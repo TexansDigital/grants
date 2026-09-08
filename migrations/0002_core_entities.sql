@@ -159,6 +159,21 @@ CREATE INDEX organizations_merge_idx ON organizations (merged_into_id);
 -- A merge must point at a LIVE, unmerged organization. Without this, A can be
 -- merged into B while B is merged into A, and any "walk to the surviving
 -- organization" loop hangs. Merging into a soft-deleted row is equally broken.
+-- Soft-deleting an organization that still has live applications or live users
+-- leaves orphans that every scoped query would have to remember to filter.
+-- Refusing the delete is one rule in one place; filtering the parent in every
+-- future query is a rule that will eventually be forgotten.
+CREATE TRIGGER organizations_no_soft_delete_with_live_records
+BEFORE UPDATE OF deleted_at ON organizations
+WHEN OLD.deleted_at IS NULL AND NEW.deleted_at IS NOT NULL
+ AND (
+   EXISTS (SELECT 1 FROM applications WHERE organization_id = OLD.id AND deleted_at IS NULL)
+   OR EXISTS (SELECT 1 FROM users WHERE organization_id = OLD.id AND deleted_at IS NULL)
+ )
+BEGIN
+  SELECT RAISE(ABORT, 'cannot delete an organization that still has live applications or users');
+END;
+
 CREATE TRIGGER organizations_merge_target_must_be_live
 BEFORE UPDATE OF merged_into_id, status ON organizations
 WHEN NEW.merged_into_id IS NOT NULL

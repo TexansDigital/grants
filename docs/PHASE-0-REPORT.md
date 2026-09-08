@@ -80,19 +80,29 @@ submitting on their own devices.
   a CLI is Phase 1.
 
 **Known weaknesses:**
-- `unindexStatements` still has no caller. Search now joins `applications` and
-  filters `deleted_at`, so a stale index entry cannot surface — but the index
-  itself is not pruned.
-- `attachments.parent_type/parent_id` remains a polymorphic pointer with no
-  per-type existence constraint.
-- One person cannot represent two organizations: `users_email_uniq` is global
-  and the role CHECK permits exactly one `organization_id`. A shared executive
-  director or a fiscal sponsor breaks this. Cheap to fix now with a
-  `user_organizations` join table; expensive after Phase 2.
-- Soft-deleted organizations can still have live users and applications.
-- `field_type` is a reference table, but `src/lib/fieldTypes.ts` still switches
-  on a hardcoded union, so a new type is a row *plus* a code change to be
-  renderable. The migration is gone; the code change is not.
+- `unindexStatements` still has no caller. Search joins `applications` and
+  filters `deleted_at` and `withdrawn`, so a stale index entry cannot surface —
+  but the index itself is not pruned. The natural caller is the withdraw
+  endpoint, which is Phase 2.
+- **One person cannot represent two organizations.** `users_email_uniq` is
+  global and the role CHECK permits exactly one `organization_id`. A shared
+  executive director, a fiscal sponsor, or a grant consultant working for two
+  nonprofits breaks this. Fixing it means a `user_organizations` join table and
+  a change to session scoping — the part of the system that must not be wrong.
+  Cheap now, expensive after Phase 2 holds real applications.
+  **This is a decision for a human, not a defect I should fix unilaterally.**
+- `field_type` and `maps_to` are reference tables, but `src/lib/fieldTypes.ts`
+  still switches on a hardcoded union and `src/lib/mapsTo.ts` holds the column
+  maps. A new field type is a row *plus* a code change to be renderable. The
+  migration is gone; the code change is not. Drift between the two now fails a
+  test rather than failing silently.
+
+**Closed after the review, before Phase 1:**
+- `attachments.parent_type/parent_id` now has a per-type existence trigger.
+- An organization can no longer be soft-deleted while live applications or
+  users still point at it.
+- Vocabulary drift between the reference tables and the code is now a test
+  failure.
 
 **Security posture:** I cannot perform a security review and have not. A human
 security review is required before the public form goes live. R2 does no malware

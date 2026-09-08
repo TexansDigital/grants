@@ -231,5 +231,28 @@ CREATE TABLE attachments (
 );
 
 CREATE UNIQUE INDEX attachments_r2_key_uniq ON attachments (r2_key);
+
+-- parent_type/parent_id is a polymorphic pointer, which no foreign key can
+-- cover. Until the later phases add their own tables, the one parent type that
+-- exists is validated here; the ELSE branch is deliberately permissive so that
+-- adding 'award' or 'report_submission' in Phase 4/5 is a migration that
+-- extends this trigger rather than a silent hole today.
+CREATE TRIGGER attachments_parent_must_exist_insert
+BEFORE INSERT ON attachments
+WHEN NEW.parent_id IS NOT NULL
+ AND NEW.parent_type = 'application'
+ AND NOT EXISTS (SELECT 1 FROM applications WHERE id = NEW.parent_id)
+BEGIN
+  SELECT RAISE(ABORT, 'attachment parent does not exist');
+END;
+
+CREATE TRIGGER attachments_parent_must_exist_update
+BEFORE UPDATE OF parent_type, parent_id ON attachments
+WHEN NEW.parent_id IS NOT NULL
+ AND NEW.parent_type = 'application'
+ AND NOT EXISTS (SELECT 1 FROM applications WHERE id = NEW.parent_id)
+BEGIN
+  SELECT RAISE(ABORT, 'attachment parent does not exist');
+END;
 CREATE INDEX attachments_parent_idx ON attachments (parent_type, parent_id) WHERE deleted_at IS NULL;
 CREATE INDEX attachments_org_idx ON attachments (organization_id) WHERE deleted_at IS NULL;

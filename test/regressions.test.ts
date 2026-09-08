@@ -15,7 +15,23 @@ import {
 import { isFieldVisible, validateSubmission, loadFormDefinition, allFields } from '../src/lib/forms';
 import { isCycleAcceptingSubmission, nowIso } from '../src/lib/time';
 import { newId } from '../src/lib/ids';
-import type { FieldDef } from '../src/lib/fieldTypes';
+import type { FieldDef, FieldType } from '../src/lib/fieldTypes';
+import {
+  APPLICATION_COLUMN_BY_TARGET,
+  ORGANIZATION_COLUMN_BY_TARGET,
+  CONTACT_COLUMN_BY_TARGET,
+} from '../src/lib/mapsTo';
+
+/**
+ * The field types the coercion switch in src/lib/fieldTypes.ts actually
+ * implements. Kept as an explicit list so it can be compared against the
+ * field_types table -- the union type itself is erased at runtime.
+ */
+const IMPLEMENTED_FIELD_TYPES: FieldType[] = [
+  'short_text', 'long_text', 'email', 'phone', 'select', 'multi_select',
+  'checkbox_attestation', 'currency', 'integer', 'url', 'address_block',
+  'file_upload', 'consent_checkbox', 'other_specify',
+];
 
 /**
  * Regression tests for defects found by adversarial review of the first build.
@@ -673,10 +689,31 @@ describe('schema invariants that previously had no test', () => {
     ).rejects.toThrow(/CHECK/i);
   });
 
+  it('refuses to retire an organization that still has live users or applications', async () => {
+    const s = await scenario();
+    await expect(
+      db.prepare(`UPDATE organizations SET deleted_at=datetime('now') WHERE id=?`)
+        .bind(s.org.organizationId).run(),
+    ).rejects.toThrow(/live applications or users/);
+  });
+
+  it('refuses an attachment pointing at an application that does not exist', async () => {
+    const s = await scenario();
+    await expect(
+      db.prepare(
+        `INSERT INTO attachments (id, parent_type, parent_id, organization_id, r2_key, filename, mime_type, size_bytes, uploaded_at)
+         VALUES (?,'application','no-such-application',?,?,?,?,?,?)`)
+        .bind(newId(), s.org.organizationId, `r2/${newId()}`, 'x.pdf', 'application/pdf', 10, nowIso())
+        .run(),
+    ).rejects.toThrow(/parent does not exist/);
+  });
+
   it('refuses a merge into a soft-deleted organization', async () => {
     const ctx = ctxFor(adminSession());
     const a = await seedOrganization(db, ctx, ORG_FIXTURES[0]!);
     const b = await seedOrganization(db, ctx, ORG_FIXTURES[1]!);
+    // An organization can only be retired once nothing live points at it.
+    await db.prepare(`UPDATE users SET deleted_at=datetime('now') WHERE organization_id=?`).bind(b.organizationId).run();
     await db.prepare(`UPDATE organizations SET deleted_at=datetime('now') WHERE id=?`).bind(b.organizationId).run();
     await expect(
       db
@@ -684,5 +721,56 @@ describe('schema invariants that previously had no test', () => {
         .bind(b.organizationId, a.organizationId)
         .run(),
     ).rejects.toThrow(/live, unmerged/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+describe('the database vocabulary and the code agree', () => {
+  // field_type and maps_to are reference TABLES now, so a new program can add a
+  // field type as a row. But the coercion switch in fieldTypes.ts and the
+  // promotion maps in mapsTo.ts are still code. These tests make that seam
+  // loud: adding a row without the matching code, or vice versa, fails here
+  // rather than at 11pm on a launch day.
+  it('every seeded field type is implemented in the coercion registry', async () => {
+    const { results } = await db.prepare(`SELECT key FROM field_types ORDER BY key`).all<{ key: string }>();
+    const inDb = results.map((r) => r.key).sort();
+    const inCode = [...IMPLEMENTED_FIELD_TYPES].sort();
+    expect(inDb, 'field_types rows and the FieldType union have drifted').toEqual(inCode);
+  });
+
+  it('every promotion target maps to a real column in the code', async () => {
+    const { results } = await db
+      .prepare(`SELECT key, target_table, target_column FROM promotion_targets ORDER BY key`)
+      .all<{ key: string; target_table: string; target_column: string }>();
+
+    for (const row of results) {
+      const map =
+        row.target_table === 'applications' ? APPLICATION_COLUMN_BY_TARGET
+        : row.target_table === 'organizations' ? ORGANIZATION_COLUMN_BY_TARGET
+        : CONTACT_COLUMN_BY_TARGET;
+      expect(
+        (map as Record<string, string | undefined>)[row.key],
+        `promotion target ${row.key} has no code mapping for ${row.target_table}`,
+      ).toBe(row.target_column);
+    }
+  });
+
+  it('every promotion target column actually exists on its table', async () => {
+    const { results } = await db
+      .prepare(`SELECT key, target_table, target_column FROM promotion_targets`)
+      .all<{ key: string; target_table: string; target_column: string }>();
+
+    const columnsOf = new Map<string, Set<string>>();
+    for (const table of ['applications', 'organizations', 'contacts']) {
+      const info = await db.prepare(`PRAGMA table_info(${table})`).all<{ name: string }>();
+      columnsOf.set(table, new Set(info.results.map((r) => r.name)));
+    }
+
+    for (const row of results) {
+      expect(
+        columnsOf.get(row.target_table)?.has(row.target_column),
+        `${row.key} points at ${row.target_table}.${row.target_column}, which does not exist`,
+      ).toBe(true);
+    }
   });
 });
