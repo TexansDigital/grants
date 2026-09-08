@@ -1,0 +1,180 @@
+/*
+ * Steward design tokens.
+ *
+ * The applicant form is LIGHT themed. A dark ground under a forty-field form
+ * that someone fills in over an hour is a readability problem, not a brand win.
+ * Internal staff views are dark; those tokens live under [data-surface="internal"].
+ *
+ * Palette discipline:
+ *   --steel  #021018  text, headings, the dark ground on internal views
+ *   --red    #ED0028  highest-priority accents and alerts ONLY. Not a hover
+ *                     state, not a heading colour, not decoration.
+ *   --blue   #0080C6  links, active states, badges, focus rings
+ *   --white  #FFFFFF
+ *
+ * Everything else is a neutral derived from --steel, so the greys sit under the
+ * brand rather than beside it.
+ */
+
+:root {
+  --steel: #021018;
+  --red: #ed0028;
+  --blue: #0080c6;
+  --white: #ffffff;
+
+  /* Neutrals: --steel at decreasing opacity over white, flattened to hex so
+     they composite predictably over any background. */
+  --ink: #021018;
+  --ink-2: #35404a; /* secondary text: help text, metadata */
+  --ink-3: #5c666f; /* tertiary: placeholders, disabled */
+  --line: #d8dcdf; /* borders */
+  --line-2: #eceef0; /* hairlines, table rules */
+  --surface: #ffffff;
+  --surface-2: #f7f8f9; /* page ground behind cards */
+  --surface-3: #eef1f3; /* pressed / hovered neutral */
+
+  /* Semantic. Red is reserved for errors precisely because it is reserved. */
+  --danger: var(--red);
+  --danger-bg: #fdecef;
+  --danger-line: #f5b8c3;
+  --ok: #0a7a4b;
+  --ok-bg: #eaf6f0;
+  --warn: #8a5a00;
+  --warn-bg: #fdf5e6;
+
+  --focus: var(--blue);
+
+  /* Type. One family, weights carry the hierarchy. No decorative faces. */
+  --font: ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+    'Helvetica Neue', Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+
+  --step--1: 0.8125rem; /* 13px: metadata, counters */
+  --step-0: 1rem; /* 16px: body and every input. Never smaller on a form. */
+  --step-1: 1.125rem;
+  --step-2: 1.375rem;
+  --step-3: 1.75rem;
+  --step-4: 2.25rem;
+
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+  --space-7: 3rem;
+  --space-8: 4rem;
+
+  --radius: 6px;
+  --radius-lg: 10px;
+
+  /* Measure. Narrative answers are read as prose, so inputs for them are
+     capped near 65 characters rather than stretched to the container. */
+  --measure: 68ch;
+
+  --shadow-1: 0 1px 2px rgba(2, 16, 24, 0.06), 0 1px 3px rgba(2, 16, 24, 0.08);
+  --shadow-2: 0 4px 12px rgba(2, 16, 24, 0.08), 0 2px 4px rgba(2, 16, 24, 0.06);
+}
+
+/* Internal staff surfaces: dense, dark, information-first. */
+[data-surface='internal'] {
+  --ink: #eef1f3;
+  --ink-2: #a9b4bd;
+  --ink-3: #7b868f;
+  --line: #1d2a33;
+  --line-2: #14202a;
+  --surface: #0a1720;
+  --surface-2: #021018;
+  --surface-3: #14232e;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font);
+  font-size: var(--step-0);
+  line-height: 1.55;
+  color: var(--ink);
+  background: var(--surface-2);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Respect a reader who has asked for less motion. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/*
+ * Focus.
+ *
+ * Visible on keyboard focus, everywhere, no exceptions. This form is one a
+ * nonprofit is REQUIRED to use to receive money; someone navigating it by
+ * keyboard or screen reader has to be able to see where they are.
+ */
+:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+
+a {
+  color: var(--blue);
+  text-underline-offset: 2px;
+}
+a:hover {
+  text-decoration-thickness: 2px;
+}
+
+h1,
+h2,
+h3 {
+  line-height: 1.25;
+  margin: 0;
+  font-weight: 650;
+  letter-spacing: -0.011em;
+}
+
+/* A skip link that is genuinely reachable, not display:none. */
+.skip-link {
+  position: absolute;
+  left: var(--space-4);
+  top: calc(-1 * var(--space-8));
+  z-index: 100;
+  background: var(--surface);
+  color: var(--ink);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-2);
+  transition: top 120ms ease;
+}
+.skip-link:focus {
+  top: var(--space-4);
+}
+
+/* Visually hidden but announced. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}

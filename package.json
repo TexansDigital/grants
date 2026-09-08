@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Steward \u2014 multi-program grantmaking platform on Cloudflare",
+  "description": "Steward — multi-program grantmaking platform on Cloudflare",
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
@@ -24,8 +24,14 @@
     "@cloudflare/vitest-pool-workers": "^0.12.21",
     "@cloudflare/workers-types": "^5.20260908.1",
     "@types/node": "^22.20.1",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.7",
+    "@vitejs/plugin-react": "^5.2.0",
     "fflate": "^0.8.3",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
     "typescript": "^5.7.3",
+    "vite": "^7.3.6",
     "vitest": "~3.2.7",
     "wrangler": "^4.129.1"
   },
