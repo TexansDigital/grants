@@ -2,18 +2,34 @@
 
 Definition of done, reported honestly. Where a claim is partial, it says so.
 
-## 1. Migrations run clean from empty — MET (with a caveat)
+## 1. Migrations run clean from empty — MET, verified on real D1
 
 `readD1Migrations` feeds the real numbered files to `applyD1Migrations` inside
 workerd, against a real local D1, for every test file. `isolatedStorage` gives
 each test a fresh migrated database.
 
-**Caveat:** "fresh preview database" here means a local Miniflare D1, not a
-remote preview D1. The migration splitter is the same one
-`wrangler d1 migrations apply --remote` uses, so the `CREATE TRIGGER ... BEGIN
-... END;` blocks are safe remotely, but no migration has been applied to a real
-preview database yet. **A human must run `npm run migrate:preview` and confirm
-it succeeds before Phase 1 relies on it.**
+**Verified remotely on 2026-09-08.** All five migrations applied in order to the
+`steward-preview` D1 (region WNAM), 95 commands total, no errors and no skipped
+statements. The remote schema census is byte-identical to local:
+
+| | local | remote |
+|---|---|---|
+| indexes | 43 | 43 |
+| tables | 23 | 23 |
+| triggers | **27** | **27** |
+
+The trigger count was the risk worth checking. Triggers are the enforcement
+mechanism for append-only logging, published-form immutability, the
+retired-to-draft block, cross-program referential integrity, and the per-cycle
+application limit. A splitter that mishandled `CREATE TRIGGER ... BEGIN ...
+END;` would have left the remote database missing those guarantees while every
+local test still passed.
+
+A live probe confirmed enforcement rather than mere presence: inserting an
+`error_log` row and then updating it was rejected by real D1 with
+`error_log is append-only: rows cannot be updated` (`SQLITE_CONSTRAINT_TRIGGER`,
+code 7500). One probe row remains in the preview `error_log`, which is correct —
+the table has no delete path by design.
 
 ## 2. Authorization rules have passing tests — MET for the library, NOT for routes
 
@@ -108,6 +124,10 @@ submitting on their own devices.
 security review is required before the public form goes live. R2 does no malware
 scanning; type and size validation is not safety. SPF, DKIM and DMARC on the new
 domain are prerequisites for Phase 2, and no code can substitute for them.
+
+**Preview D1 exists; R2 and KV do not yet.** `wrangler.toml` still names
+`steward-preview-files` and `steward-preview-sessions`, which have not been
+created. Phase 2 needs both; Phase 1a needs neither.
 
 **Scheduled D1 export to R2 must land before Phase 2**, not in Phase 7 as the
 original plan had it. Phase 2 is the first moment this system holds real
