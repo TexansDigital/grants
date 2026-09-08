@@ -61,8 +61,14 @@ export type AuditAction =
   | 'cycle.updated'
   | 'cycle.opened'
   | 'cycle.closed'
+  // rubrics
+  | 'rubric.created'
+  | 'rubric.published'
+  | 'rubric.retired'
+  | 'rubric.criterion_changed'
   // reviews
   | 'review.assigned'
+  | 'review.unassigned'
   | 'review.conflict_declared'
   | 'review.recused'
   | 'review.score_saved'

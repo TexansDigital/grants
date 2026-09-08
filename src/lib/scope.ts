@@ -206,15 +206,21 @@ export async function listApplicationsForExternal(
  *
  * Admins see everything. A reviewer sees only applications assigned to them —
  * enforced here in SQL via review_assignments rather than in the caller, so
- * there is no path that forgets. The assignment table arrives in Phase 3; until
- * then a reviewer's scope resolves to nothing, which is the safe direction to
- * be wrong in.
+ * there is no path that forgets.
+ *
+ * Three conditions gate a reviewer, and all three are in the JOIN rather than
+ * in a caller's `if`:
+ *   - the assignment names them,
+ *   - it has not been recused,
+ *   - it has not been soft-deleted.
+ * The last one was missing while the table did not exist, so unassigning a
+ * reviewer the way the rest of this schema unassigns anything — a soft delete —
+ * would have left their access intact.
  */
 export async function getApplicationForStaff(
   db: D1Database,
   session: Session,
   applicationId: string,
-  opts: { reviewAssignmentsExist?: boolean } = {},
 ): Promise<Record<string, unknown>> {
   if (session.role === 'admin') {
     const row = await db
@@ -226,10 +232,6 @@ export async function getApplicationForStaff(
   }
 
   if (session.role === 'reviewer') {
-    if (!opts.reviewAssignmentsExist) {
-      // Phase 0/1: no assignment table yet. Fail closed.
-      throw notFound('application');
-    }
     const row = await db
       .prepare(
         `SELECT a.*
@@ -238,6 +240,7 @@ export async function getApplicationForStaff(
              ON ra.application_id = a.id
             AND ra.reviewer_user_id = ?
             AND ra.recused_at IS NULL
+            AND ra.deleted_at IS NULL
           WHERE a.id = ?
             AND a.deleted_at IS NULL`,
       )
@@ -249,6 +252,48 @@ export async function getApplicationForStaff(
 
   // executive: no in-app access at all, by design. They receive exports.
   throw notFound('application');
+}
+
+/**
+ * The review queue: every application assigned to this reviewer.
+ *
+ * Lives here, beside getApplicationForStaff, rather than in a route. The list
+ * and the detail view must agree exactly about what a reviewer may see — if
+ * they drift, the queue shows a row that 404s when clicked, or worse, the queue
+ * leaks a title the detail view would have refused. Same three conditions, same
+ * file, one place to get it wrong.
+ *
+ * An admin passed to this gets their OWN assignments, not everything. An admin
+ * wanting the whole pipeline asks for the pipeline.
+ */
+export async function listApplicationsForReviewer(
+  db: D1Database,
+  session: Session,
+): Promise<Record<string, unknown>[]> {
+  if (session.role !== 'reviewer' && session.role !== 'admin') {
+    // Applicants, grantees and executives have no review queue. Empty, not an
+    // error: this is a list endpoint, and "nothing assigned to you" is a
+    // legitimate answer that reveals nothing.
+    return [];
+  }
+  const { results } = await db
+    .prepare(
+      `SELECT a.id, a.cycle_id, a.stage_id, a.organization_id, a.status,
+              a.project_title, a.requested_amount_cents, a.submitted_at,
+              ra.id AS review_assignment_id, ra.assigned_at, ra.completed_at,
+              ra.conflict_declared_at
+         FROM applications a
+         JOIN review_assignments ra
+           ON ra.application_id = a.id
+          AND ra.reviewer_user_id = ?
+          AND ra.recused_at IS NULL
+          AND ra.deleted_at IS NULL
+        WHERE a.deleted_at IS NULL
+        ORDER BY ra.assigned_at DESC`,
+    )
+    .bind(session.userId)
+    .all<Record<string, unknown>>();
+  return results ?? [];
 }
 
 /**
