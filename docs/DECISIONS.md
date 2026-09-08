@@ -74,6 +74,49 @@ would be unfalsifiable for the first phase. Landing the tables, the helpers, and
 the org-scoping helper now means Phase 1 cannot be built without going through
 them.
 
+## 7. One person represents exactly one organization
+
+**Decided by the owner.** A user carries a single `organization_id` and email is
+globally unique among live users.
+
+**Scope of the constraint.** It binds APPLICANTS and GRANTEES only. Outside
+review consultants are `reviewer` role with a null `organization_id`, so a
+consultant reviews across every program from one account. That was the case I
+had originally flagged, and it turns out not to be affected.
+
+**What it means operationally.** A shared executive director serving two
+nonprofits needs two email addresses. A person moving from one nonprofit to
+another needs a new account rather than a reassignment. A grant consultant
+cannot apply on behalf of two clients from one login.
+
+**To reverse.** A `user_organizations` join table and a change to how
+`sessionOrgId` derives scope. Cheap while the scoping tests are the only
+consumers; expensive once Phase 2 holds real applications.
+
+## 8. Rubrics are parsed server-side, from CSV and XLSX
+
+**Decided by the owner:** both formats. My earlier recommendation was CSV-only,
+on the assumption that XLSX meant a SheetJS-scale dependency (~350 KB gzipped)
+in a Worker bundle against a $10/month run-cost target. Measured, that
+assumption was wrong and the recommendation with it.
+
+**Parser: `read-excel-file`,** used via its `web-worker` entry.
+- Bundles to **17 KB gzipped** (53 KB minified) — 0.17% of the Workers size
+  limit, negligible cold-start cost.
+- Verified to parse inside workerd, not merely to import.
+- No known advisories.
+- Returns numbers as numbers, so a weight cannot silently arrive as `"30"`.
+
+**Why not SheetJS.** npm's `xlsx` is frozen at 0.18.5 with two HIGH advisories:
+prototype pollution (CVE-2023-30533) and a ReDoS. The fixes ship only in
+0.19.3+, published from SheetJS's own CDN rather than npm, so there is no
+registry upgrade path. Parsing admin-uploaded files with a known-vulnerable
+parser is not a trade worth making for a once-a-cycle action.
+
+**Test fixtures build a minimal .xlsx by hand** (`test/xlsxFixture.ts`, ~60
+lines over `fflate`) rather than pulling in a spreadsheet-authoring dependency.
+It also documents exactly what file shape the parser must accept.
+
 ## Still open, and now blocking sooner than the brief implies
 
 - **Grace rule for late drafts (open decision #6).** Implemented as a per-cycle
