@@ -15,6 +15,7 @@ import type { Env, RequestContext, Session } from './types';
 import { newRequestId } from './lib/ids';
 import { AppError, logError, notFound, toErrorResponse } from './lib/errors';
 import { nowIso, formatInZone } from './lib/time';
+import { securityHeaders } from './lib/httpHeaders';
 import { requireStaffSession } from './lib/auth';
 import { loadFormDefinition } from './lib/forms';
 
@@ -37,29 +38,6 @@ function buildContext(request: Request): RequestContext {
     userAgent: request.headers.get('User-Agent'),
     route: url.pathname,
     method: request.method,
-  };
-}
-
-/**
- * Response headers applied to everything.
- *
- * The CSP is restrictive by default and is the floor the Phase 2 form is built
- * against: no inline script, no framing, nothing loaded cross-origin. Setting
- * it now means the UI is written to fit it, rather than the policy being
- * loosened later to fit the UI.
- */
-function securityHeaders(requestId: string): Record<string, string> {
-  return {
-    'content-type': 'application/json; charset=utf-8',
-    'x-request-id': requestId,
-    'cache-control': 'no-store',
-    'x-content-type-options': 'nosniff',
-    'referrer-policy': 'strict-origin-when-cross-origin',
-    'x-frame-options': 'DENY',
-    'content-security-policy':
-      "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; " +
-      "connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'none'; " +
-      "form-action 'self'; frame-ancestors 'none'",
   };
 }
 

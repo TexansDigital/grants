@@ -18,6 +18,7 @@
 import type { Env, RequestContext } from '../types';
 import { newId } from './ids';
 import { nowIso } from './time';
+import { securityHeaders } from './httpHeaders';
 
 export type Severity = 'warn' | 'error' | 'fatal';
 
@@ -351,15 +352,10 @@ export async function toErrorResponse(
     (body.error as Record<string, unknown>).fields = appErr.fieldErrors;
   }
 
+  // Same headers as a success response. These previously diverged and error
+  // responses shipped without a Content-Security-Policy.
   return new Response(JSON.stringify(body), {
     status: appErr.httpStatus,
-    headers: {
-      'content-type': 'application/json; charset=utf-8',
-      'x-request-id': ctx.requestId,
-      'cache-control': 'no-store',
-      'x-content-type-options': 'nosniff',
-      'referrer-policy': 'strict-origin-when-cross-origin',
-      'x-frame-options': 'DENY',
-    },
+    headers: securityHeaders(ctx.requestId),
   });
 }

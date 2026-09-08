@@ -139,6 +139,28 @@ describe('public routes', () => {
     const res = await call('/not-a-page');
     expect(res.status).toBe(404);
   });
+
+  it('heads ERROR responses identically to success responses', async () => {
+    // These two paths built their headers separately and drifted: error
+    // responses shipped without a Content-Security-Policy, which only showed up
+    // reading live headers side by side. One builder now serves both.
+    const ok = await call('/health');
+    const err = await call('/api/session'); // 401
+    expect(err.status).toBe(401);
+
+    for (const h of [
+      'content-security-policy',
+      'x-content-type-options',
+      'x-frame-options',
+      'referrer-policy',
+      'cache-control',
+      'content-type',
+    ]) {
+      expect(err.headers.get(h), `error response is missing ${h}`).toBe(ok.headers.get(h));
+    }
+    // The request id must differ; it identifies the individual request.
+    expect(err.headers.get('x-request-id')).not.toBe(ok.headers.get('x-request-id'));
+  });
 });
 
 describe('staff API requires a verified Access assertion', () => {
