@@ -390,26 +390,58 @@ export async function saveDraft(
   const statements = [
     ...answerStatements(db, app.id, definition, outcome.answers, savedAt),
     ...clearHiddenStatements(db, app.id, outcome.hiddenFieldIds),
-    db
-      .prepare(`UPDATE applications SET updated_at = ? WHERE id = ? AND status = 'draft'`)
-      .bind(savedAt, app.id),
-    auditStatement(db, ctx, {
-      action: 'application.answer_saved',
-      entityType: 'application',
-      entityId: app.id,
-      before: Object.keys(clearedBefore).length > 0 ? { cleared_answers: clearedBefore } : null,
-      after: {
-        status: 'draft',
-        saved_field_keys: [...outcome.answers.keys()]
-          .map((id) => allFields(definition).find((f) => f.id === id)?.field_key)
-          .filter(Boolean),
-        cleared_field_ids: outcome.hiddenFieldIds,
-        had_validation_errors: outcome.errors.length > 0,
+    auditStatement(
+      db,
+      ctx,
+      {
+        action: 'application.answer_saved',
+        entityType: 'application',
+        entityId: app.id,
+        before: Object.keys(clearedBefore).length > 0 ? { cleared_answers: clearedBefore } : null,
+        after: {
+          status: 'draft',
+          saved_field_keys: [...outcome.answers.keys()]
+            .map((id) => allFields(definition).find((f) => f.id === id)?.field_key)
+            .filter(Boolean),
+          cleared_field_ids: outcome.hiddenFieldIds,
+          had_validation_errors: outcome.errors.length > 0,
+        },
       },
-    }),
+      // THE SAME GUARD as every other statement in this batch.
+      //
+      // It was missing. Every answer upsert and every clear carried
+      // DRAFT_GUARD; the audit row did not, and the return value was computed
+      // without reading the batch result at all. So an autosave racing a
+      // concurrent submit wrote NO answers, told the applicant "Saved at
+      // 19:41", and left an append-only row asserting an event that never
+      // happened. submitApplication, forty lines below, already did this
+      // correctly -- the rule was written down here and then not applied here.
+      { guard: draftGuard(app.id) },
+    ),
+    // LAST, so its row count is the authoritative answer about whether this
+    // call actually did anything. Same construction as submitApplication.
+    db
+      .prepare(
+        `UPDATE applications SET updated_at = ?
+          WHERE id = ? AND status = 'draft' AND deleted_at IS NULL`,
+      )
+      .bind(savedAt, app.id),
   ];
 
-  await db.batch(statements);
+  const results = await db.batch(statements);
+
+  // The confirmation must prove MY write landed, not that SOME write did.
+  // 0 means the draft guard was already false: a concurrent submit won, or an
+  // admin moved the application on. Telling the applicant it saved would be a
+  // false green light on the one screen where losing work matters most.
+  const changed = results[results.length - 1]?.meta?.changes ?? 0;
+  if (changed !== 1) {
+    throw new AppError('CONFLICT', 'This application is no longer a draft. Reload to see its current state.', {
+      internalMessage: `autosave for ${app.id} affected ${changed} rows; the draft guard was false`,
+      severity: 'warn',
+    });
+  }
+
   return { savedAt, errors: outcome.errors };
 }
 
