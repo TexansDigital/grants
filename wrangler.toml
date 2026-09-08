@@ -31,8 +31,8 @@ DISPLAY_TIMEZONE = "America/Chicago"
 [[d1_databases]]
 binding = "DB"
 database_name = "steward-preview"
-database_id = "steward-preview-local"
-preview_database_id = "steward-preview-local"
+database_id = "f5be3d5c-642c-4706-b9e6-bdd8e0c9858e"
+preview_database_id = "f5be3d5c-642c-4706-b9e6-bdd8e0c9858e"
 migrations_dir = "migrations"
 
 # --- PREVIEW R2 (default) -----------------------------------------------------
