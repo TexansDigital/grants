@@ -527,13 +527,22 @@ export async function getApplicationDetailForStaff(
     .bind(application.organization_id)
     .first<Record<string, unknown>>();
 
+  // Read straight from application_answers, NOT through a join to form_fields.
+  //
+  // The answers table deliberately keeps field_key, label_at_answer and
+  // field_type as they were AT THE MOMENT OF ANSWER. Joining to form_fields
+  // would return the CURRENT label instead, so a staff member reading a
+  // submission would see the question as it is worded now rather than as the
+  // applicant was asked it. For a published form those are the same; for a
+  // report form, or after a version bump, they are not -- and the version where
+  // they differ is exactly the one where somebody is trying to work out what
+  // was actually asked.
   const { results: answerRows } = await db
     .prepare(
-      `SELECT f.field_key, ans.value_text, ans.value_int, ans.value_real,
-              ans.value_json, ans.answered_at
-         FROM application_answers ans
-         JOIN form_fields f ON f.id = ans.form_field_id
-        WHERE ans.application_id = ?`,
+      `SELECT field_key, label_at_answer, field_type,
+              value_text, value_int, value_real, value_json, answered_at
+         FROM application_answers
+        WHERE application_id = ?`,
     )
     .bind(applicationId)
     .all<Record<string, unknown>>();

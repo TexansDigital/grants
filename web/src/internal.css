@@ -145,6 +145,31 @@ th.num {
   text-decoration: line-through;
 }
 
+/*
+ * Application statuses.
+ *
+ * Strictly inside the palette: an outline blue for work in progress, a FILLED
+ * blue for the affirmative end state, muted for the ones that are simply over.
+ * Red is not used here at all -- a declined application is a normal outcome of
+ * grantmaking, not an alert, and spending the alert colour on the most common
+ * status would leave nothing louder for the cases that need it.
+ */
+.badge-submitted,
+.badge-under_review {
+  border-color: var(--blue);
+  color: var(--blue-ink);
+}
+.badge-awarded {
+  border-color: var(--blue-fill);
+  background: var(--blue-fill);
+  color: var(--white);
+}
+.badge-declined,
+.badge-withdrawn {
+  border-color: var(--line);
+  color: var(--ink-3);
+}
+
 .btn.small {
   font-size: var(--step--1);
   padding: var(--space-2) var(--space-3);
@@ -206,4 +231,300 @@ th.num {
 /* The upload placeholder's explanatory text. */
 .upload .help {
   margin-top: var(--space-2);
+}
+
+/* ---- primary navigation --------------------------------------------------- */
+
+.mainnav {
+  display: flex;
+  gap: var(--space-1);
+  margin-left: var(--space-4);
+}
+.mainnav button {
+  font: inherit;
+  font-size: var(--step--1);
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.72);
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius);
+  padding: var(--space-2) var(--space-3);
+  cursor: pointer;
+}
+.mainnav button:hover {
+  color: var(--white);
+  background: rgba(255, 255, 255, 0.08);
+}
+/* The current section is marked by weight and a rule, not by colour alone. */
+.mainnav button[aria-current='page'] {
+  color: var(--white);
+  background: rgba(255, 255, 255, 0.12);
+  box-shadow: inset 0 -2px 0 var(--blue);
+}
+
+.crumbs {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--step--1);
+  color: var(--ink-3);
+  margin-bottom: var(--space-4);
+}
+
+/* A button that reads as a link. Real buttons, because these do not navigate
+   to a URL a browser could open in a new tab -- pretending otherwise with an
+   <a href="#"> breaks middle-click in a way people notice. */
+.linklike {
+  font: inherit;
+  color: var(--blue-ink);
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+  font-weight: 600;
+}
+.linklike:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* ---- filters -------------------------------------------------------------- */
+
+.searchbar {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  padding-bottom: var(--space-4);
+  margin-bottom: var(--space-4);
+  border-bottom: 1px solid var(--line);
+}
+.searchbar label {
+  font-size: var(--step--1);
+  font-weight: 600;
+  color: var(--ink-2);
+  display: block;
+  margin-bottom: var(--space-1);
+}
+.searchbar input {
+  font: inherit;
+  font-size: var(--step-0);
+  min-width: 320px;
+  padding: var(--space-2) var(--space-3);
+  min-height: 36px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.filters {
+  display: flex;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+  align-items: flex-end;
+  margin-bottom: var(--space-5);
+}
+.filter label {
+  display: block;
+  font-size: var(--step--1);
+  font-weight: 600;
+  color: var(--ink-2);
+  margin-bottom: var(--space-1);
+}
+.filter select,
+.filter input {
+  font: inherit;
+  font-size: var(--step--1);
+  padding: var(--space-2) var(--space-3);
+  min-height: 36px;
+  min-width: 150px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.hits {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: var(--space-4);
+  margin-bottom: var(--space-5);
+  background: var(--surface-2);
+}
+.hits h3 {
+  margin: 0 0 var(--space-3);
+}
+.hits ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--space-3);
+}
+.hits li {
+  display: grid;
+  gap: var(--space-1);
+}
+/* FTS delimiters arrive as literal [ ] in the text. Rendered as text, never
+   as markup -- the snippet is applicant-authored content. */
+.snippet {
+  font-size: var(--step--1);
+  color: var(--ink-2);
+  line-height: 1.5;
+}
+
+.empty {
+  padding: var(--space-6);
+  text-align: center;
+}
+
+.pager {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  margin-top: var(--space-4);
+}
+
+.rowlink {
+  cursor: pointer;
+}
+
+/* ---- detail --------------------------------------------------------------- */
+
+.detail {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: var(--space-5);
+  align-items: start;
+}
+@media (max-width: 1100px) {
+  .detail {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.detail-side {
+  position: sticky;
+  top: var(--space-4);
+}
+@media (max-width: 1100px) {
+  .detail-side {
+    position: static;
+  }
+}
+
+.facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--space-4);
+  margin: 0;
+}
+.facts dt {
+  font-size: var(--step--1);
+  color: var(--ink-3);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: var(--space-1);
+}
+.facts dd {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.answers {
+  margin: 0;
+  display: grid;
+  gap: var(--space-4);
+}
+.answers > div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+  gap: var(--space-4);
+  align-items: start;
+}
+@media (max-width: 720px) {
+  .answers > div {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-1);
+  }
+}
+.answers dt {
+  color: var(--ink-2);
+  font-size: var(--step--1);
+  font-weight: 600;
+}
+.answers dd {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.answers dd[data-empty='true'] {
+  color: var(--ink-3);
+  font-style: italic;
+}
+
+.meta.strong {
+  color: var(--ink);
+  font-weight: 600;
+  font-size: var(--step-0);
+}
+
+.bignum {
+  font-size: var(--step-4);
+  font-weight: 650;
+  line-height: 1;
+  margin: 0 0 var(--space-4);
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+.bignum span {
+  font-size: var(--step--1);
+  font-weight: 400;
+  color: var(--ink-3);
+}
+
+.tally {
+  list-style: none;
+  margin: 0 0 var(--space-4);
+  padding: 0;
+  display: grid;
+  gap: var(--space-2);
+}
+.tally li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.timeline {
+  list-style: none;
+  margin: 0 0 var(--space-4);
+  padding: 0;
+  display: grid;
+  gap: var(--space-3);
+  border-left: 2px solid var(--line);
+  padding-left: var(--space-4);
+}
+.timeline li {
+  display: grid;
+  gap: 2px;
+  font-size: var(--step--1);
+}
+/* The application currently open, so the panel says "you are here" rather than
+   listing five rows that all look the same. */
+.timeline li[data-current='true'] {
+  box-shadow: inset 3px 0 0 var(--blue);
+  margin-left: calc(-1 * var(--space-4));
+  padding-left: var(--space-4);
+}
+.timeline .when {
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
 }

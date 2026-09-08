@@ -18,6 +18,9 @@ import type { CycleRow, FormSummary, ProgramRow, SessionUser } from './api';
 import type { FormDefinition } from '../../src/lib/forms';
 import { Home } from './Home';
 import { FormRenderer } from './FormRenderer';
+import { Pipeline } from './Pipeline';
+import { ApplicationDetail } from './ApplicationDetail';
+import { Shell } from './Shell';
 import {
   loadPreference,
   savePreference,
@@ -27,11 +30,20 @@ import {
   type ThemePreference,
 } from './theme';
 
-type Route = { name: 'home' } | { name: 'form'; id: string };
+type Route =
+  | { name: 'home' }
+  | { name: 'pipeline' }
+  | { name: 'application'; id: string }
+  | { name: 'form'; id: string };
 
 function parseRoute(pathname: string): Route | null {
   const parts = pathname.split('/').filter((s) => s.length > 0);
-  if (parts.length === 0) return { name: 'home' };
+  if (parts.length === 0) return { name: 'pipeline' };
+  if (parts.length === 1 && parts[0] === 'configuration') return { name: 'home' };
+  if (parts.length === 1 && parts[0] === 'pipeline') return { name: 'pipeline' };
+  if (parts.length === 2 && parts[0] === 'applications' && parts[1]) {
+    return { name: 'application', id: parts[1] };
+  }
   if (parts.length === 2 && parts[0] === 'forms' && parts[1]) return { name: 'form', id: parts[1] };
   return null;
 }
@@ -52,15 +64,33 @@ export function App(): ReactElement {
   const [themePref, setThemePref] = useState<ThemePreference>(loadPreference);
   const [systemIsLight, setSystemIsLight] = useState(systemPrefersLight);
 
+  const [search, setSearch] = useState(() => window.location.search.replace(/^\?/, ''));
+
   const navigate = useCallback((path: string) => {
     window.history.pushState({}, '', path);
-    setRoute(parseRoute(path));
+    const url = new URL(path, window.location.origin);
+    setRoute(parseRoute(url.pathname));
+    setSearch(url.search.replace(/^\?/, ''));
+  }, []);
+
+  /**
+   * Filters live in the URL so a filtered pipeline is a link someone can send.
+   * replaceState, not pushState: typing in a filter should not put a dozen
+   * entries in the history that Back has to walk through one at a time.
+   */
+  const setPipelineQuery = useCallback((next: string) => {
+    const url = next === '' ? window.location.pathname : `${window.location.pathname}?${next}`;
+    window.history.replaceState({}, '', url);
+    setSearch(next);
   }, []);
 
   // Back and forward have to work. An applicant who presses Back and lands on a
   // blank page assumes they lost their answers.
   useEffect(() => {
-    const onPop = () => setRoute(parseRoute(window.location.pathname));
+    const onPop = () => {
+      setRoute(parseRoute(window.location.pathname));
+      setSearch(window.location.search.replace(/^\?/, ''));
+    };
     window.addEventListener('popstate', onPop);
     return () => window.removeEventListener('popstate', onPop);
   }, []);
@@ -109,7 +139,7 @@ export function App(): ReactElement {
 
     (async () => {
       try {
-        if (route?.name === 'home') {
+        if (route?.name === 'home' || route?.name === 'pipeline' || route?.name === 'application') {
           const [s, p, c, f] = await Promise.all([
             api.session(signal),
             api.programs(signal),
@@ -191,17 +221,45 @@ export function App(): ReactElement {
   }
 
   if (!home) return <Message title="Loading"><p>Loading…</p></Message>;
-  return (
-    <Home
+
+  const shell = (children: ReactNode) => (
+    <Shell
       user={home.user}
+      active={route.name}
+      themePref={themePref}
+      resolvedTheme={resolvedTheme}
+      onCycleTheme={cycleTheme}
+      onNavigate={navigate}
+    >
+      {children}
+    </Shell>
+  );
+
+  if (route.name === 'application') {
+    return shell(
+      <ApplicationDetail applicationId={route.id} onBack={() => navigate('/pipeline')} />,
+    );
+  }
+
+  if (route.name === 'pipeline') {
+    return shell(
+      <Pipeline
+        programs={home.programs}
+        cycles={home.cycles}
+        query={search}
+        onQueryChange={setPipelineQuery}
+        onOpen={(id) => navigate(`/applications/${encodeURIComponent(id)}`)}
+      />,
+    );
+  }
+
+  return shell(
+    <Home
       programs={home.programs}
       cycles={home.cycles}
       forms={home.forms}
       onOpenForm={(id) => navigate(`/forms/${encodeURIComponent(id)}`)}
-      themePref={themePref}
-      resolvedTheme={resolvedTheme}
-      onCycleTheme={cycleTheme}
-    />
+    />,
   );
 }
 

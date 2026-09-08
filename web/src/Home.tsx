@@ -8,30 +8,16 @@
  */
 
 import type { ReactElement } from 'react';
-import type { CycleRow, FormSummary, ProgramRow, SessionUser } from './api';
-import { labelFor, type ResolvedTheme, type ThemePreference } from './theme';
+import type { CycleRow, FormSummary, ProgramRow } from './api';
 
 interface Props {
-  user: SessionUser;
   programs: ProgramRow[];
   cycles: CycleRow[];
   forms: FormSummary[];
   onOpenForm: (id: string) => void;
-  themePref: ThemePreference;
-  resolvedTheme: ResolvedTheme;
-  onCycleTheme: () => void;
 }
 
-export function Home({
-  user,
-  programs,
-  cycles,
-  forms,
-  onOpenForm,
-  themePref,
-  resolvedTheme,
-  onCycleTheme,
-}: Props): ReactElement {
+export function Home({ programs, cycles, forms, onOpenForm }: Props): ReactElement {
   const cyclesByProgram = new Map<string, CycleRow[]>();
   for (const c of cycles) {
     const list = cyclesByProgram.get(c.program_id) ?? [];
@@ -46,29 +32,7 @@ export function Home({
   }
 
   return (
-    <div className="page">
-      <a className="skip-link" href="#main">
-        Skip to content
-      </a>
-
-      <header className="masthead">
-        <div className="masthead-inner">
-          <h1>Steward</h1>
-          <span className="program">Grantmaking platform</span>
-          <span className="spacer" />
-          <span className="program">
-            {user.email} · {user.role}
-          </span>
-          {/* Cycles system -> the opposite of what you see now -> back to
-              system. The label always states where you are, so nobody has to
-              press it to find out. */}
-          <button type="button" className="theme-toggle" onClick={onCycleTheme}>
-            {labelFor(themePref, resolvedTheme)}
-          </button>
-        </div>
-      </header>
-
-      <main id="main" className="wide">
+    <>
         {programs.length === 0 && (
           <div className="state">
             <h1>No programs yet</h1>
@@ -165,7 +129,6 @@ export function Home({
             </section>
           );
         })}
-      </main>
-    </div>
+    </>
   );
 }
