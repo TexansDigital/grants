@@ -125,16 +125,32 @@ preview_id = "212f8367ee404685853a0125b8c9f46d"
 [env.staging]
 name = "steward-staging"
 
+# EMPTY ON PURPOSE. Without this, wrangler INHERITS the top-level `routes` and a
+# `--env staging` deploy reassigns grants.houstontexansfoundation.org to the
+# staging Worker -- taking the live staff application offline and pointing the
+# hostname at a database that does not have the real data in it. wrangler warns
+# about this; checkConfig now refuses it, because a warning in a deploy log is
+# read once and a failing build is read every time.
+#
+# Staging is reached by `wrangler dev --env staging` and by direct D1 and R2
+# commands. It deliberately has no public hostname: there is nothing to serve
+# from it that anyone should reach over the internet.
+routes = []
+
 [env.staging.vars]
 ENVIRONMENT = "staging"
 DISPLAY_TIMEZONE = "America/Chicago"
-ACCESS_TEAM_DOMAIN = "texansdigital.cloudflareaccess.com"
-ACCESS_AUD = "FILL_IN_STAGING_ACCESS_AUD"
+# Staging has NO hostname and therefore no Access application. Both values are
+# empty, which makes every staff route fail CLOSED. That is the correct posture
+# for an environment reached only by CLI: nothing is served from it, so nothing
+# needs to authenticate against it.
+ACCESS_TEAM_DOMAIN = ""
+ACCESS_AUD = ""
 
 [[env.staging.d1_databases]]
 binding = "DB"
 database_name = "steward-staging"
-database_id = "FILL_IN_STAGING_D1_ID"
+database_id = "6c300d84-a3a3-45b8-a9f7-a13f8067d9a7"
 migrations_dir = "migrations"
 
 [[env.staging.r2_buckets]]
@@ -143,7 +159,7 @@ bucket_name = "steward-staging-files"
 
 [[env.staging.kv_namespaces]]
 binding = "SESSIONS"
-id = "FILL_IN_STAGING_KV_ID"
+id = "a7b016bfcca94300be98cf3f992ba9c8"
 
 # ==============================================================================
 # PRODUCTION — deliberate, human-run deploy step only.
@@ -157,6 +173,13 @@ id = "FILL_IN_STAGING_KV_ID"
 # ==============================================================================
 [env.production]
 name = "steward-production"
+
+# EMPTY, like staging, and for the same reason: without this, deploying
+# production REASSIGNS grants.houstontexansfoundation.org away from the Worker
+# currently serving it. The production hostname is a deliberate choice a human
+# makes at cutover, alongside the ids below -- not something inherited by
+# accident from the environment it is meant to replace.
+routes = []
 
 [env.production.vars]
 ENVIRONMENT = "production"

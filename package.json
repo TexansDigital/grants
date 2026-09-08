@@ -20,7 +20,9 @@
     "check:config": "esbuild scripts/checkConfig.ts --bundle --platform=node --format=esm --outfile=.cfgcheck.mjs --log-level=warning && node .cfgcheck.mjs && rm -f .cfgcheck.mjs",
     "verify": "npm run check:config && npm run typecheck && npm test",
     "build:web": "vite build web",
-    "dev:web": "vite web"
+    "dev:web": "vite web",
+    "migrate:staging": "wrangler d1 migrations apply steward-staging --remote --env staging",
+    "dev:staging": "wrangler dev --env staging"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.12.21",

@@ -23,8 +23,18 @@ const firstTable = lines.findIndex((l) => /^\s*\[/.test(l));
 // before Access is set up -- but a MALFORMED value is not, because it would
 // make every staff login fail with an error pointing at the token instead of
 // at the config.
-const team = /ACCESS_TEAM_DOMAIN = "([^"]*)"/.exec(src)?.[1] ?? '';
-const aud = /ACCESS_AUD = "([^"]*)"/.exec(src)?.[1] ?? '';
+function defaultEnvLines(): string[] {
+  const end = lines.findIndex((l) => /^\s*\[env\./.test(l));
+  return end === -1 ? lines : lines.slice(0, end);
+}
+const defaultsEarly = defaultEnvLines().join('\n');
+
+// Scoped to the DEFAULT section. This regexed the whole file and relied on the
+// default block happening to appear first; staging now declares its own
+// (deliberately empty) Access vars, so "first match in the file" is a
+// coincidence to stop depending on.
+const team = /ACCESS_TEAM_DOMAIN = "([^"]*)"/.exec(defaultsEarly)?.[1] ?? '';
+const aud = /ACCESS_AUD = "([^"]*)"/.exec(defaultsEarly)?.[1] ?? '';
 
 /**
  * A key that must be top-level, i.e. above the first [table] header.
@@ -112,6 +122,39 @@ if (aud !== '' && !/^[0-9a-f]{64}$/.test(aud)) {
 }
 if ((team === '') !== (aud === '')) {
   problems.push('ACCESS_TEAM_DOMAIN and ACCESS_AUD must both be set or both be empty');
+}
+
+/*
+ * Every [env.*] must declare `routes` explicitly.
+ *
+ * wrangler INHERITS the top-level `routes` into a named environment, so
+ * `wrangler deploy --env staging` would reassign
+ * grants.houstontexansfoundation.org to the staging Worker -- taking the live
+ * staff application offline and pointing the hostname at a database that does
+ * not hold the real data. wrangler prints a warning about this. A warning in a
+ * deploy log is read once; a failing build is read every time.
+ *
+ * `routes = []` is the correct declaration for an environment with no public
+ * hostname. An environment that genuinely wants one declares its own.
+ */
+for (let i = 0; i < lines.length; i++) {
+  const header = /^\s*\[env\.([a-z0-9_-]+)\]\s*$/.exec(lines[i]!);
+  if (!header) continue;
+  const name = header[1]!;
+  // A constructed RegExp, not a literal: an interpolation inside a regex
+  // literal is matched as the characters "${name}", which made this loop
+  // succeed by accident rather than by design.
+  const nextEnvHeader = new RegExp(`^\\s*\\[env\\.(?!${name}[.\\]])`);
+  const rest = lines.slice(i + 1);
+  const nextEnv = rest.findIndex((l) => nextEnvHeader.test(l));
+  const body = (nextEnv === -1 ? rest : rest.slice(0, nextEnv)).join('\n');
+  if (!/^\s*routes\s*=/m.test(body)) {
+    problems.push(
+      `[env.${name}] does not declare \`routes\`. It would INHERIT the top-level ` +
+        `custom domain, and deploying it would reassign that hostname away from the ` +
+        `main Worker. Add \`routes = []\` if it should have no public hostname.`,
+    );
+  }
 }
 
 // NON-NEGOTIABLE: the default bindings must never point at production.
