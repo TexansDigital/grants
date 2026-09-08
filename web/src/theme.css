@@ -44,6 +44,18 @@
   --blue-ink: #0075b5; /* 4.99:1 on white */
   --blue-fill: #0075b5; /* white on it: 4.99:1 */
 
+  /*
+   * The border that IDENTIFIES a control, as opposed to one that decorates a
+   * card.
+   *
+   * --line is 1.38:1 against the surface, which is fine for a card edge and
+   * fails WCAG 1.4.11 for a form control: the fill and the card are both
+   * --surface, so that 1px border is the ONLY thing telling someone where the
+   * input is. Every text input, select, textarea, choice row and currency affix
+   * was drawn with it.
+   */
+  --line-control: #767f87; /* 3.05:1 on white */
+
   /* Neutrals: --steel at decreasing opacity over white, flattened to hex so
      they composite predictably over any background. */
   --ink: #021018;
@@ -115,6 +127,7 @@
   /* Lightened rather than darkened: on a dark ground the text has to come up,
      not down. 5.32:1 on --surface and 4.70:1 on the hover surface. */
   --blue-ink: #2693cf;
+  --line-control: #5a6874; /* 3.02:1 on --surface #0a1720 */
   --ink: #eef1f3;
   --ink-2: #a9b4bd;
   --ink-3: #7b868f;
@@ -167,6 +180,15 @@ body {
   outline: 3px solid var(--focus);
   outline-offset: 2px;
   border-radius: 3px;
+}
+
+/* Placeholders were never styled, so the browser default #757575 was used --
+   3.94:1 on the dark surface, a fail. --ink-3 is defined FOR this and was not
+   applied. opacity:1 because Firefox dims placeholders by default. */
+input::placeholder,
+textarea::placeholder {
+  color: var(--ink-3);
+  opacity: 1;
 }
 
 a {

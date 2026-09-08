@@ -187,7 +187,9 @@ export function ApplicationDetail({ applicationId, onBack }: Props): ReactElemen
         <div className="detail-main">
           <section className="panel">
             <div className="panel-head">
-              <h2>{app.project_title ?? 'Untitled request'}</h2>
+              <h2 tabIndex={-1} data-route-heading>
+                {app.project_title ?? 'Untitled request'}
+              </h2>
               <span className={`badge badge-${app.status}`}>{app.status.replace(/_/g, ' ')}</span>
               {app.requested_amount_cents !== null && (
                 <span className="meta strong">{formatCents(app.requested_amount_cents)} requested</span>
@@ -261,6 +263,7 @@ export function ApplicationDetail({ applicationId, onBack }: Props): ReactElemen
           {detail.attachments.length > 0 && (
             <section className="panel">
               <h3>Attachments</h3>
+              <div className="table-scroll">
               <table>
                 <thead>
                   <tr>
@@ -281,6 +284,7 @@ export function ApplicationDetail({ applicationId, onBack }: Props): ReactElemen
                   ))}
                 </tbody>
               </table>
+              </div>
               <p className="meta">
                 Downloads are not available yet. Files will be served through short-lived signed
                 links that are audited when issued.

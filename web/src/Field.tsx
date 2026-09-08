@@ -374,15 +374,30 @@ function renderControl(
     }
 
     case 'file_upload':
-      // Deliberately inert. Uploads go direct to R2 through a presigned PUT and
-      // that endpoint is Phase 2 work; a control that looks like it uploads and
-      // does not is worse than one that says so.
+      /*
+       * A REAL, disabled input -- not a <div>.
+       *
+       * This was a <div>, and the <label htmlFor> above it pointed at it. A
+       * <div> is not a labelable element, so the accessibility tree contained
+       * no control at all for this field: a screen reader user was told three
+       * questions needed their attention and given nothing to answer. A real
+       * input binds the label, appears in the tree, and announces as disabled.
+       *
+       * Uploads go direct to R2 through a presigned PUT, which is Phase 2c.
+       * Until then the control says so rather than pretending.
+       */
       return (
-        <div className="upload" id={common.id as string} aria-describedby={common['aria-describedby'] as string | undefined}>
-          <strong>Attachment: {field.label}</strong>
+        <div className="upload">
+          <input
+            {...common}
+            type="file"
+            disabled
+            multiple={(v.max_files ?? 1) > 1}
+            accept={(v.allowed_mime ?? []).join(',') || undefined}
+          />
           <p className="help">
-            File uploads are not wired up in this build. They will upload directly to
-            storage from the browser, which is Phase 2 work.
+            Uploads are not available in this preview. In the live form this is required,
+            and files upload straight to secure storage from your browser.
           </p>
         </div>
       );

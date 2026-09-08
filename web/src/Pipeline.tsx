@@ -137,7 +137,9 @@ export function Pipeline({ programs, cycles, query, onQueryChange, onOpen }: Pro
     <>
       <section className="panel">
         <div className="panel-head">
-          <h2>Pipeline</h2>
+          <h2 tabIndex={-1} data-route-heading>
+            Pipeline
+          </h2>
           <span className="meta">
             {loading ? 'Loading…' : `${total} application${total === 1 ? '' : 's'}`}
           </span>
@@ -171,7 +173,7 @@ export function Pipeline({ programs, cycles, query, onQueryChange, onOpen }: Pro
         </form>
 
         {hits !== null && (
-          <div className="hits">
+          <div className="hits" aria-live="polite">
             <h3>
               {hits.length} match{hits.length === 1 ? '' : 'es'}
             </h3>
@@ -297,6 +299,7 @@ export function Pipeline({ programs, cycles, query, onQueryChange, onOpen }: Pro
             {params.toString() !== '' && ' Try clearing one of them.'}
           </p>
         ) : (
+          <div className="table-scroll">
           <table>
             <thead>
               <tr>
@@ -311,8 +314,14 @@ export function Pipeline({ programs, cycles, query, onQueryChange, onOpen }: Pro
               </tr>
             </thead>
             <tbody>
+              {/* Deliberately no onClick on the <tr>. It bubbled from the
+                  button inside it, pushing TWO history entries so one Back
+                  appeared to do nothing, and it hijacked drag-selection:
+                  highlighting an amount to paste into an email navigated away
+                  instead. The button in the first cell is the single
+                  affordance, and it is the one a keyboard reaches anyway. */}
               {rows.map((r) => (
-                <tr key={r.id} className="rowlink" onClick={() => onOpen(r.id)}>
+                <tr key={r.id}>
                   <th scope="row">
                     <button type="button" className="linklike" onClick={() => onOpen(r.id)}>
                       {r.organization_name ?? 'Unknown organization'}
@@ -331,6 +340,7 @@ export function Pipeline({ programs, cycles, query, onQueryChange, onOpen }: Pro
               ))}
             </tbody>
           </table>
+          </div>
         )}
 
         {total > limit && (

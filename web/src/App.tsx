@@ -11,7 +11,7 @@
  * remembering to.
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ReactElement, ReactNode } from 'react';
 import { ApiError, api } from './api';
 import type { CycleRow, FormSummary, ProgramRow, SessionUser } from './api';
@@ -78,7 +78,14 @@ export function App(): ReactElement {
    * replaceState, not pushState: typing in a filter should not put a dozen
    * entries in the history that Back has to walk through one at a time.
    */
+  // The last pipeline query, so returning from a detail view lands back on the
+  // filtered list. Without this a reviewer working a filtered set of forty
+  // re-applies the filter after every single application -- which defeats the
+  // entire reason the filters live in the URL.
+  const lastPipelineQuery = useRef('');
+
   const setPipelineQuery = useCallback((next: string) => {
+    lastPipelineQuery.current = next;
     const url = next === '' ? window.location.pathname : `${window.location.pathname}?${next}`;
     window.history.replaceState({}, '', url);
     setSearch(next);
@@ -122,6 +129,30 @@ export function App(): ReactElement {
     html.dataset.surface = internal ? 'internal' : 'applicant';
     html.dataset.theme = internal ? resolvedTheme : 'light';
   }, [resolvedTheme, route]);
+
+  /*
+   * Move focus and set the title on every route change.
+   *
+   * Focus was landing on <body>, so a keyboard user paid eleven Tabs to get
+   * back to where they were and a screen reader user got no signal that
+   * navigation had happened at all. FormRenderer already did this correctly for
+   * its steps; the internal shell never got the same treatment.
+   */
+  useEffect(() => {
+    const titles: Record<string, string> = {
+      pipeline: 'Pipeline · Steward',
+      application: 'Application · Steward',
+      home: 'Configuration · Steward',
+      form: 'Form preview · Steward',
+    };
+    document.title = route ? (titles[route.name] ?? 'Steward') : 'Page not found · Steward';
+    if (loading) return;
+    // After paint, so the heading being focused actually exists.
+    const id = requestAnimationFrame(() => {
+      document.querySelector<HTMLElement>('main [data-route-heading]')?.focus();
+    });
+    return () => cancelAnimationFrame(id);
+  }, [loading, route]);
 
   const cycleTheme = useCallback(() => {
     setThemePref((prev) => {
@@ -222,6 +253,9 @@ export function App(): ReactElement {
 
   if (!home) return <Message title="Loading"><p>Loading…</p></Message>;
 
+  const toPipeline = () =>
+    lastPipelineQuery.current ? `/pipeline?${lastPipelineQuery.current}` : '/pipeline';
+
   const shell = (children: ReactNode) => (
     <Shell
       user={home.user}
@@ -229,7 +263,7 @@ export function App(): ReactElement {
       themePref={themePref}
       resolvedTheme={resolvedTheme}
       onCycleTheme={cycleTheme}
-      onNavigate={navigate}
+      onNavigate={(path) => navigate(path === '/pipeline' ? toPipeline() : path)}
     >
       {children}
     </Shell>
@@ -237,7 +271,10 @@ export function App(): ReactElement {
 
   if (route.name === 'application') {
     return shell(
-      <ApplicationDetail applicationId={route.id} onBack={() => navigate('/pipeline')} />,
+      <ApplicationDetail
+        applicationId={route.id}
+        onBack={() => navigate(toPipeline())}
+      />,
     );
   }
 

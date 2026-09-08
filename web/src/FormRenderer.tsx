@@ -96,8 +96,33 @@ export function FormRenderer({ def, onBack }: Props): ReactElement {
     const { errors } = validateSubmission(def, values);
     const map = new Map<string, string>();
     for (const e of errors) if (!map.has(e.field)) map.set(e.field, e.message);
+
+    /*
+     * Uploads cannot be satisfied in a preview, so the preview does not demand
+     * them.
+     *
+     * The Inspire Change form has three REQUIRED file_upload fields. With the
+     * upload endpoint unbuilt, Continue on the Documents section reported three
+     * errors that no action could clear and the step never advanced -- a wall
+     * with no way through, in the middle of the flow this screen exists to let
+     * staff walk.
+     *
+     * The server is untouched: submitApplication still requires them, and
+     * validateSubmission still reports them. Only this preview relaxes the
+     * requirement, and the section says so on screen rather than silently
+     * passing. When 2c ships, delete this block and the note with it.
+     */
+    for (const field of fields) {
+      if (field.field_type === 'file_upload') map.delete(field.field_key);
+    }
     return map;
-  }, [def, values]);
+  }, [def, fields, values]);
+
+  /** Sections carrying an upload field, so the preview can explain itself. */
+  const uploadFieldCount = useMemo(
+    () => fields.filter((f) => f.field_type === 'file_upload' && f.is_required).length,
+    [fields],
+  );
 
   const sectionErrorCount = useCallback(
     (section: SectionDef) =>
@@ -312,7 +337,7 @@ export function FormRenderer({ def, onBack }: Props): ReactElement {
           </ol>
         </nav>
 
-        <main id="main" className="card">
+        <main id="main" tabIndex={-1} className="card">
           <p className="banner">
             <strong>Preview.</strong> This renders the form definition exactly as it is stored.
             Answers are kept in this browser only — nothing is sent to Steward and nothing is
@@ -330,6 +355,7 @@ export function FormRenderer({ def, onBack }: Props): ReactElement {
               totalErrors={totalErrors}
               onEditSection={(i) => goTo(i)}
               onJumpToField={jumpToField}
+              uploadNotice={uploadFieldCount}
             />
           ) : (
             section && (
@@ -485,6 +511,8 @@ interface ReviewProps {
   totalErrors: number;
   onEditSection: (index: number) => void;
   onJumpToField: (sectionIndex: number, fieldKey: string) => void;
+  /** Required uploads the preview cannot accept, so the review screen can say so. */
+  uploadNotice: number;
 }
 
 /**
@@ -505,6 +533,7 @@ function ReviewStep({
   totalErrors,
   onEditSection,
   onJumpToField,
+  uploadNotice,
 }: ReviewProps): ReactElement {
   useEffect(() => {
     if (totalErrors > 0) summaryRef.current?.focus();
@@ -573,6 +602,13 @@ function ReviewStep({
         application is validated in full on the server, written in one transaction, and
         confirmed by email with a read-only copy of everything above.
       </p>
+      {uploadNotice > 0 && (
+        <p className="help">
+          <strong>{uploadNotice} required document{uploadNotice === 1 ? '' : 's'}</strong> cannot be
+          attached in this preview, so they are not counted against the checks above. The live
+          form requires them before it will accept a submission.
+        </p>
+      )}
     </>
   );
 }

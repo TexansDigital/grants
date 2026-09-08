@@ -155,7 +155,19 @@ async function get<T>(path: string, signal?: AbortSignal): Promise<T> {
     throw new ApiError(res.status, code, message, requestId);
   }
 
-  return (await res.json()) as T;
+  // The failure path already guarded this; the SUCCESS path did not, so an
+  // Access interstitial or an edge error page arriving with a 200 surfaced as
+  // `SyntaxError: Unexpected token '<'` in front of the user.
+  try {
+    return (await res.json()) as T;
+  } catch {
+    throw new ApiError(
+      res.status,
+      'BAD_RESPONSE',
+      'Steward returned something unexpected. Reload and try again.',
+      requestId,
+    );
+  }
 }
 
 export const api = {

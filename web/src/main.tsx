@@ -11,12 +11,15 @@ import './theme.css';
 import './form.css';
 import './internal.css';
 import { App } from './App';
+import { ErrorBoundary } from './ErrorBoundary';
 
 const root = document.getElementById('root');
 if (!root) throw new Error('missing #root');
 
 createRoot(root).render(
   <StrictMode>
-    <App />
+    <ErrorBoundary>
+      <App />
+    </ErrorBoundary>
   </StrictMode>,
 );

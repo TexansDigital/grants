@@ -237,13 +237,14 @@
 .field input[type='tel'],
 .field input[type='url'],
 .field input[type='number'],
+.field input[type='file'],
 .field select,
 .field textarea {
   font: inherit;
   font-size: var(--step-0);
   color: var(--ink);
   background: var(--surface);
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-control);
   border-radius: var(--radius);
   padding: var(--space-3);
   width: 100%;
@@ -273,7 +274,7 @@
 .affix {
   display: flex;
   align-items: stretch;
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-control);
   border-radius: var(--radius);
   background: var(--surface);
   overflow: hidden;
@@ -288,7 +289,7 @@
   padding: 0 var(--space-3);
   background: var(--surface-3);
   color: var(--ink-2);
-  border-right: 1px solid var(--line);
+  border-right: 1px solid var(--line-control);
   font-variant-numeric: tabular-nums;
 }
 .affix input {
@@ -322,7 +323,7 @@
   align-items: flex-start;
   gap: var(--space-3);
   padding: var(--space-3);
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-control);
   border-radius: var(--radius);
   cursor: pointer;
   background: var(--surface);

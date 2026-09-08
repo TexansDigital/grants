@@ -49,7 +49,9 @@ export function Home({ programs, cycles, forms, onOpenForm }: Props): ReactEleme
           return (
             <section className="panel" key={p.id}>
               <div className="panel-head">
-                <h2>{p.name}</h2>
+                <h2 tabIndex={-1} data-route-heading>
+                  {p.name}
+                </h2>
                 <span className={`badge badge-${p.status}`}>{p.status}</span>
                 {p.fiscal_year !== null && <span className="meta">FY{p.fiscal_year}</span>}
                 <span className="meta">overdue reports: {p.compliance_policy}</span>
@@ -59,6 +61,7 @@ export function Home({ programs, cycles, forms, onOpenForm }: Props): ReactEleme
               {programCycles.length === 0 ? (
                 <p className="meta">No cycles defined.</p>
               ) : (
+                <div className="table-scroll">
                 <table>
                   <thead>
                     <tr>
@@ -87,12 +90,14 @@ export function Home({ programs, cycles, forms, onOpenForm }: Props): ReactEleme
                     ))}
                   </tbody>
                 </table>
+                </div>
               )}
 
               <h3>Form definitions</h3>
               {programForms.length === 0 ? (
                 <p className="meta">No forms defined.</p>
               ) : (
+                <div className="table-scroll">
                 <table>
                   <thead>
                     <tr>
@@ -125,6 +130,7 @@ export function Home({ programs, cycles, forms, onOpenForm }: Props): ReactEleme
                     ))}
                   </tbody>
                 </table>
+                </div>
               )}
             </section>
           );

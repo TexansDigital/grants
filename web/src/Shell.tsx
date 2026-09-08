@@ -71,7 +71,7 @@ export function Shell({
         </div>
       </header>
 
-      <main id="main" className="wide">
+      <main id="main" tabIndex={-1} className="wide">
         {children}
       </main>
     </div>
