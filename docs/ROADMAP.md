@@ -1,112 +1,154 @@
-# Steward roadmap — draft for review
+# Steward roadmap
 
-Written after Phase 1. This is a proposed **revision** to the phase plan in
-CLAUDE.md, not a restatement of it. Where it differs, the reason is stated.
+Revised after adversarial review. This is a proposed **revision** to the phase
+plan in CLAUDE.md, not a restatement of it. Where it differs, the reason is
+stated. Nothing here has been built.
 
 ## Where we actually are
 
-Phase 0 and Phase 1 are done, but the honest summary is narrower than the phase
-names suggest:
+**Reachable over HTTP:** an Access-verified staff session, and six GET routes —
+`/health`, `/api/session`, `/api/programs`, `/api/cycles`, `/api/forms`,
+`/api/forms/:id`. Plus the applicant form renderer.
 
-**Built, tested, and reachable over HTTP:** Access-verified staff session,
-program / cycle / form-definition reads, the form definition contract, the
-applicant form renderer.
+**There is not one mutating route in the system.** Every route is a GET.
 
-**Built and tested, but reachable by nothing.** This is the important one.
-`saveDraft`, `submitApplication`, `searchApplications`,
-`getApplicationForExternal`, `listApplicationsForExternal`, `promote`,
-`validateUploadIntent` all exist with tests and have **zero HTTP routes**. The
-submission engine is written. Nobody can reach it.
+**Built, tested, and reachable by nothing.** `saveDraft`, `submitApplication`,
+`searchApplications`, `getApplicationForExternal`, `listApplicationsForExternal`,
+`promote`, `validateUploadIntent` all have tests and zero routes.
 
-**Not built at all:**
-- Applicant and grantee identity. `requireStaffSession` is the only auth in the
-  system. The KV namespace is bound and unused. No magic link, no token table.
-- R2 upload. `aws4fetch` is not a dependency; no presigning endpoint exists.
-- Email. Resend is not a dependency. No sending path.
-- Schema beyond applications. Migrations stop at 0005. There are **no tables**
-  for rubrics, review assignments, review scores, awards, amendments, payments,
-  report periods, report submissions, metrics, or metric values. That is roughly
-  half the data model in CLAUDE.md, and Phases 3 through 6 all sit on it.
-- The scheduled D1 export to R2. No cron trigger is configured.
+**Not built:**
+- Any way to *create* an application. `saveDraft` starts from an application
+  that already exists (`src/lib/submit.ts:78`); no `INSERT INTO applications`
+  exists outside the test suite. The audit verb `application.created`
+  (`src/lib/audit.ts:35`) has no writer.
+- Applicant and grantee identity. The KV namespace is bound and unused.
+- R2 upload. `aws4fetch` is not a dependency.
+- **Email of any kind.** Resend is not a dependency. This blocks the magic link,
+  the submission confirmation, and every decision notice.
+- Schema past applications. Migrations stop at 0005. No rubrics, reviews,
+  awards, payments, reports or metrics — about half the model in CLAUDE.md.
+- A domain. `workers_dev = true`, and Access fronts that hostname.
+- The cron D1→R2 export. The `scheduled` handler is a stub that returns
+  immediately (`src/index.ts:223`).
 
-## Two changes to the phase plan, and why
+**Phase 1 is less done than its name suggests.** CLAUDE.md's Phase 1 includes
+program/cycle/stage CRUD, organization and application read views, form
+definition management, and rubric upload and parse. None of those exist. What
+exists is Access, read-only lists, and the renderer.
 
-### 1. Split Phase 2. It is four risky things, not one.
+## The schema already commits to things that do not exist
 
-CLAUDE.md says Phase 2 is the highest-risk phase and must not be compressed. It
-then describes eleven steps that include a new identity system, a new storage
-path, a new email dependency, and the first public endpoint this system has ever
-had. Any one of those can sink a deadline day on its own.
+This matters for sequencing:
 
-Proposed split:
+- `cycles.rubric_id` is a dangling `TEXT` with no FK (`0002:102`).
+- `attachments.parent_type` already admits `'award'`, `'report_submission'` and
+  `'rubric'` (`0004:207`).
+- `getApplicationForStaff` **fails closed for every reviewer today**, because
+  `review_assignments` does not exist (`src/lib/scope.ts:229`). A reviewer
+  session currently 404s on every application in the system.
 
-- **2a — Applicant identity.** Magic-link login on KV: single-use, hashed at
-  rest, short expiry, rate limited. Ends with an applicant able to sign in and
-  see an empty dashboard and nothing else. Small, self-contained, and the thing
-  every later step assumes.
-- **2b — Draft and submit over HTTP.** Route the engine that already exists:
-  draft create, autosave, whole-form validate, submit, confirmation read-back.
-  Wire the renderer's autosave to the server instead of localStorage. This is
-  mostly plumbing precisely because the hard part was done in Phase 0.
-- **2c — Uploads.** Presigned PUT direct to R2 per the pattern in CLAUDE.md
-  (aws4fetch, do not sign Content-Type, bucket CORS). Replaces the inert upload
-  control in the renderer.
-- **2d — Public entry and cycle close.** The public cycle page, Turnstile,
-  eligibility screen, returning-organization prefill, EIN check, the hard
-  cutoff at `closes_at` and the grace rule.
+## Changes to the phase plan
 
-### 2. Pull three Phase 7 items forward, to before 2d ships.
+**1. Split Phase 2.** CLAUDE.md says it is the highest-risk phase and must not
+be compressed. It contains a new identity system, a new storage path, a new
+email dependency and the first public endpoint. Four things, not one.
 
-CLAUDE.md puts operations in Phase 7 and separately says the export must exist
-before the public form goes live. Those two statements conflict. Phase 2d is the
-moment this system starts holding other organizations' audited financial
-statements and EINs, so the prerequisites belong before it, not after:
+**2. Pull the operational prerequisites forward out of Phase 7.** CLAUDE.md puts
+them in Phase 7 and separately says the export must exist before the public form
+goes live. Those conflict. Phase 2 is when this system starts holding other
+organizations' audited financial statements.
 
-- **Scheduled D1 export to R2** via cron. Time Travel is disaster recovery, not
-  backup. Currently there is no cron trigger at all.
-- **SPF, DKIM and DMARC on the domain.** Not a code task. A grantee who cannot
-  receive a login link cannot file a report, and this is a DNS lead time, not a
-  sprint item.
-- **The human security review.** CLAUDE.md is explicit that I cannot perform
-  one. Booking it is a calendar action with a lead time, and it gates 2d.
+**3. Buy the domain now.** Not in the original plan at all, and it is a hard
+blocker: the first public applicant route on an Access-fronted hostname is
+either blocked by Access or forces a path-scoped policy rewrite. DNS is lead
+time, not effort.
 
-## Proposed order
+**4. Split the schema work rather than writing it all now.** See below.
 
-| # | Work | Depends on | Why here |
+## Verdict on writing migrations 0006–0008 in one pass: no
+
+**For:** migrations are cheap to write and impossible to edit once applied, so
+one coherent design pass beats six. The schema has already committed to these
+shapes anyway.
+
+**Against, and decisive:** eleven tables carry genuine design decisions —
+multi-year awards vs `parent_award_id` chains, amendment granularity, payment
+vocabularies, whether report periods are generated or authored, whether metric
+values are typed columns or JSON. **Four of those decisions are on CLAUDE.md's
+own open list and are unanswered** (#2 e-sign, #3 retention, #5 NFL reporting
+format, #7 continuity). Freezing guesses into an append-only chain before any UI
+has taught us anything spends the most expensive currency in the project on
+phases we know least about.
+
+**Split:**
+- **0006 now** — rubrics, rubric_criteria, review_assignments, review_scores,
+  and the FK on `cycles.rubric_id`. It has a live consumer today: the reviewer
+  path is dead until it exists.
+- **0007 immediately before awards work.**
+- **0008 immediately before reporting work.**
+
+## Order
+
+| # | Work | Depends on | Note |
 |---|---|---|---|
-| **A** | Migrations 0006–0008: rubrics, reviews, awards, payments, reports, metrics | — | Unblocks Phases 3–6. Pure schema, no UI, reviewable in one sitting. Doing it now means later phases are not each preceded by a schema scramble. |
-| **B** | 2a — applicant identity | A not required | Every external-facing thing assumes it. Smallest risky piece; do it alone. |
-| **C** | 2b — draft and submit routes | B | Routes an engine that is already written and tested. |
-| **D** | Phase 3 — review and scoring | A | Runs in parallel with C. Staff-only, behind Access, no new identity surface. |
-| **E** | 2c — uploads | C | Needs a draft to attach to. |
-| **F** | Ops prerequisites: cron export, SPF/DKIM/DMARC, book the security review | — | Start the DNS and the booking during C and D; they have lead times, not effort. |
-| **G** | 2d — public entry, Turnstile, eligibility, close rules | E, F | The first public endpoint. Nothing public ships before F is done. |
-| **H** | Phase 4 — awards, payments, decision communication | A, D | |
-| **I** | Phase 5 — grantee reporting | A, H | Reuses the form engine and the 2a identity path. |
-| **J** | Phase 6 — dashboard and exports | H, I | |
+| **1** | Migration 0006: rubrics, criteria, review assignments, scores; FK on `cycles.rubric_id` | — | Unblocks the reviewer path, which fails closed today |
+| **2** | Router refactor to a route table; first staff **write** routes (program / cycle / stage CRUD, cycle open-close) | — | Nothing mutating exists. Both the review flow and the public cutoff need this |
+| **3** | Resend integration: send helper, failure logging, template harness | — | The magic link is the first send; the confirmation email is the second |
+| **4** | **Domain**: purchase → Worker on custom domain → Access re-scoped to staff paths → `workers_dev = false` | — | Start immediately; DNS lead time. Blocks anything public |
+| **5** | 2a — applicant identity **including organization resolution**: magic link (single-use, hashed, 15-min, rate-limited), email→organization matching, EIN capture, returning-organization prefill | 3 | `users` requires a non-null `organization_id` for applicants, so signup *must* resolve an org. Prefill and EIN matching move here from 2d |
+| **6** | Staff read surface: pipeline list, filters, application detail, FTS search route, applicant-history panel | 1, 2 | The undone half of Phase 1. Parallel with 5 |
+| **7** | Draft create: application row, per-cycle limit, stage gate, **public published-only** form endpoint | 2, 5 | Not plumbing. The current form endpoint is staff-only and serves draft and retired definitions unfiltered |
+| **8** | 2c — uploads: presigned PUT via aws4fetch, bucket CORS, R2 lifecycle | 7 | **Before submit.** The seeded form has three *required* upload fields, so submit can never pass on it until uploads exist |
+| **9** | Autosave + whole-form validate + submit + confirmation read-back email; compliance-policy hook as a no-op | 7, 8, 3 | Rewrites the renderer's autosave from localStorage to the server |
+| **10** | Rubric upload and parse, assignment, conflict-of-interest declaration at assignment | 1, 6 | |
+| **11** | Scoring, weighted totals, normalization view, offline export/import, decision recording | 10 | |
+| **12** | Cron D1→R2 export; SPF, DKIM, DMARC | 4 | Fills the stub at `src/index.ts:223` |
+| **13** | Conduct the human security review; accessibility pass with real assistive technology | 8, 9, 4 | Gate, not a task. I cannot perform either |
+| **14** | 2d — public cycle page, Turnstile, privacy notice, hard cutoff, grace rule | 8, 9, 12, 13 | The first public endpoint. Nothing public ships before 13 |
+| **15** | Migration 0007: awards, amendments, payments | 11 | |
+| **16** | Phase 4 — awards, payments, decision communication (embargo, acceptances before declines, human review before send), optimistic locking on awards | 15, 3, 11 | |
+| **17** | Migration 0008: report periods, submissions, metrics | 16 | |
+| **18** | Phase 5 — grantee reporting; **enable** the compliance gate built at 9 | 17, 16 | |
+| **19** | Phase 6 — dashboard and exports | 16, 18 | |
+| **20** | Phase 7 residual — Eloqua opt-in sync, Formstack import, organization merge tool, data health | 9, 16 | Do not let this evaporate. `organizations` deliberately has no unique index on EIN because duplicates are expected and an admin merges them; without the tool they accumulate from the day 9 ships |
 
-Phase 1 leftovers — rubric CSV/XLSX upload and parse, and form-definition
-management in the UI — fold into A and D rather than standing as their own
-phase. The rubric parser is only useful once `rubrics` and `rubric_criteria`
-exist.
+## Decisions needed
 
-## Decisions this plan needs
+**Blocking, in order of urgency:**
 
-1. **Applicant login mechanism.** The Cloudflare OTP took ten minutes to arrive
-   and that is the current live evidence. Transactional mail through Resend is a
-   different sender with different latency, but the deeper problem is that
-   corporate scanners *follow* links in mail, which burns a single-use token
-   before the applicant clicks it. A link that is single-use but survives a HEAD
-   or a prefetch, or a link plus a code fallback, is the design question. This
-   blocks B.
-2. **The grace rule** for drafts started before close (open decision #6). The
-   column exists and defaults to 0. Blocks G, not before.
-3. **Whether declined applicants keep portal access** (open decision #4). Shapes
-   the identity model in B.
+1. **Where the friendly-organization test data lives.** CLAUDE.md verifies Phase
+   2 by having three real organizations submit real applications. Today
+   `database_id == preview_database_id` — one database — and `seed:preview`,
+   `admin:apply` and `migrate:preview` all run against it with `--remote`. Real
+   EINs and audited financials in the database people run destructive scripts
+   against inverts the spirit of non-negotiable #2. Options: a third D1
+   (`steward-staging`), or a deliberate production cutover before that test.
+2. **The domain**, and how Access is re-scoped once public paths share the
+   hostname.
+3. **The IRS Business Master File / Pub 78 data source** — which file, where it
+   lives, refresh cadence, who refreshes it. `src/lib/ein.ts` defines the result
+   type and has nothing behind it. Blocks the EIN check in item 5.
+4. **Eligibility: section or stage.** It is currently section 1 of a
+   single-stage form (`src/seed/inspireChange.ts:52`). CLAUDE.md wants a
+   fail-fast screen that never collects a full application from an ineligible
+   organization. Published form definitions are immutable, so changing this
+   later means a new version while applicants may be mid-draft.
+5. **Applicant login: magic link plus what.** The link is a prior decision and
+   stands. The open question is the fallback, because corporate scanners follow
+   links in mail and burn a single-use token before the applicant clicks. A code
+   alongside the link, or a link that survives a HEAD or prefetch.
 
-## What I am not proposing
+**Not yet blocking, but cheap now and expensive later:**
 
-- No production deploy in any phase here. Everything stays on preview bindings.
-- No public endpoint before F.
-- I am not proposing to skip the offline scoring export in D. CLAUDE.md wants it
-  as a fallback and is right that it should not be the default path.
+6. Retention policy for uploaded financials (open decision #3) — sets the R2
+   lifecycle rules and key layout, so it wants answering before item 8.
+7. Concurrency on awards: optimistic locking, or last-write-wins in writing.
+8. Grace rule for drafts started before close (open decision #6) — blocks 14.
+9. Whether declined applicants keep portal access (open decision #4) — shapes 5.
+
+## Not proposed
+
+- No production deploy in any item here, pending decision 1.
+- No public endpoint before item 13.
+- Offline scoring stays a fallback, never the default path.
+- The public grantee page (Module 8) is deliberately dropped for now.
