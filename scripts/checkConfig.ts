@@ -123,9 +123,66 @@ if (prodPlaceholders < 3) {
   );
 }
 
-// The default D1 must be the preview database, not production.
-if (!/database_name = "steward-preview"/.test(src)) {
+// -----------------------------------------------------------------------------
+// NON-NEGOTIABLE #2: the default bindings point at PREVIEW, always.
+//
+// This was the rule with no check behind it. The script asserted the database
+// NAME was steward-preview and stopped there, so editing the default
+// `database_id` to a production uuid passed `npm run verify` clean -- and the
+// default binding is what every script, every `wrangler dev` and every
+// unqualified deploy uses.
+//
+// The invariant that actually makes "a script run with the default config hits
+// preview, never production" true is that the id and the preview id are the
+// SAME VALUE. If they diverge, `--remote` and `--local` reach different
+// databases and one of them is not preview.
+// -----------------------------------------------------------------------------
+
+/**
+ * The default-environment part of the file: everything before the first real
+ * `[env.*]` table header.
+ *
+ * Scanned line by line rather than with indexOf, because the file's own header
+ * COMMENT mentions `[env.production]` on line 9 -- a substring search truncated
+ * the section to nine lines and every assertion below silently passed on an
+ * almost-empty string. Config that fails silently is what this script exists to
+ * prevent, so getting caught by it here was fair.
+ */
+function defaultEnvSection(): string {
+  const end = lines.findIndex((l) => /^\s*\[env\./.test(l));
+  return (end === -1 ? lines : lines.slice(0, end)).join('\n');
+}
+
+const defaults = defaultEnvSection();
+
+function pairMustMatch(label: string, aKey: string, bKey: string): void {
+  const a = new RegExp(`^\\s*${aKey}\\s*=\\s*"([^"]*)"`, 'm').exec(defaults)?.[1];
+  const b = new RegExp(`^\\s*${bKey}\\s*=\\s*"([^"]*)"`, 'm').exec(defaults)?.[1];
+  if (a === undefined || b === undefined) {
+    problems.push(`${label}: expected both ${aKey} and ${bKey} in the default bindings`);
+    return;
+  }
+  if (a !== b) {
+    problems.push(
+      `${label}: ${aKey} (${a}) and ${bKey} (${b}) differ. ` +
+        `The default bindings must resolve to the SAME preview resource, or a script ` +
+        `run without --env reaches something that is not preview.`,
+    );
+  }
+}
+
+pairMustMatch('D1', 'database_id', 'preview_database_id');
+pairMustMatch('R2', 'bucket_name', 'preview_bucket_name');
+pairMustMatch('KV', 'id', 'preview_id');
+
+if (!/database_name = "steward-preview"/.test(defaults)) {
   problems.push('the default D1 binding is not steward-preview');
+}
+if (!/bucket_name = "steward-preview-files"/.test(defaults)) {
+  problems.push('the default R2 binding is not steward-preview-files');
+}
+if (!/ENVIRONMENT = "preview"/.test(defaults)) {
+  problems.push('the default ENVIRONMENT var is not "preview"');
 }
 
 if (problems.length > 0) {

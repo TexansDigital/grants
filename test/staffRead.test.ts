@@ -316,6 +316,66 @@ describe('applicant history', () => {
   });
 });
 
+describe('soft-deleted work never resurfaces on a staff read', () => {
+  /*
+   * Non-negotiable #7 makes soft-delete the only delete, which makes EVERY read
+   * responsible for the filter. The applicant path had this test; the staff
+   * surface did not, so dropping `a.deleted_at IS NULL` from the pipeline, the
+   * detail gate or the history list left the suite green.
+   */
+  it('is gone from the pipeline', async () => {
+    const s = await scene();
+    expect((await listApplicationsForStaff(db, adminSession())).total).toBe(2);
+    await db.prepare(`UPDATE applications SET deleted_at = ? WHERE id = ?`).bind(nowIso(), s.mine).run();
+    const after = await listApplicationsForStaff(db, adminSession());
+    expect(after.total).toBe(1);
+    expect(after.applications.map((a) => a.id)).not.toContain(s.mine);
+  });
+
+  it('404s on the detail view, for an admin as well as a reviewer', async () => {
+    const s = await scene();
+    await db.prepare(`UPDATE applications SET deleted_at = ? WHERE id = ?`).bind(nowIso(), s.mine).run();
+    await expect(getApplicationDetailForStaff(db, adminSession(), s.mine)).rejects.toMatchObject({
+      code: 'NOT_FOUND',
+    });
+  });
+
+  it('is gone from the organization history', async () => {
+    const s = await scene();
+    await db.prepare(`UPDATE applications SET deleted_at = ? WHERE id = ?`).bind(nowIso(), s.mine).run();
+    // orgA had exactly one application, so the history gate itself now 404s --
+    // which is the correct answer, not an empty history.
+    await expect(organizationHistoryForStaff(db, adminSession(), s.orgA)).rejects.toMatchObject({
+      code: 'NOT_FOUND',
+    });
+  });
+
+  it('a WITHDRAWN application is not findable in search', async () => {
+    // The join to applications exists so "a withdrawn application stays
+    // findable" cannot happen. Only the soft-delete half of that join was
+    // tested.
+    const s = await scene();
+    expect(await searchApplications(db, adminSession(), 'literacy')).toHaveLength(2);
+    await db.prepare(`UPDATE applications SET status = 'withdrawn' WHERE id = ?`).bind(s.mine).run();
+    const hits = await searchApplications(db, adminSession(), 'literacy');
+    expect(hits.map((h) => h.application_id)).toEqual([s.theirs]);
+  });
+});
+
+describe('the pipeline amount filter is INCLUSIVE, as its interface says', () => {
+  it('includes a row sitting exactly on each bound', async () => {
+    // The existing filter test uses a bound that is never a row value, so
+    // >= degrading to > went unnoticed despite "Inclusive bounds" in the type.
+    const s = await scene();
+    const admin = adminSession();
+    expect((await listApplicationsForStaff(db, admin, { minAmountCents: 25_000_00 })).total).toBe(2);
+    expect((await listApplicationsForStaff(db, admin, { maxAmountCents: 25_000_00 })).total).toBe(1);
+    expect(
+      (await listApplicationsForStaff(db, admin, { minAmountCents: 25_000_00, maxAmountCents: 25_000_00 })).total,
+    ).toBe(1);
+  });
+});
+
 describe('the scope helper itself', () => {
   it('gives an admin an unrestricted scope and a reviewer a joined one', () => {
     expect(staffApplicationScope(adminSession())).toEqual({ join: '', where: '1 = 1', binds: [] });
