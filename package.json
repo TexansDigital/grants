@@ -1,0 +1,23 @@
+{
+  "name": "steward",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Steward \u2014 multi-program grantmaking platform on Cloudflare",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json",
+    "migrate:local": "wrangler d1 migrations apply steward-preview --local",
+    "migrate:preview": "wrangler d1 migrations apply steward-preview --remote",
+    "dev": "wrangler dev"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.8.19",
+    "@cloudflare/workers-types": "^4.20250109.0",
+    "@types/node": "^22.20.1",
+    "typescript": "^5.7.3",
+    "vitest": "~3.0.5",
+    "wrangler": "^3.101.0"
+  }
+}

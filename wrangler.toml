@@ -1,0 +1,80 @@
+#
+# Steward — Cloudflare Worker configuration
+#
+# NON-NEGOTIABLE: the default (top-level) bindings in this file point at PREVIEW
+# resources ONLY. Production D1 and R2 hold real EINs, audited financial
+# statements, and operating budgets belonging to other organizations.
+#
+# There is deliberately NO usable production binding in this file. The
+# [env.production] block below carries placeholder IDs that will fail loudly.
+# A human fills them in, in a named deploy step, at the moment of deploy.
+# Do not commit real production IDs here.
+#
+name = "steward"
+main = "src/index.ts"
+compatibility_date = "2025-01-15"
+compatibility_flags = ["nodejs_compat"]
+
+[observability]
+enabled = true
+
+[vars]
+ENVIRONMENT = "preview"
+# Display timezone for all human-facing dates. Storage is always UTC.
+DISPLAY_TIMEZONE = "America/Chicago"
+# Turnstile / Resend / Eloqua / R2 signing credentials are Wrangler SECRETS.
+# They are never listed here. See docs/SECRETS.md.
+
+# --- PREVIEW D1 (default) -----------------------------------------------------
+# Both ids point at the preview database on purpose. If someone runs a migration
+# or a data script with the default config, it hits preview, never production.
+[[d1_databases]]
+binding = "DB"
+database_name = "steward-preview"
+database_id = "steward-preview-local"
+preview_database_id = "steward-preview-local"
+migrations_dir = "migrations"
+
+# --- PREVIEW R2 (default) -----------------------------------------------------
+# Private bucket. Objects are reached only through short-lived presigned URLs.
+[[r2_buckets]]
+binding = "FILES"
+bucket_name = "steward-preview-files"
+preview_bucket_name = "steward-preview-files"
+
+# --- PREVIEW KV (sessions + magic-link tokens) --------------------------------
+[[kv_namespaces]]
+binding = "SESSIONS"
+id = "steward-preview-sessions"
+preview_id = "steward-preview-sessions"
+
+# ==============================================================================
+# PRODUCTION — deliberate, human-run deploy step only.
+#
+#   wrangler deploy --env production
+#
+# The placeholder ids below are intentionally invalid. Filling them in is a
+# conscious act by a human who has decided to touch production. Never run
+# `wrangler d1 migrations apply --env production` casually, and never run a
+# data-mutating script against it without being told to in that same message.
+# ==============================================================================
+[env.production]
+name = "steward-production"
+
+[env.production.vars]
+ENVIRONMENT = "production"
+DISPLAY_TIMEZONE = "America/Chicago"
+
+[[env.production.d1_databases]]
+binding = "DB"
+database_name = "steward-production"
+database_id = "FILL_IN_AT_DEPLOY_TIME_DO_NOT_COMMIT"
+migrations_dir = "migrations"
+
+[[env.production.r2_buckets]]
+binding = "FILES"
+bucket_name = "FILL_IN_AT_DEPLOY_TIME_DO_NOT_COMMIT"
+
+[[env.production.kv_namespaces]]
+binding = "SESSIONS"
+id = "FILL_IN_AT_DEPLOY_TIME_DO_NOT_COMMIT"
