@@ -22,6 +22,10 @@ enabled = true
 ENVIRONMENT = "preview"
 # Display timezone for all human-facing dates. Storage is always UTC.
 DISPLAY_TIMEZONE = "America/Chicago"
+# Cloudflare Access. Fill both in once the Access application exists; until then
+# every staff route fails closed. Neither is a secret.
+ACCESS_TEAM_DOMAIN = ""
+ACCESS_AUD = ""
 # Turnstile / Resend / Eloqua / R2 signing credentials are Wrangler SECRETS.
 # They are never listed here. See docs/SECRETS.md.
 
@@ -45,8 +49,8 @@ preview_bucket_name = "steward-preview-files"
 # --- PREVIEW KV (sessions + magic-link tokens) --------------------------------
 [[kv_namespaces]]
 binding = "SESSIONS"
-id = "steward-preview-sessions"
-preview_id = "steward-preview-sessions"
+id = "212f8367ee404685853a0125b8c9f46d"
+preview_id = "212f8367ee404685853a0125b8c9f46d"
 
 # ==============================================================================
 # PRODUCTION — deliberate, human-run deploy step only.

@@ -1,22 +1,26 @@
 /**
  * Steward Worker entry point.
  *
- * Phase 0 deliberately exposes almost no surface. What lives here is the thing
- * every later phase depends on: a request context and a global error boundary
- * that logs EVERY failure to error_log and returns a safe body to the client.
+ * Two things live here and nothing else: the request context with the global
+ * error boundary, and the router.
  *
- * Routes arrive in Phase 1 (internal shell) and Phase 2 (public application
- * flow). Adding one must not require touching the boundary.
+ * The staff API is a JSON contract, not a rendering surface. The form
+ * definition endpoint returns exactly what the applicant form will later
+ * consume, so the Phase 2 public flow reuses this endpoint rather than
+ * replacing it -- and the field validation and conditional-visibility rules
+ * stay in src/lib, imported by both sides, never reimplemented in a client.
  */
 
-import type { Env, RequestContext } from './types';
+import type { Env, RequestContext, Session } from './types';
 import { newRequestId } from './lib/ids';
-import { AppError, logError, toErrorResponse } from './lib/errors';
-import { nowIso } from './lib/time';
+import { AppError, logError, notFound, toErrorResponse } from './lib/errors';
+import { nowIso, formatInZone } from './lib/time';
+import { requireStaffSession } from './lib/auth';
+import { loadFormDefinition } from './lib/forms';
 
 /**
- * Client IP as Cloudflare reports it. Never trust X-Forwarded-For from the
- * edge: a client can set it. CF-Connecting-IP is set by Cloudflare itself.
+ * Client IP as Cloudflare reports it. X-Forwarded-For is never trusted: a
+ * client can set it. CF-Connecting-IP is set by Cloudflare itself.
  */
 function clientIp(request: Request): string | null {
   return request.headers.get('CF-Connecting-IP');
@@ -26,9 +30,8 @@ function buildContext(request: Request): RequestContext {
   const url = new URL(request.url);
   return {
     requestId: newRequestId(),
-    // Authentication lands in Phase 1 (Cloudflare Access for staff) and Phase 2
-    // (magic link for applicants and grantees). Until then there is no session,
-    // and every scoped helper fails closed rather than defaulting to a role.
+    // Populated by the route once Access has been verified. It starts null so
+    // that a handler which forgets to authenticate has no session to use.
     session: null,
     ip: clientIp(request),
     userAgent: request.headers.get('User-Agent'),
@@ -37,44 +40,118 @@ function buildContext(request: Request): RequestContext {
   };
 }
 
+/**
+ * Response headers applied to everything.
+ *
+ * The CSP is restrictive by default and is the floor the Phase 2 form is built
+ * against: no inline script, no framing, nothing loaded cross-origin. Setting
+ * it now means the UI is written to fit it, rather than the policy being
+ * loosened later to fit the UI.
+ */
+function securityHeaders(requestId: string): Record<string, string> {
+  return {
+    'content-type': 'application/json; charset=utf-8',
+    'x-request-id': requestId,
+    'cache-control': 'no-store',
+    'x-content-type-options': 'nosniff',
+    'referrer-policy': 'strict-origin-when-cross-origin',
+    'x-frame-options': 'DENY',
+    'content-security-policy':
+      "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; " +
+      "connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'none'; " +
+      "form-action 'self'; frame-ancestors 'none'",
+  };
+}
+
 function json(body: unknown, ctx: RequestContext, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: {
-      'content-type': 'application/json; charset=utf-8',
-      'x-request-id': ctx.requestId,
-      'cache-control': 'no-store',
-      // These matter on a public form that accepts financial documents.
-      'x-content-type-options': 'nosniff',
-      'referrer-policy': 'strict-origin-when-cross-origin',
-      'x-frame-options': 'DENY',
-    },
-  });
+  return new Response(JSON.stringify(body), { status, headers: securityHeaders(ctx.requestId) });
+}
+
+/** Match `/api/forms/:id` and friends without pulling in a router dependency. */
+function segments(pathname: string): string[] {
+  return pathname.split('/').filter((s) => s.length > 0);
 }
 
 async function route(request: Request, env: Env, ctx: RequestContext): Promise<Response> {
   const url = new URL(request.url);
+  const parts = segments(url.pathname);
+  const method = request.method;
 
-  if (url.pathname === '/health' && request.method === 'GET') {
-    // Confirms the Worker is up AND that the D1 binding actually resolves.
-    // A health check that does not touch the database is a health check that
-    // stays green while every request fails.
+  // ---- public -------------------------------------------------------------
+  if (parts.length === 1 && parts[0] === 'health' && method === 'GET') {
+    // Touches D1 on purpose: a health check that does not exercise its
+    // dependencies stays green while every real request fails.
     const row = await env.DB.prepare('SELECT 1 AS ok').first<{ ok: number }>();
+    const healthy = row?.ok === 1;
     return json(
-      {
-        status: row?.ok === 1 ? 'ok' : 'degraded',
-        environment: env.ENVIRONMENT,
-        time: nowIso(),
-      },
+      { status: healthy ? 'ok' : 'degraded', environment: env.ENVIRONMENT, time: nowIso() },
       ctx,
-      row?.ok === 1 ? 200 : 503,
+      healthy ? 200 : 503,
     );
   }
 
-  throw new AppError('NOT_FOUND', 'That page could not be found.', {
-    internalMessage: `no route for ${request.method} ${url.pathname}`,
-    severity: 'warn',
-  });
+  if (parts[0] !== 'api') {
+    throw notFound('page');
+  }
+
+  // ---- everything below requires a verified Access session ----------------
+  const session: Session = await requireStaffSession(request, env, ctx);
+  ctx.session = session;
+
+  // GET /api/session -- who the caller is. The UI uses this to decide what to
+  // render, but it is a convenience: every endpoint checks for itself.
+  if (parts.length === 2 && parts[1] === 'session' && method === 'GET') {
+    return json({ user: { email: session.email, role: session.role } }, ctx);
+  }
+
+  // GET /api/programs
+  if (parts.length === 2 && parts[1] === 'programs' && method === 'GET') {
+    const { results } = await env.DB.prepare(
+      `SELECT id, name, slug, status, fiscal_year, compliance_policy
+         FROM programs WHERE deleted_at IS NULL ORDER BY name`,
+    ).all<Record<string, unknown>>();
+    return json({ programs: results ?? [] }, ctx);
+  }
+
+  // GET /api/cycles?program_id=...
+  if (parts.length === 2 && parts[1] === 'cycles' && method === 'GET') {
+    const programId = url.searchParams.get('program_id');
+    const stmt = programId
+      ? env.DB.prepare(
+          `SELECT id, program_id, name, opens_at, closes_at, status, draft_grace_hours
+             FROM cycles WHERE program_id = ? AND deleted_at IS NULL ORDER BY opens_at DESC`,
+        ).bind(programId)
+      : env.DB.prepare(
+          `SELECT id, program_id, name, opens_at, closes_at, status, draft_grace_hours
+             FROM cycles WHERE deleted_at IS NULL ORDER BY opens_at DESC`,
+        );
+    const { results } = await stmt.all<Record<string, unknown>>();
+    return json(
+      {
+        cycles: (results ?? []).map((c) => ({
+          ...c,
+          // Deadlines are announced in Central time. Storage stays UTC; the
+          // display string is computed once, here, so every surface agrees.
+          closes_at_display: formatInZone(String(c.closes_at), env.DISPLAY_TIMEZONE),
+          opens_at_display: formatInZone(String(c.opens_at), env.DISPLAY_TIMEZONE),
+        })),
+      },
+      ctx,
+    );
+  }
+
+  // GET /api/forms/:id -- THE CONTRACT.
+  //
+  // This is what the Phase 2 applicant form consumes. It returns the definition
+  // exactly as loadFormDefinition assembles it: sections and fields in order,
+  // with parsed options, validation rules, conditional wiring and promotion
+  // targets. No answers, no applicant data, no internal notes.
+  if (parts.length === 3 && parts[1] === 'forms' && method === 'GET') {
+    const definition = await loadFormDefinition(env.DB, parts[2]!);
+    return json({ form: definition }, ctx);
+  }
+
+  throw notFound('endpoint');
 }
 
 export default {
@@ -90,12 +167,10 @@ export default {
   /**
    * Scheduled work.
    *
-   * Phase 7 hangs the D1-to-R2 export here. Recommendation on record: that
-   * export must exist BEFORE the public form goes live in Phase 2, because
-   * Phase 2 is the first moment this system holds real third-party audited
-   * financial statements, and D1 Time Travel is disaster recovery, not backup.
-   *
-   * The boundary is here now so a cron failure is never silent.
+   * Phase 7 hangs the D1-to-R2 export here. Standing recommendation: that
+   * export must exist BEFORE the public form goes live, because that is the
+   * first moment this system holds real third-party audited financial
+   * statements, and D1 Time Travel is disaster recovery, not backup.
    */
   async scheduled(event: ScheduledController, env: Env, _ctx: ExecutionContext): Promise<void> {
     const ctx: RequestContext = {
@@ -107,7 +182,6 @@ export default {
       method: 'SCHEDULED',
     };
     try {
-      // No scheduled jobs registered yet.
       return;
     } catch (err) {
       await logError(env, ctx, {
@@ -121,3 +195,6 @@ export default {
     }
   },
 };
+
+// Re-exported so tests can assert the exact error shape the boundary produces.
+export { AppError };

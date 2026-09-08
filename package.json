@@ -13,7 +13,9 @@
     "dev": "wrangler dev",
     "seed:build": "esbuild scripts/buildSeed.ts --bundle --platform=node --format=esm --outfile=.seedbuild.mjs --log-level=warning && node .seedbuild.mjs && rm -f .seedbuild.mjs",
     "seed:preview": "wrangler d1 execute steward-preview --remote --file=seeds/inspire-change.sql",
-    "seed:local": "wrangler d1 execute steward-preview --local --file=seeds/inspire-change.sql"
+    "seed:local": "wrangler d1 execute steward-preview --local --file=seeds/inspire-change.sql",
+    "admin:sql": "esbuild scripts/buildAdmins.ts --bundle --platform=node --format=esm --outfile=.adminbuild.mjs --log-level=warning && node .adminbuild.mjs",
+    "admin:apply": "wrangler d1 execute steward-preview --remote --file=seeds/admins.sql"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.12.21",

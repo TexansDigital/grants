@@ -8,3 +8,7 @@ dist/
 .DS_Store
 coverage/
 .seedbuild.mjs
+.adminbuild.mjs
+
+# Generated per deployment; contains real staff email addresses.
+seeds/admins.sql

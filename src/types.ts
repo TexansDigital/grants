@@ -8,6 +8,15 @@ export interface Env {
   SESSIONS: KVNamespace;
   ENVIRONMENT: string;
   DISPLAY_TIMEZONE: string;
+  /**
+   * Cloudflare Access team domain and application audience tag.
+   *
+   * Empty means staff authentication is unconfigured, and every staff route
+   * fails closed. Neither value is a secret: the team domain is a public
+   * hostname and the audience tag is an application identifier.
+   */
+  ACCESS_TEAM_DOMAIN: string;
+  ACCESS_AUD: string;
 }
 
 export type Role = 'admin' | 'reviewer' | 'applicant' | 'grantee' | 'executive';
