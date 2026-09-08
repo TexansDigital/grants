@@ -107,6 +107,45 @@ id = "212f8367ee404685853a0125b8c9f46d"
 preview_id = "212f8367ee404685853a0125b8c9f46d"
 
 # ==============================================================================
+# STAGING — where REAL data goes before production exists.
+#
+# Decision #12: the friendly-organization test and any import of real past
+# applications land here, NOT in preview. Preview is the database that
+# seed:preview and admin:apply are pointed at with --remote; running a
+# destructive script against real EINs and audited financial statements is the
+# spirit of non-negotiable #2 inverted, even though that rule names production.
+#
+# Deployed deliberately:  wrangler deploy --env staging
+# Migrated deliberately:  wrangler d1 migrations apply steward-staging --remote --env staging
+#
+# The ids below are placeholders until a human creates the resources. They fail
+# loudly rather than silently falling back to preview, and checkConfig asserts
+# they are never equal to the preview ids.
+# ==============================================================================
+[env.staging]
+name = "steward-staging"
+
+[env.staging.vars]
+ENVIRONMENT = "staging"
+DISPLAY_TIMEZONE = "America/Chicago"
+ACCESS_TEAM_DOMAIN = "texansdigital.cloudflareaccess.com"
+ACCESS_AUD = "FILL_IN_STAGING_ACCESS_AUD"
+
+[[env.staging.d1_databases]]
+binding = "DB"
+database_name = "steward-staging"
+database_id = "FILL_IN_STAGING_D1_ID"
+migrations_dir = "migrations"
+
+[[env.staging.r2_buckets]]
+binding = "FILES"
+bucket_name = "steward-staging-files"
+
+[[env.staging.kv_namespaces]]
+binding = "SESSIONS"
+id = "FILL_IN_STAGING_KV_ID"
+
+# ==============================================================================
 # PRODUCTION — deliberate, human-run deploy step only.
 #
 #   wrangler deploy --env production

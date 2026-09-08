@@ -611,11 +611,37 @@ export async function organizationHistoryForStaff(
     .first<Record<string, unknown>>();
   if (!organization) throw notFound('organization');
 
-  // The history itself is the ORGANIZATION's, not the reviewer's slice of it.
-  // A reviewer who is assigned one of this organization's applications is
-  // entitled to know it has applied four times before -- that is the point of
-  // the panel. What they do not get is the narrative of those other
-  // applications, so this returns counts, statuses and dates only.
+  /*
+   * The history is the ORGANIZATION's, but the DETAIL is the reviewer's slice
+   * of it.
+   *
+   * The first version of this returned every row in full to anyone who passed
+   * the gate above, and the docstring claimed it was "scoped the same way
+   * everything else is". It was not: a reviewer assigned one small application
+   * could read the project title and the exact ask of every other application
+   * that organization had ever filed, in every program, including programmes
+   * they have no role in. That is competitive information about another
+   * program's pipeline, and CLAUDE.md is explicit -- a reviewer sees
+   * applications "in cycles they are assigned to".
+   *
+   * The panel's PURPOSE survives, because the purpose is institutional memory:
+   * "this org has applied four times, was funded once, last applied in 2024" is
+   * exactly what a reviewer should have in front of them. Counts, statuses and
+   * dates are that. A title and an amount are not.
+   *
+   * So: rows inside the reviewer's own scope come back whole; rows outside it
+   * come back as a date, a status and a cycle name, with no id -- there is
+   * nothing to pivot on and nothing to read.
+   */
+  const scoped = await db
+    .prepare(
+      `SELECT a.id FROM applications a ${scope.join}
+        WHERE ${scope.where} AND a.organization_id = ? AND a.deleted_at IS NULL`,
+    )
+    .bind(...scope.binds, organizationId)
+    .all<{ id: string }>();
+  const inScope = new Set((scoped.results ?? []).map((r) => r.id));
+
   const { results: applications } = await db
     .prepare(
       `SELECT a.id, a.status, a.submitted_at, a.requested_amount_cents,
@@ -628,7 +654,19 @@ export async function organizationHistoryForStaff(
     .bind(organizationId)
     .all<Record<string, unknown>>();
 
-  const rows = applications ?? [];
+  const rows = (applications ?? []).map((row) => {
+    if (inScope.has(String(row.id))) return { ...row, in_scope: true };
+    // Deliberately constructed by naming what MAY be shown, rather than by
+    // deleting what may not. A column added to applications later cannot leak
+    // through this by default.
+    return {
+      status: row.status,
+      submitted_at: row.submitted_at,
+      cycle_name: row.cycle_name,
+      program_id: row.program_id,
+      in_scope: false,
+    };
+  });
   return {
     organization,
     applications: rows,

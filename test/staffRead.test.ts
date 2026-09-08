@@ -314,6 +314,80 @@ describe('applicant history', () => {
     const history = await organizationHistoryForStaff(db, reviewerSession(s.reviewer), s.orgA);
     expect(JSON.stringify(history)).not.toContain('INTERNAL');
   });
+
+  it('withholds TITLE and AMOUNT for applications outside the reviewer scope', async () => {
+    /*
+     * The leak this closes: a reviewer assigned one small application could
+     * read the project title and the exact ask of every other application that
+     * organization had ever filed, in every program. That is competitive
+     * information about another programme's pipeline, and CLAUDE.md says a
+     * reviewer sees applications "in cycles they are assigned to".
+     */
+    const s = await scene();
+
+    // A SECOND application for the same organization, which the reviewer is
+    // deliberately not assigned to.
+    const row = await db
+      .prepare(`SELECT stage_id, form_definition_id FROM applications WHERE id = ?`)
+      .bind(s.mine)
+      .first<{ stage_id: string; form_definition_id: string }>();
+    // In a DIFFERENT cycle: the per-cycle limit trigger correctly refuses a
+    // second live application in the same one, and a prior cycle is the real
+    // shape of this leak anyway.
+    const now = nowIso();
+    const priorCycle = newId();
+    await db
+      .prepare(
+        `INSERT INTO cycles (id, program_id, name, opens_at, closes_at, status, created_at, updated_at)
+         VALUES (?,?,?,?,?,'closed',?,?)`,
+      )
+      .bind(priorCycle, s.programId, 'FY2025 Rolling',
+            '2025-01-05T14:00:00.000Z', '2025-03-02T05:59:00.000Z', now, now)
+      .run();
+
+    const secret = newId();
+    await db
+      .prepare(
+        `INSERT INTO applications (id, cycle_id, stage_id, organization_id, form_definition_id,
+           status, project_title, requested_amount_cents, submitted_at, created_at, updated_at)
+         VALUES (?,?,?,?,?,'submitted',?,?,?,?,?)`,
+      )
+      .bind(secret, priorCycle, row!.stage_id, s.orgA, row!.form_definition_id,
+            'CONFIDENTIAL crisis line expansion', 400_000_00, now, now, now)
+      .run();
+
+    await assign(s.mine, s.reviewer);
+    const history = await organizationHistoryForStaff(db, reviewerSession(s.reviewer), s.orgA);
+    const rows = history.applications as Record<string, unknown>[];
+    expect(rows).toHaveLength(2);
+
+    // Their own assignment comes back whole.
+    const own = rows.find((r) => r.in_scope === true);
+    expect(own?.project_title).toBe('Reading support');
+
+    // Anything else is a date, a status and a cycle -- no title, no amount, and
+    // no id to pivot on.
+    const other = rows.find((r) => r.in_scope === false)!;
+    expect(other.project_title).toBeUndefined();
+    expect(other.requested_amount_cents).toBeUndefined();
+    expect(other.id).toBeUndefined();
+    expect(other.status).toBe('submitted');
+    expect(other.cycle_name).toBeTruthy();
+    expect(JSON.stringify(history)).not.toContain('CONFIDENTIAL');
+
+    // The COUNT still tells them the org has applied twice, which is the whole
+    // point of the panel.
+    expect((history.summary as Record<string, unknown>).total_applications).toBe(2);
+  });
+
+  it('an ADMIN still sees every row in full', async () => {
+    const s = await scene();
+    const history = await organizationHistoryForStaff(db, adminSession(), s.orgA);
+    for (const row of history.applications as Record<string, unknown>[]) {
+      expect(row.in_scope).toBe(true);
+      expect(row.project_title).toBeTruthy();
+    }
+  });
 });
 
 describe('soft-deleted work never resurfaces on a staff read', () => {

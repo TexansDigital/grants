@@ -317,3 +317,83 @@ Consequences, none of them due yet:
   public hostname with nothing behind it is a surface with no purpose.
 - CSP, cookies and CORS stay simple: same-origin on each hostname separately,
   and the two never need to talk to each other.
+
+## 16. Reviewers do not see internal notes or decision rationale
+
+Decided 2026-09-08, by the owner. CLAUDE.md forbids these in applicant and
+grantee payloads and is silent about reviewers; this settles it.
+
+`internal_notes` and `decision_notes` are ABSENT from every reviewer payload --
+the pipeline, the detail view and the history panel -- not hidden in the UI.
+Enforced by `REVIEWER_APPLICATION_COLUMNS` in scope.ts, an allowlist, so a
+migration that adds an internal column cannot start leaking it by default.
+
+The reasoning: staff commentary and prior decision rationale reaching a reviewer
+before they score anchors the score on someone else's opinion, which is exactly
+what a rubric exists to prevent. It matters most for the outside consultants
+CLAUDE.md anticipates, who should form a view from the application and the
+rubric, not from "the budget looks thin".
+
+The cost is real and accepted: a reviewer cannot see that staff have flagged an
+unresolved compliance issue. If that turns out to matter, the answer is a
+structured, reviewer-visible flag on the application -- not opening the free-text
+notes field.
+
+## 17. The applicant-history panel shows detail only inside the reviewer's scope
+
+Decided 2026-09-08, by the owner, after an adversarial review demonstrated the
+leak.
+
+`organizationHistoryForStaff` gated on "does this reviewer have any live
+assignment to this organization" and then returned every application that
+organization had ever filed, in full, across every program and cycle -- project
+title and exact requested amount included. A reviewer assigned one small
+application could read another programme's unfunded $400,000 ask by name. The
+docstring claimed it was "scoped the same way everything else is". It was not.
+
+Now: rows inside the reviewer's own scope come back whole; rows outside it come
+back as a status, a date and a cycle name, with no id and no title and no
+amount. The row is CONSTRUCTED by naming what may be shown rather than by
+deleting what may not, so a column added to `applications` later cannot leak
+through it by default. Admins are unaffected.
+
+The panel's purpose survives, because the purpose is institutional memory:
+"this organization has applied four times, was funded once, last applied in
+2024" is what a reviewer should have in front of them. A title and an amount
+are not that.
+
+## 18. Real past applications go to STAGING, never to preview
+
+Decided 2026-09-08, by the owner, when the sample data turned out to be real
+past applicants rather than invented fixtures.
+
+This is decision #12 becoming load-bearing. Preview is the database that
+`seed:preview` and `admin:apply` are pointed at with `--remote`; importing real
+EINs, real budgets and real narratives there would put third-party financial
+information in the environment destructive scripts routinely run against.
+
+`[env.staging]` now exists in wrangler.toml with placeholder ids that fail
+loudly. `scripts/checkConfig.ts` asserts staging never reuses a preview id --
+a copy-paste is exactly how the real data would end up in the wrong database,
+and the check is what keeps this decision true rather than aspirational.
+
+Nothing real is imported until the staging resources exist and the importer has
+been run against invented rows first.
+
+## 19. Declined applicants keep portal access
+
+Decided 2026-09-08, by the owner. Closes open decision #4.
+
+A declined organization keeps its login, can see its submitted application
+read-only, and reapplies next cycle with organization fields prefilled.
+`users.is_active` stays 1 after a decline; a decision is not a deactivation.
+
+Reduces applicant burden, which is the strongest signal in current grantmaking
+practice, and it is also the humane reading: an organization told no in March
+should not have to retype its EIN, address, mission and budget in September.
+
+Consequences for Phase 2a: the identity model has no "access ends at decision"
+state to build, and the prefill path must read the most recent submitted
+application for the organization regardless of its outcome. Reviewer scores,
+internal notes and decision rationale remain absent from everything a declined
+applicant can see -- non-negotiable #5 does not soften because the answer was no.

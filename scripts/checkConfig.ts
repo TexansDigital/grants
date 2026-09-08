@@ -171,6 +171,39 @@ function pairMustMatch(label: string, aKey: string, bKey: string): void {
   }
 }
 
+/*
+ * Staging must never collide with preview or production.
+ *
+ * A copy-pasted id here is how the friendly-organization test with REAL EINs
+ * ends up writing into the database that seed and admin scripts are pointed at
+ * with --remote. Decision #12 exists to keep those apart; this is the check
+ * that keeps the decision true.
+ */
+const stagingSection = (() => {
+  const start = lines.findIndex((l) => /^\s*\[env\.staging\]/.test(l));
+  if (start === -1) return '';
+  const rest = lines.slice(start + 1);
+  const end = rest.findIndex((l) => /^\s*\[env\.(?!staging)/.test(l));
+  return (end === -1 ? rest : rest.slice(0, end)).join('\n');
+})();
+
+if (stagingSection !== '') {
+  const previewIds = [
+    /^\s*database_id\s*=\s*"([^"]*)"/m.exec(defaults)?.[1],
+    /^\s*id\s*=\s*"([^"]*)"/m.exec(defaults)?.[1],
+    /^\s*bucket_name\s*=\s*"([^"]*)"/m.exec(defaults)?.[1],
+  ].filter((v): v is string => typeof v === 'string' && v !== '');
+
+  for (const value of [...stagingSection.matchAll(/=\s*"([^"]+)"/g)].map((m) => m[1]!)) {
+    if (previewIds.includes(value)) {
+      problems.push(
+        `staging reuses the preview resource "${value}". Real applicant data would ` +
+          `land in the database that seed:preview and admin:apply are run against.`,
+      );
+    }
+  }
+}
+
 pairMustMatch('D1', 'database_id', 'preview_database_id');
 pairMustMatch('R2', 'bucket_name', 'preview_bucket_name');
 pairMustMatch('KV', 'id', 'preview_id');
