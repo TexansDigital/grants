@@ -35,13 +35,32 @@ dashboard and choose Zero Trust in the sidebar. It asks you to pick a team name;
 whatever you type becomes the team domain. Choose the free plan -- staff fit well
 inside the 50-seat limit, and applicants never touch Access.
 
+## 0b. Deploy the Worker first
+
+Access points at a destination that must already exist. Create the Access
+application AFTER the Worker is deployed, not before.
+
+    npm run deploy:preview
+
+Deploying before Access is in front of it is safe by design: `/health` returns a
+status and nothing else, and every `/api/*` route returns 401 because the Access
+variables below are empty and the code fails closed.
+
+If the deploy uploads the Worker but then fails on
+`/workers/scripts/steward/subdomain` with "This Worker does not exist on your
+account", either retry (there is a propagation race on a script's first upload)
+or check that the account has a workers.dev subdomain at all -- every Cloudflare
+account chooses one once, under Workers & Pages, and a Worker cannot get a
+hostname until it exists.
+
 ## 1. Create the Access application
 
 Zero Trust → Access → Applications → Add an application → Self-hosted.
 
-- **Application domain:** the hostname the Worker serves on. Before a custom
-  domain exists, use the `workers.dev` hostname, or a placeholder you correct
-  later.
+- **Application type:** "Self-hosted and private", then the **Workers**
+  sub-tab. Access protects a Worker directly, so no custom domain is needed to
+  get started -- the destination is the `workers.dev` hostname. "Public DNS"
+  is the wrong tab here: it wants a hostname in a zone on your account.
 - **Session duration:** see the note on identity providers below. 30 days is
   the right answer if you are using One-time PIN.
 - **Policy:** Allow → Emails, listing the people who will hold admin accounts.
