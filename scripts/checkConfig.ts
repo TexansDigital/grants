@@ -41,6 +41,22 @@ function requireTopLevel(key: string, expected: string): void {
 requireTopLevel('workers_dev', 'true');
 requireTopLevel('preview_urls', 'false');
 
+// Access configuration. Empty is allowed -- that is the fail-closed state
+// before Access is set up -- but a MALFORMED value is not, because it would
+// make every staff login fail with an error pointing at the token instead of
+// at the config.
+const team = /ACCESS_TEAM_DOMAIN = "([^"]*)"/.exec(src)?.[1] ?? '';
+const aud = /ACCESS_AUD = "([^"]*)"/.exec(src)?.[1] ?? '';
+if (team !== '' && !/^[a-z0-9-]+\.cloudflareaccess\.com$/.test(team)) {
+  problems.push(`ACCESS_TEAM_DOMAIN "${team}" is not a <team>.cloudflareaccess.com hostname`);
+}
+if (aud !== '' && !/^[0-9a-f]{64}$/.test(aud)) {
+  problems.push(`ACCESS_AUD is not 64 lowercase hex characters (got ${aud.length})`);
+}
+if ((team === '') !== (aud === '')) {
+  problems.push('ACCESS_TEAM_DOMAIN and ACCESS_AUD must both be set or both be empty');
+}
+
 // NON-NEGOTIABLE: the default bindings must never point at production.
 const prodPlaceholders = (src.match(/FILL_IN_AT_DEPLOY_TIME_DO_NOT_COMMIT/g) ?? []).length;
 if (prodPlaceholders < 3) {
