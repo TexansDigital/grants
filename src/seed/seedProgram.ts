@@ -14,7 +14,7 @@ import type { ProgramSpec, FieldSpec } from './types';
 import { newId } from '../lib/ids';
 import { nowIso } from '../lib/time';
 import { auditStatement } from '../lib/audit';
-import { assertUniversalCoverage, assertNoDuplicateTargets } from '../lib/mapsTo';
+import { assertUniversalCoverage, assertNoDuplicateTargets, DEFAULT_REQUIRED_MAPS_TO } from '../lib/mapsTo';
 import { loadFormDefinition, assertPublishable, allFields } from '../lib/forms';
 import type { FieldDef } from '../lib/fieldTypes';
 
@@ -76,8 +76,9 @@ export async function seedProgram(
       .prepare(
         `INSERT INTO programs (
            id, name, slug, description, status, fiscal_year, total_budget_cents,
-           compliance_policy, guidelines_version, created_at, updated_at
-         ) VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+           compliance_policy, guidelines_version, required_maps_to_json,
+           max_applications_per_cycle, created_at, updated_at
+         ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       )
       .bind(
         programId,
@@ -89,6 +90,8 @@ export async function seedProgram(
         spec.totalBudgetCents,
         spec.compliancePolicy,
         spec.guidelinesVersion,
+        JSON.stringify(spec.requiredMapsTo ?? DEFAULT_REQUIRED_MAPS_TO),
+        spec.maxApplicationsPerCycle === undefined ? 1 : spec.maxApplicationsPerCycle,
         now,
         now,
       ),
@@ -123,6 +126,17 @@ export async function seedProgram(
           now,
           now,
         ),
+      auditStatement(db, ctx, {
+        action: 'program_stage.created',
+        entityType: 'program_stage',
+        entityId: stageId,
+        after: {
+          program_id: programId,
+          stage_key: stage.key,
+          name: stage.name,
+          gate_on_prior_decision: stage.gateOnPriorDecision ? 1 : 0,
+        },
+      }),
     );
 
     const formDefinitionId = newId();
@@ -132,11 +146,13 @@ export async function seedProgram(
       db
         .prepare(
           `INSERT INTO form_definitions (
-             id, program_id, stage_id, kind, name, version, status,
+             id, program_id, form_key, stage_id, kind, name, version, status,
              created_at, updated_at
-           ) VALUES (?,?,?,?,?,?,?,?,?)`,
+           ) VALUES (?,?,?,?,?,?,?,?,?,?)`,
         )
-        .bind(formDefinitionId, programId, stageId, 'application', stage.form.name, 1, 'draft', now, now),
+        // form_key identifies the form within the program independently of
+        // stage, so a program can later carry interim AND final report forms.
+        .bind(formDefinitionId, programId, stage.key, stageId, 'application', stage.form.name, 1, 'draft', now, now),
       auditStatement(db, ctx, {
         action: 'form_definition.created',
         entityType: 'form_definition',
@@ -174,6 +190,12 @@ export async function seedProgram(
             sectionIndex,
             now,
           ),
+        auditStatement(db, ctx, {
+          action: 'form_section.created',
+          entityType: 'form_definition',
+          entityId: formDefinitionId,
+          after: { section_id: sectionId, section_key: section.key, title: section.title },
+        }),
       );
 
       for (const [fieldIndex, field] of section.fields.entries()) {
@@ -221,6 +243,20 @@ export async function seedProgram(
               null,
               now,
             ),
+          // A field row decides which question becomes requested_amount_cents.
+          // That is a configuration change worth an audit row.
+          auditStatement(db, ctx, {
+            action: 'form_field.created',
+            entityType: 'form_definition',
+            entityId: formDefinitionId,
+            after: {
+              field_id: fieldId,
+              field_key: field.key,
+              field_type: field.type,
+              is_required: field.required ? 1 : 0,
+              maps_to: field.mapsTo ?? null,
+            },
+          }),
         );
       }
     }
@@ -228,7 +264,7 @@ export async function seedProgram(
     // Pre-flight the configuration BEFORE writing. A program that cannot be
     // published is a program an admin has to debug at 11pm on launch day.
     assertNoDuplicateTargets(preflightFields);
-    assertUniversalCoverage(preflightFields);
+    assertUniversalCoverage(preflightFields, spec.requiredMapsTo ?? DEFAULT_REQUIRED_MAPS_TO);
   }
 
   // ---- cycles ---------------------------------------------------------------
@@ -300,7 +336,22 @@ export async function publishFormDefinition(
   const fields = allFields(definition);
   assertNoDuplicateTargets(fields);
   if (definition.kind === 'application') {
-    assertUniversalCoverage(fields);
+    // The required set is the PROGRAM's, not a global constant.
+    const program = await db
+      .prepare(`SELECT required_maps_to_json AS req FROM programs WHERE id = ?`)
+      .bind(definition.program_id)
+      .first<{ req: string }>();
+    let required: string[] = [...DEFAULT_REQUIRED_MAPS_TO];
+    if (program?.req) {
+      try {
+        const parsed = JSON.parse(program.req);
+        if (Array.isArray(parsed)) required = parsed.map(String);
+      } catch {
+        // Malformed configuration falls back to the safe default rather than
+        // publishing a form that collects nothing.
+      }
+    }
+    assertUniversalCoverage(fields, required);
   }
 
   const now = nowIso();

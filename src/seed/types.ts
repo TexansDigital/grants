@@ -60,6 +60,17 @@ export interface ProgramSpec {
   totalBudgetCents: number;
   compliancePolicy: 'block' | 'warn' | 'ignore';
   guidelinesVersion: string;
+  /**
+   * Promotion targets a form in this program must collect before it can be
+   * published. Omit for the organization-grant default. A scholarship or an
+   * individual award sets its own, shorter list -- it has no EIN to collect.
+   */
+  requiredMapsTo?: MapsToTarget[];
+  /**
+   * Live applications one organization may hold per cycle per stage.
+   * 1 is the common case; null means unlimited.
+   */
+  maxApplicationsPerCycle?: number | null;
   stages: StageSpec[];
   cycles: CycleSpec[];
 }

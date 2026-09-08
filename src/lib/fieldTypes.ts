@@ -333,7 +333,22 @@ export function coerceAnswer(field: FieldDef, raw: unknown): CoerceResult {
         if (!attachmentId || !filename) {
           return { ok: false, message: `${label} could not be read. Try uploading again.` };
         }
-        refs.push({ attachment_id: attachmentId, filename });
+        // The client controls this payload entirely, so neither value is
+        // trusted here. The id is only accepted as a reference to be resolved
+        // against attachments the session's organization owns (see
+        // resolveAttachments in submit.ts); the display name is sanitized so it
+        // cannot carry markup or a traversal sequence into the staff review UI.
+        if (!/^[0-9a-zA-Z_-]{1,64}$/.test(attachmentId)) {
+          return { ok: false, message: `${label} could not be read. Try uploading again.` };
+        }
+        const safeName = filename
+          .replace(/[\\/\u0000-\u001f\u007f\u202a-\u202e<>"'`]/g, '')
+          .trim()
+          .slice(0, 200);
+        if (safeName === '') {
+          return { ok: false, message: `${label} has an unsupported file name.` };
+        }
+        refs.push({ attachment_id: attachmentId, filename: safeName });
       }
       return {
         ok: true,

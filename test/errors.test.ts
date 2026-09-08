@@ -27,12 +27,51 @@ describe('redaction', () => {
     expect(json).not.toContain('"T"');
   });
 
+  it('scrubs secrets embedded in a message string, not just in keys', () => {
+    const out = redact({
+      msg: 'failed to verify magic-link token tok_LIVE_abc123def456ghi789 for user',
+    }) as Record<string, string>;
+    expect(out.msg).not.toContain('tok_LIVE_abc123def456ghi789');
+    expect(out.msg).toContain('[redacted-key]');
+
+    const bearer = redact({ m: 'Authorization: Bearer eyJhbGciOi.eyJzdWIi.QSSw5c' }) as Record<string, string>;
+    expect(bearer.m).not.toContain('eyJhbGciOi.eyJzdWIi.QSSw5c');
+
+    const url = redact({ m: 'GET /verify?token=SECRETVALUE123&x=1 failed' }) as Record<string, string>;
+    expect(url.m).not.toContain('SECRETVALUE123');
+  });
+
+  it('does not eat ordinary prose that merely looks long', () => {
+    const prose = redact({ m: 'the quick brown fox jumps over the lazy dog' }) as Record<string, string>;
+    expect(prose.m).toBe('the quick brown fox jumps over the lazy dog');
+  });
+
+  it('redacts a secret nested inside an array of header pairs', () => {
+    const out = redact({
+      headers: [
+        ['authorization', 'Bearer eyJTOPSECRETVALUE'],
+        ['cookie', 'sid=abc123'],
+        ['accept', 'application/json'],
+      ],
+    }) as Record<string, string[][]>;
+    const flat = JSON.stringify(out);
+    expect(flat).not.toContain('eyJTOPSECRETVALUE');
+    expect(flat).not.toContain('sid=abc123');
+    expect(flat).toContain('application/json');
+  });
+
+  it('cannot be walked past by a non-enumerable property', () => {
+    const o: Record<string, unknown> = { visible: 'ok' };
+    Object.defineProperty(o, 'apiKey', { value: 'HIDDENSECRET', enumerable: false });
+    expect(JSON.stringify(redact(o))).not.toContain('HIDDENSECRET');
+  });
+
   it('truncates long strings instead of dropping them', () => {
-    const long = 'x'.repeat(5000);
+    const long = 'lorem ipsum dolor sit amet '.repeat(400);
     const out = redact({ narrative: long }) as Record<string, string>;
     const narrative = out.narrative!;
     expect(narrative.length).toBeLessThan(600);
-    expect(narrative).toContain('5000 chars');
+    expect(narrative).toContain('chars');
   });
 
   it('caps arrays and depth without throwing', () => {

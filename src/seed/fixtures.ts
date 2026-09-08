@@ -146,6 +146,20 @@ export async function seedOrganization(
       entityId: organizationId,
       after: { legal_name: fixture.legalName, ein: fixture.ein, source: 'fixture' },
     }),
+    auditStatement(db, ctx, {
+      action: 'contact.created',
+      entityType: 'contact',
+      entityId: contactId,
+      after: { organization_id: organizationId, is_primary: 1, source: 'fixture' },
+    }),
+    // Creating a login-capable account is an access-control event and gets its
+    // own row. It was previously folded into organization.created.
+    auditStatement(db, ctx, {
+      action: 'user.created',
+      entityType: 'user',
+      entityId: userId,
+      after: { organization_id: organizationId, role: 'applicant', source: 'fixture' },
+    }),
   ]);
 
   return { organizationId, contactId, userId };

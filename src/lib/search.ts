@@ -6,6 +6,9 @@
  * See the design note in migration 0005 for why.
  */
 
+import type { Session } from '../types';
+import { isStaffRole } from './scope';
+import { notFound } from './errors';
 import type { FormDefinition } from './forms';
 import { allFields } from './forms';
 import type { StoredValue } from './fieldTypes';
@@ -127,16 +130,22 @@ export function reindexStatements(
   db: D1Database,
   doc: SearchSource,
   indexedAt: string,
+  /** Same predicate as the mutation this accompanies; see submit.ts. */
+  guard?: { sql: string; binds: unknown[] },
 ): D1PreparedStatement[] {
   const hash = contentHash(doc);
+  const where = guard ? guard.sql : '1=1';
+  const gb = guard?.binds ?? [];
   return [
-    db.prepare(`DELETE FROM application_fts WHERE application_id = ?`).bind(doc.applicationId),
+    db
+      .prepare(`DELETE FROM application_fts WHERE application_id = ? AND ${where}`)
+      .bind(doc.applicationId, ...gb),
     db
       .prepare(
         `INSERT INTO application_fts (
            application_id, organization_name, ein, project_title,
            counties, focus_area, narrative
-         ) VALUES (?,?,?,?,?,?,?)`,
+         ) SELECT ?,?,?,?,?,?,? WHERE ${where}`,
       )
       .bind(
         doc.applicationId,
@@ -146,15 +155,16 @@ export function reindexStatements(
         doc.counties,
         doc.focusArea,
         doc.narrative,
+        ...gb,
       ),
     db
       .prepare(
         `INSERT INTO application_search_state (application_id, indexed_at, content_hash)
-         VALUES (?,?,?)
+         SELECT ?,?,? WHERE ${where}
          ON CONFLICT(application_id) DO UPDATE SET indexed_at = excluded.indexed_at,
                                                    content_hash = excluded.content_hash`,
       )
-      .bind(doc.applicationId, indexedAt, hash),
+      .bind(doc.applicationId, indexedAt, hash, ...gb),
   ];
 }
 
@@ -176,7 +186,10 @@ export function unindexStatements(db: D1Database, applicationId: string): D1Prep
  */
 export function toFtsQuery(userInput: string): string | null {
   const terms = userInput
-    .replace(/"/g, ' ')
+    // Strip quotes AND control characters. FTS5 parses its query as a C string,
+    // so an embedded NUL truncates the query mid-quote and raises
+    // "unterminated string" -- a guaranteed 500 from a search box.
+    .replace(/["\u0000-\u001f\u007f]/g, ' ')
     .split(/\s+/)
     .map((t) => t.trim())
     .filter((t) => t.length > 0 && t.length <= 64)
@@ -193,25 +206,38 @@ export interface SearchHit {
 }
 
 /**
- * Search submitted applications. STAFF ONLY - this returns cross-organization
- * results by design and must never be reachable from an external session.
+ * Search submitted applications.
+ *
+ * STAFF ONLY, and enforced rather than documented. This returns
+ * cross-organization results from an index containing every organization's EIN
+ * and narrative, so the session is a required first argument exactly like every
+ * other read helper in this codebase. A docstring is not an access control.
  */
 export async function searchApplications(
   db: D1Database,
+  session: Session,
   userInput: string,
   limit = 50,
 ): Promise<SearchHit[]> {
+  if (!isStaffRole(session)) throw notFound('search');
+
   const query = toFtsQuery(userInput);
   if (!query) return [];
 
+  // Joined to applications so soft-deleted and withdrawn work cannot surface.
+  // The FTS table has no lifecycle of its own; relying on remembering to call
+  // unindexStatements everywhere is how a withdrawn application stays findable.
   const { results } = await db
     .prepare(
-      `SELECT application_id,
-              rank AS rank,
+      `SELECT f.application_id AS application_id,
+              f.rank AS rank,
               snippet(application_fts, 6, '[', ']', '...', 20) AS snippet
-         FROM application_fts
+         FROM application_fts f
+         JOIN applications a ON a.id = f.application_id
         WHERE application_fts MATCH ?
-        ORDER BY rank
+          AND a.deleted_at IS NULL
+          AND a.status <> 'withdrawn'
+        ORDER BY f.rank
         LIMIT ?`,
     )
     .bind(query, Math.min(Math.max(limit, 1), 200))

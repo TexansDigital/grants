@@ -9,8 +9,17 @@ import { newId } from '../src/lib/ids';
 import { nowIso } from '../src/lib/time';
 import type { Session } from '../src/types';
 
-/** A complete, valid Inspire Change submission. */
-function fullPayload(over: Record<string, unknown> = {}): Record<string, unknown> {
+/**
+ * A complete, valid Inspire Change submission.
+ *
+ * `atts` are REAL attachment ids owned by the submitting organization. The
+ * submit path resolves every claimed attachment against attachments that org
+ * owns, so invented ids are rejected -- which is the point.
+ */
+function fullPayload(
+  atts: { budget: string; fin: string; op: string },
+  over: Record<string, unknown> = {},
+): Record<string, unknown> {
   return {
     entity_type_confirmation: true,
     guidelines_attestation: true,
@@ -43,9 +52,9 @@ function fullPayload(over: Record<string, unknown> = {}): Record<string, unknown
     leadership_lived_experience: 'Our board includes parents and alumni of the program.',
     partial_funding_plan: 'We would reduce the number of sites from four to two.',
     volunteer_engagement: 'Reading buddy sessions and a back-to-school supply drive.',
-    itemized_budget: [{ attachment_id: 'att-budget', filename: 'budget.pdf' }],
-    financial_statements: [{ attachment_id: 'att-fin', filename: 'audit-2025.pdf' }],
-    operating_budget_doc: [{ attachment_id: 'att-op', filename: 'operating.xlsx' }],
+    itemized_budget: [{ attachment_id: atts.budget, filename: 'budget.pdf' }],
+    financial_statements: [{ attachment_id: atts.fin, filename: 'audit-2025.pdf' }],
+    operating_budget_doc: [{ attachment_id: atts.op, filename: 'operating.xlsx' }],
     marketing_opt_in: true,
     ...over,
   };
@@ -77,14 +86,28 @@ async function setup(cycleOverride: { opensAt?: string; closesAt?: string } = {}
     .bind(applicationId, cycleId, program.stageIds.application!, org.organizationId, program.formDefinitionIds.application!, now, now)
     .run();
 
+  // Uploads that genuinely belong to this organization.
+  const atts = { budget: newId(), fin: newId(), op: newId() };
+  for (const [key, id] of Object.entries(atts)) {
+    await db
+      .prepare(
+        `INSERT INTO attachments (id, parent_type, parent_id, organization_id, r2_key,
+             filename, mime_type, size_bytes, uploaded_at)
+         VALUES (?,?,?,?,?,?,?,?,?)`,
+      )
+      .bind(id, 'application', null, org.organizationId, `r2/${id}`, `${key}.pdf`,
+            'application/pdf', 1024, now)
+      .run();
+  }
+
   const session: Session = applicantSession(org.organizationId, org.userId);
-  return { program, org, cycleId, applicationId, session, ctx: ctxFor(session) };
+  return { program, org, cycleId, applicationId, atts, session, ctx: ctxFor(session) };
 }
 
 describe('submit', () => {
   it('writes the application, answers, promotion, search index, and audit row', async () => {
     const s = await setup();
-    const result = await submitApplication(db, s.ctx, s.session, s.applicationId, fullPayload(), {
+    const result = await submitApplication(db, s.ctx, s.session, s.applicationId, fullPayload(s.atts), {
       guidelinesVersion: '2026.1',
     });
     expect(result.applicationId).toBe(s.applicationId);
@@ -129,7 +152,7 @@ describe('submit', () => {
 
   it('stores currency in value_int and never in value_real', async () => {
     const s = await setup();
-    await submitApplication(db, s.ctx, s.session, s.applicationId, fullPayload());
+    await submitApplication(db, s.ctx, s.session, s.applicationId, fullPayload(s.atts));
     const rows = await db
       .prepare(
         `SELECT field_key, field_type, value_int, value_real, typeof(value_int) AS t
@@ -148,16 +171,16 @@ describe('submit', () => {
 
   it('indexes the application for full-text search', async () => {
     const s = await setup();
-    await submitApplication(db, s.ctx, s.session, s.applicationId, fullPayload());
+    await submitApplication(db, s.ctx, s.session, s.applicationId, fullPayload(s.atts));
 
     // The motivating query: "have we ever funded youth mental health".
-    const hits = await searchApplications(db, 'youth mental health');
+    const hits = await searchApplications(db, adminSession(), 'youth mental health');
     expect(hits.map((h) => h.application_id)).toContain(s.applicationId);
 
-    const byCounty = await searchApplications(db, 'fort_bend');
+    const byCounty = await searchApplications(db, adminSession(), 'fort_bend');
     expect(byCounty.map((h) => h.application_id)).toContain(s.applicationId);
 
-    const miss = await searchApplications(db, 'zzzznotpresent');
+    const miss = await searchApplications(db, adminSession(), 'zzzznotpresent');
     expect(miss).toEqual([]);
   });
 
@@ -182,9 +205,9 @@ describe('submit', () => {
 
   it('refuses a second submit', async () => {
     const s = await setup();
-    await submitApplication(db, s.ctx, s.session, s.applicationId, fullPayload());
+    await submitApplication(db, s.ctx, s.session, s.applicationId, fullPayload(s.atts));
     await expect(
-      submitApplication(db, s.ctx, s.session, s.applicationId, fullPayload()),
+      submitApplication(db, s.ctx, s.session, s.applicationId, fullPayload(s.atts)),
     ).rejects.toMatchObject({ code: 'CONFLICT' });
   });
 
@@ -193,14 +216,14 @@ describe('submit', () => {
     const other = await seedOrganization(db, ctxFor(adminSession()), ORG_FIXTURES[1]!);
     const otherSession = applicantSession(other.organizationId, other.userId);
     await expect(
-      submitApplication(db, ctxFor(otherSession), otherSession, s.applicationId, fullPayload()),
+      submitApplication(db, ctxFor(otherSession), otherSession, s.applicationId, fullPayload(s.atts)),
     ).rejects.toMatchObject({ code: 'NOT_FOUND', httpStatus: 404 });
   });
 
   it('refuses a submit after the cycle closes', async () => {
     const s = await setup({ closesAt: '2020-06-01T00:00:00.000Z' });
     await expect(
-      submitApplication(db, s.ctx, s.session, s.applicationId, fullPayload()),
+      submitApplication(db, s.ctx, s.session, s.applicationId, fullPayload(s.atts)),
     ).rejects.toMatchObject({ code: 'CYCLE_CLOSED' });
 
     // And the draft survives: a closed cycle must never destroy work.
@@ -239,7 +262,7 @@ describe('autosave', () => {
     await saveDraft(db, s.ctx, s.session, s.applicationId, {
       project_summary: 'A distinctive draft phrase quixotic',
     });
-    const hits = await searchApplications(db, 'quixotic');
+    const hits = await searchApplications(db, adminSession(), 'quixotic');
     expect(hits).toEqual([]);
   });
 
@@ -281,7 +304,7 @@ describe('autosave', () => {
 
   it('refuses to autosave over a submitted application', async () => {
     const s = await setup();
-    await submitApplication(db, s.ctx, s.session, s.applicationId, fullPayload());
+    await submitApplication(db, s.ctx, s.session, s.applicationId, fullPayload(s.atts));
     await expect(
       saveDraft(db, s.ctx, s.session, s.applicationId, { project_title: 'Sneaky edit' }),
     ).rejects.toMatchObject({ code: 'CONFLICT' });
@@ -298,7 +321,7 @@ describe('FTS query escaping', () => {
 
   it('does not throw on hostile input', async () => {
     for (const q of ['*', '""', 'a OR (b', 'x" OR "1"="1']) {
-      await expect(searchApplications(db, q)).resolves.toBeInstanceOf(Array);
+      await expect(searchApplications(db, adminSession(), q)).resolves.toBeInstanceOf(Array);
     }
   });
 });

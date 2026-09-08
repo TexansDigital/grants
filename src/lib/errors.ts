@@ -119,9 +119,42 @@ export function validationFailed(fieldErrors: FieldError[]): AppError {
  * `resendApiKey`, `X-Api-Key` and `session_token` are all caught.
  */
 const REDACT_KEY_PATTERN =
-  /(secret|token|password|passwd|api[-_]?key|apikey|authorization|auth[-_]?header|cookie|session|signature|signing|credential|private[-_]?key|access[-_]?key)/i;
+  /(secret|token|password|passwd|pwd|api[-_]?key|apikey|authorization|auth[-_]?header|bearer|jwt|cookie|session|signature|signing|credential|private[-_]?key|access[-_]?key|magic[-_]?link|otp|salt|ssn|ein|account[-_]?number)/i;
+
+/**
+ * VALUE-level scrubbing.
+ *
+ * Key-based redaction cannot help a secret that is interpolated into a message
+ * string, and every AppError internal message in this codebase is a template
+ * literal built by its caller. A magic-link token inside an error message would
+ * otherwise land verbatim in error_log, which is append-only and has no
+ * supported delete path.
+ */
+const SECRET_VALUE_PATTERNS: [RegExp, string][] = [
+  [/\bBearer\s+[A-Za-z0-9._~+/=-]{8,}/gi, 'Bearer [redacted]'],
+  // JWT: three base64url segments.
+  [/\beyJ[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}\b/g, '[redacted-jwt]'],
+  // Vendor-prefixed keys: Resend (re_), Stripe-style (sk_/rk_/pk_), generic tok_.
+  [/\b(?:re|sk|rk|pk|tok|key|secret)_[A-Za-z0-9_-]{6,}\b/gi, '[redacted-key]'],
+  // Token-bearing query parameters.
+  [/([?&](?:token|t|code|key|sig|signature|access_token)=)[^&\s]+/gi, '$1[redacted]'],
+  // Long unbroken base64/hex runs: almost never prose, often a credential.
+  [/\b[A-Fa-f0-9]{32,}\b/g, '[redacted-hex]'],
+  [
+    /\b(?=[A-Za-z0-9+/]*[0-9])(?=[A-Za-z0-9+/]*[A-Za-z])[A-Za-z0-9+/]{40,}={0,2}\b/g,
+    '[redacted-b64]',
+  ],
+];
+
+export function scrubSecrets(input: string): string {
+  let out = input;
+  for (const [re, replacement] of SECRET_VALUE_PATTERNS) out = out.replace(re, replacement);
+  return out;
+}
 
 const MAX_STRING_LENGTH = 512;
+/** Stacks need room; truncating them at 512 destroyed the reason to keep them. */
+const MAX_STACK_LENGTH = 8_000;
 const MAX_DEPTH = 6;
 const MAX_ARRAY_ITEMS = 25;
 const MAX_CONTEXT_BYTES = 8_000;
@@ -140,7 +173,7 @@ export function redact(value: unknown, depth = 0): unknown {
 
   const t = typeof value;
   if (t === 'string') {
-    const s = value as string;
+    const s = scrubSecrets(value as string);
     return s.length > MAX_STRING_LENGTH
       ? `${s.slice(0, MAX_STRING_LENGTH)}…[${s.length} chars]`
       : s;
@@ -155,14 +188,34 @@ export function redact(value: unknown, depth = 0): unknown {
   if (value instanceof Date) return value.toISOString();
 
   if (Array.isArray(value)) {
-    const items = value.slice(0, MAX_ARRAY_ITEMS).map((v) => redact(v, depth + 1));
+    const items = value.slice(0, MAX_ARRAY_ITEMS).map((v) => {
+      // A 2-tuple of strings is almost always an entry pair -- [...headers] is
+      // exactly this shape, and is the single most likely thing a future
+      // handler logs. Array elements have no keys, so without this the
+      // key-based redaction above never sees "authorization".
+      if (Array.isArray(v) && v.length === 2 && typeof v[0] === 'string') {
+        return [v[0], REDACT_KEY_PATTERN.test(v[0]) ? REDACTED : redact(v[1], depth + 1)];
+      }
+      return redact(v, depth + 1);
+    });
     if (value.length > MAX_ARRAY_ITEMS) items.push(`[+${value.length - MAX_ARRAY_ITEMS} more]`);
     return items;
   }
 
   if (t === 'object') {
     const out: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+    // Own properties only, INCLUDING non-enumerable ones: a non-enumerable
+    // secret is still a secret, and JSON.stringify's toJSON hook is ignored
+    // here so an object cannot present one shape to us and another to the
+    // serializer.
+    for (const k of Object.getOwnPropertyNames(value as object)) {
+      if (k === 'toJSON') continue;
+      let v: unknown;
+      try {
+        v = (value as Record<string, unknown>)[k];
+      } catch {
+        v = '[getter threw]';
+      }
       out[k] = REDACT_KEY_PATTERN.test(k) ? REDACTED : redact(v, depth + 1);
     }
     return out;
@@ -224,11 +277,12 @@ export async function logError(
         ctx?.requestId ?? null,
         input.severity,
         input.code,
-        // The internal message is itself redacted: a SQL error can echo a bound
-        // value, and a bound value can be somebody's financial data.
-        String(redact(input.message)),
+        // The internal message is scrubbed at VALUE level, not just by key: a
+        // SQL error can echo a bound value, and callers interpolate ids and
+        // tokens into these strings.
+        scrubSecrets(input.message).slice(0, MAX_CONTEXT_BYTES),
         serializeContext(input.context ?? {}),
-        input.stack ? String(redact(input.stack)) : null,
+        input.stack ? scrubSecrets(input.stack).slice(0, MAX_STACK_LENGTH) : null,
         ctx?.session?.userId ?? null,
         ctx?.session?.role ?? null,
         ctx?.session?.organizationId ?? null,
@@ -303,6 +357,9 @@ export async function toErrorResponse(
       'content-type': 'application/json; charset=utf-8',
       'x-request-id': ctx.requestId,
       'cache-control': 'no-store',
+      'x-content-type-options': 'nosniff',
+      'referrer-policy': 'strict-origin-when-cross-origin',
+      'x-frame-options': 'DENY',
     },
   });
 }

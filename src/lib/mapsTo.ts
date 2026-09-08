@@ -36,11 +36,17 @@ export const MAPS_TO_TARGETS = [
 export type MapsToTarget = (typeof MAPS_TO_TARGETS)[number];
 
 /**
- * Every program's application form MUST map this set. It is the minimum needed
- * for cross-program reporting, duplicate detection, and contacting an applicant.
- * A form definition that does not cover it cannot be published.
+ * The DEFAULT required set for an organization-based grant program: the minimum
+ * needed for cross-program reporting, duplicate detection, and contacting an
+ * applicant.
+ *
+ * It is a default, not a law. `programs.required_maps_to_json` overrides it per
+ * program, because not every program has an applicant organization -- a
+ * scholarship or an individual coaches' grant legitimately has no EIN and no
+ * organization legal name to collect, and hardcoding this list made such a
+ * program impossible to publish at all.
  */
-export const UNIVERSAL_MAPS_TO: MapsToTarget[] = [
+export const DEFAULT_REQUIRED_MAPS_TO: MapsToTarget[] = [
   'organization_name',
   'ein',
   'requested_amount_cents',
@@ -150,9 +156,12 @@ export function promote(
  * Called at publish time, not at submit time — the failure belongs to the admin
  * configuring the program, not to the applicant filling it in.
  */
-export function assertUniversalCoverage(fields: readonly FieldDef[]): void {
+export function assertUniversalCoverage(
+  fields: readonly FieldDef[],
+  required: readonly string[] = DEFAULT_REQUIRED_MAPS_TO,
+): void {
   const mapped = new Set(fields.map((f) => f.maps_to).filter(Boolean) as string[]);
-  const missing = UNIVERSAL_MAPS_TO.filter((t) => !mapped.has(t));
+  const missing = required.filter((t) => !mapped.has(t));
   if (missing.length > 0) {
     throw new AppError(
       'VALIDATION_FAILED',

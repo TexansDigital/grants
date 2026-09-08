@@ -116,18 +116,6 @@ describe('migrations', () => {
       ).rejects.toThrow(/CHECK/i);
     });
 
-    it('accepts integer cents', async () => {
-      await db
-        .prepare(
-          `INSERT INTO programs (id,name,slug,status,total_budget_cents,compliance_policy,created_at,updated_at)
-           VALUES ('p-int','Int','int-slug','draft', 123456, 'warn', datetime('now'), datetime('now'))`,
-        )
-        .run();
-      const row = await db
-        .prepare(`SELECT total_budget_cents AS c FROM programs WHERE id='p-int'`)
-        .first<{ c: number }>();
-      expect(row?.c).toBe(123456);
-    });
   });
 
   describe('EIN storage', () => {

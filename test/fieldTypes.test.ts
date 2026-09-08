@@ -26,17 +26,49 @@ const ALL_TYPES: FieldType[] = [
 ];
 
 describe('field type registry', () => {
-  it('handles every one of the fourteen required types', () => {
-    expect(ALL_TYPES).toHaveLength(14);
+  it('degrades gracefully on blank for every type', () => {
+    // NOTE: this asserts ONLY the blank path. coerceAnswer returns before the
+    // type switch on blank input, so this proves nothing about any individual
+    // type -- the per-type round-trip tests below are what actually cover them.
     for (const t of ALL_TYPES) {
-      const f = field({
-        field_type: t,
-        options: [{ value: 'a', label: 'A' }],
-      });
-      // Blank is the normal state on most fields and must degrade gracefully.
+      const f = field({ field_type: t, options: [{ value: 'a', label: 'A' }] });
       const blank = coerceAnswer(f, '');
       expect(blank.ok, `${t} should accept blank`).toBe(true);
       if (blank.ok) expect(blank.empty).toBe(true);
+    }
+  });
+
+  it('gives every type a real round trip, so a missing implementation fails', () => {
+    const samples: Record<FieldType, unknown> = {
+      short_text: 'hello',
+      long_text: 'a longer answer',
+      email: 'a@example.org',
+      phone: '7135550123',
+      select: 'a',
+      multi_select: ['a'],
+      checkbox_attestation: true,
+      currency: '$1,234.56',
+      integer: '42',
+      url: 'example.org',
+      address_block: { address_1: '1 Main', city: 'Houston', state: 'TX', postal_code: '77002' },
+      file_upload: [{ attachment_id: 'att1', filename: 'f.pdf' }],
+      consent_checkbox: true,
+      other_specify: 'something else',
+    };
+    // Guards against a type being dropped from the union or the sample map.
+    expect(Object.keys(samples).sort()).toEqual([...ALL_TYPES].sort());
+
+    for (const t of ALL_TYPES) {
+      const f = field({ field_type: t, options: [{ value: 'a', label: 'A' }] });
+      const r = coerceAnswer(f, samples[t]);
+      expect(r.ok, `${t} failed to coerce a valid sample`).toBe(true);
+      if (r.ok) {
+        expect(r.empty, `${t} treated a real value as empty`).toBe(false);
+        const stored = r.stored;
+        const populated = [stored.value_text, stored.value_int, stored.value_real, stored.value_json]
+          .filter((v) => v !== null);
+        expect(populated.length, `${t} stored nothing`).toBe(1);
+      }
     }
   });
 

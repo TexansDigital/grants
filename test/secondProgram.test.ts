@@ -4,6 +4,7 @@ import { seedProgram } from '../src/seed/seedProgram';
 import { INSPIRE_CHANGE } from '../src/seed/inspireChange';
 import { SECOND_PROGRAM } from '../src/seed/secondProgram';
 import { loadFormDefinition, validateSubmission, allFields, lintFormDefinition } from '../src/lib/forms';
+import type { ProgramSpec } from '../src/seed/types';
 
 const ctx = () => ctxFor(adminSession());
 
@@ -31,6 +32,11 @@ async function schemaSnapshot(): Promise<string> {
 }
 
 describe('a second program requires zero schema changes', () => {
+  // HONESTY NOTE: the schema snapshot below is a weak assertion on its own --
+  // seedProgram emits only INSERTs, so the schema is identical by construction.
+  // It is kept as a tripwire against someone adding DDL to the seed path. The
+  // load-bearing tests are the vocabulary-boundary ones at the bottom of this
+  // file, which pin what a new program can and cannot do without a migration.
   it('seeds a two-stage gated program against the identical schema', async () => {
     await seedProgram(db, ctx(), INSPIRE_CHANGE);
     const before = await schemaSnapshot();
@@ -133,6 +139,96 @@ describe('a second program requires zero schema changes', () => {
 
     const ok = validateSubmission(loiDef, { amount_sought: '$70,000' }, { partial: true });
     expect(ok.errors.some((e) => e.field === 'amount_sought')).toBe(false);
+  });
+
+  it('accepts a NEW field type as a data row, not a migration', async () => {
+    // This is the real generic-platform claim. field_type used to be a CHECK
+    // enum, so a program wanting a date picker needed a migration -- exactly
+    // what "a new program is rows, never a migration" exists to prevent.
+    await db
+      .prepare(`INSERT INTO field_types (key, label, storage) VALUES ('date','Date','text')`)
+      .run();
+
+    const withDate: ProgramSpec = {
+      ...SECOND_PROGRAM,
+      slug: 'date-program',
+      name: 'Date Program',
+      stages: [
+        {
+          ...SECOND_PROGRAM.stages[0]!,
+          form: {
+            ...SECOND_PROGRAM.stages[0]!.form,
+            sections: [
+              ...SECOND_PROGRAM.stages[0]!.form.sections,
+              {
+                key: 'timing',
+                title: 'Timing',
+                fields: [
+                  { key: 'project_start', label: 'Project start date', type: 'date' as never },
+                ],
+              },
+            ],
+          },
+        },
+      ],
+    };
+
+    const seeded = await seedProgram(db, ctx(), withDate);
+    const def = await loadFormDefinition(db, seeded.formDefinitionIds.loi!);
+    expect(allFields(def).some((f) => f.field_key === 'project_start')).toBe(true);
+  });
+
+  it('accepts a NEW promotion target as a data row', async () => {
+    await db
+      .prepare(
+        `INSERT INTO promotion_targets (key, label, target_table, target_column)
+         VALUES ('people_served_count','People served','applications','requested_amount_cents')`,
+      )
+      .run();
+    const row = await db
+      .prepare(`SELECT key FROM promotion_targets WHERE key='people_served_count'`)
+      .first<{ key: string }>();
+    expect(row?.key).toBe('people_served_count');
+  });
+
+  it('supports a program with no organization, for individual recipients', async () => {
+    // A scholarship or a coaches' grant has no EIN and no organization legal
+    // name. The required set used to be a hardcoded constant, so such a program
+    // could not be published at all.
+    const scholarship: ProgramSpec = {
+      slug: 'coaches-grant',
+      name: 'Coaches Grant',
+      description: 'Individual awards.',
+      fiscalYear: 2026,
+      totalBudgetCents: 5_000_000,
+      compliancePolicy: 'ignore',
+      guidelinesVersion: 'cg-1',
+      requiredMapsTo: ['primary_contact_email', 'requested_amount_cents'],
+      maxApplicationsPerCycle: null,
+      stages: [
+        {
+          key: 'apply',
+          name: 'Apply',
+          form: {
+            name: 'Coaches Grant Application',
+            sections: [
+              {
+                key: 'you',
+                title: 'About you',
+                fields: [
+                  { key: 'email', label: 'Email', type: 'email', required: true, mapsTo: 'primary_contact_email' },
+                  { key: 'amount', label: 'Amount requested', type: 'currency', required: true, mapsTo: 'requested_amount_cents' },
+                ],
+              },
+            ],
+          },
+        },
+      ],
+      cycles: [],
+    };
+    const seeded = await seedProgram(db, ctx(), scholarship);
+    const def = await loadFormDefinition(db, seeded.formDefinitionIds.apply!);
+    expect(def.status).toBe('published');
   });
 
   it('keeps each program compliance policy and grace rule separate', async () => {

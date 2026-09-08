@@ -155,14 +155,23 @@ export function isFieldVisible(
   field: FieldDef,
   answersByFieldId: ReadonlyMap<string, StoredValue>,
   fieldsById: ReadonlyMap<string, FieldDef>,
+  visiting: Set<string> = new Set(),
 ): boolean {
   if (!field.conditional_on_field_id) return true;
+
+  // A conditional cycle (A depends on B depends on A) previously recursed until
+  // the stack blew, turning every load and every save of that form into a 500.
+  // lintFormDefinition catches cycles at publish, but a draft can be edited into
+  // one, so the runtime has to survive it. Fail open, matching the dangling-
+  // parent policy below.
+  if (visiting.has(field.id)) return true;
+  visiting.add(field.id);
 
   const parent = fieldsById.get(field.conditional_on_field_id);
   if (!parent) return true; // dangling condition: fail open, never hide a field forever
 
   // A conditional field nested under a hidden parent is itself hidden.
-  if (!isFieldVisible(parent, answersByFieldId, fieldsById)) return false;
+  if (!isFieldVisible(parent, answersByFieldId, fieldsById, visiting)) return false;
 
   const stored = answersByFieldId.get(parent.id);
   if (!stored) return false;
@@ -201,15 +210,31 @@ export interface ValidationOutcome {
 export function validateSubmission(
   def: FormDefinition,
   raw: Record<string, unknown>,
-  opts: { partial?: boolean } = {},
+  opts: {
+    partial?: boolean;
+    /**
+     * Answers already stored for this application, keyed by field id.
+     *
+     * Required for correct autosave. Visibility of a conditional field depends
+     * on its PARENT's value, and an autosave posts one section. Without the
+     * stored answers, a parent that simply was not in this request looks
+     * unanswered, its children look hidden, and their saved answers get
+     * cleared -- destroying work the applicant already did, from the act of
+     * saving a different section.
+     */
+    existingAnswers?: ReadonlyMap<string, StoredValue>;
+  } = {},
 ): ValidationOutcome {
   const fields = allFields(def);
   const fieldsById = new Map(fields.map((f) => [f.id, f]));
   const sectionTitleById = new Map(def.sections.map((s) => [s.id, s.title]));
 
   const errors: FieldError[] = [];
-  const coerced = new Map<string, StoredValue>();
+  // Seed with what is already stored, so visibility is judged against the whole
+  // application rather than against whichever section the browser just posted.
+  const coerced = new Map<string, StoredValue>(opts.existingAnswers ?? []);
   const emptyByFieldId = new Map<string, boolean>();
+  const presentInRequest = new Set<string>();
 
   // Pass 1 — coerce and type-validate every provided answer.
   for (const field of fields) {
@@ -218,9 +243,11 @@ export function validateSubmission(
       : undefined;
 
     if (rawValue === undefined) {
-      emptyByFieldId.set(field.id, true);
+      // Not posted. If we have a stored answer it stands; otherwise it is empty.
+      emptyByFieldId.set(field.id, !coerced.has(field.id));
       continue;
     }
+    presentInRequest.add(field.id);
 
     const result = coerceAnswer(field, rawValue);
     if (!result.ok) {
@@ -243,7 +270,11 @@ export function validateSubmission(
   for (const field of fields) {
     const visible = isFieldVisible(field, coerced, fieldsById);
     if (!visible) {
-      hiddenFieldIds.push(field.id);
+      // Only clear a field whose parent actually participated in this request.
+      // Otherwise a partial autosave would delete answers it never saw.
+      const parentId = field.conditional_on_field_id;
+      const parentWasPosted = parentId !== null && presentInRequest.has(parentId);
+      if (!opts.partial || parentWasPosted) hiddenFieldIds.push(field.id);
       continue;
     }
 

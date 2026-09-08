@@ -57,12 +57,23 @@ export function sessionOrgId(session: Session): string {
  * Deliberately throws NOT_FOUND, never FORBIDDEN. Use after a fetch that could
  * not be scoped in SQL; prefer scoping in the query itself.
  */
-export function assertOwnedBySession(
+export function assertOwnedByExternalSession(
   session: Session,
   rowOrganizationId: string | null | undefined,
   entity = 'record',
 ): void {
-  if (!isExternalRole(session)) return; // staff scoping is handled separately
+  if (!isExternalRole(session)) {
+    // Previously this returned, which silently authorized admin, reviewer AND
+    // executive for any endpoint whose only check was this helper -- and
+    // executives are documented as having no in-app access at all. The name
+    // read like a universal ownership assertion; the behaviour was "no-op for
+    // anyone who is not an applicant". Now the caller must pick a staff path
+    // explicitly.
+    throw new AppError('FORBIDDEN', 'That action is not available.', {
+      internalMessage: `assertOwnedByExternalSession called for internal role ${session.role}`,
+      severity: 'error',
+    });
+  }
   const orgId = sessionOrgId(session);
   if (!rowOrganizationId || rowOrganizationId !== orgId) {
     throw notFound(entity);
@@ -118,10 +129,29 @@ export const INTERNAL_ONLY_COLUMNS = [
   'admin_feedback',
 ] as const;
 
-/** Build a `SELECT a, b, c` list from an allowlist. Never accepts user input. */
+const SAFE_COLUMN = /^[a-z_][a-z0-9_]*$/;
+
+/**
+ * Build a `SELECT a, b, c` list from an allowlist.
+ *
+ * This is the only place in the codebase that interpolates into SQL. Today its
+ * inputs are compile-time constants, but a `?fields=` query parameter is one
+ * feature away, so the identifier shape is validated here rather than trusted
+ * to a comment.
+ */
 export function selectList(columns: readonly string[], alias?: string): string {
   const prefix = alias ? `${alias}.` : '';
-  return columns.map((c) => `${prefix}${c}`).join(', ');
+  return columns
+    .map((c) => {
+      if (!SAFE_COLUMN.test(c)) {
+        throw new AppError('INTERNAL', 'Something went wrong on our end.', {
+          internalMessage: `unsafe column identifier in selectList: ${c}`,
+          severity: 'fatal',
+        });
+      }
+      return `${prefix}${c}`;
+    })
+    .join(', ');
 }
 
 /**
@@ -226,6 +256,21 @@ export async function getApplicationForStaff(
  * assert that an outbound external payload carries no internal-only key.
  */
 export function assertNoInternalFields(payload: unknown, path = 'payload'): void {
+  // Assert against what will ACTUALLY be sent. Walking the live object let an
+  // object with a toJSON() that returns internal fields pass the check while
+  // JSON.stringify emitted them, and let a non-enumerable property through.
+  if (path === 'payload') {
+    let serialized: unknown;
+    try {
+      serialized = JSON.parse(JSON.stringify(payload ?? null));
+    } catch {
+      throw new AppError('INTERNAL', 'Something went wrong on our end.', {
+        internalMessage: 'external payload could not be serialized for inspection',
+        severity: 'fatal',
+      });
+    }
+    return assertNoInternalFields(serialized, 'payload.serialized');
+  }
   if (payload === null || typeof payload !== 'object') return;
   if (Array.isArray(payload)) {
     payload.forEach((item, i) => assertNoInternalFields(item, `${path}[${i}]`));

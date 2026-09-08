@@ -31,9 +31,27 @@ CREATE TABLE programs (
                           CHECK (compliance_policy IN ('block','warn','ignore')),
   guidelines_doc_id     TEXT,
   guidelines_version    TEXT,
+  -- Which promotion targets a form in THIS program must collect before it can
+  -- be published. A JSON array of promotion_targets keys. Per-program rather
+  -- than a global constant because not every program has an applicant
+  -- organization: a scholarship or an individual coaches' grant legitimately
+  -- has no EIN and no organization legal name to collect.
+  required_maps_to_json TEXT NOT NULL
+                          DEFAULT '["organization_name","ein","requested_amount_cents","primary_contact_email","counties_served"]',
+  -- How many live applications one organization may have per cycle per stage.
+  -- 1 is the common case. A district submitting one application per campus, or
+  -- an arts program accepting three project ideas, sets this higher.
+  -- NULL means unlimited.
+  max_applications_per_cycle INTEGER
+                          DEFAULT 1
+                          CHECK (max_applications_per_cycle IS NULL OR
+                                 (typeof(max_applications_per_cycle) = 'integer'
+                                  AND max_applications_per_cycle >= 1)),
   created_at            TEXT NOT NULL,
   updated_at            TEXT NOT NULL,
-  deleted_at            TEXT
+  deleted_at            TEXT,
+
+  CHECK (json_valid(required_maps_to_json))
 );
 
 CREATE UNIQUE INDEX programs_slug_uniq ON programs (slug) WHERE deleted_at IS NULL;
@@ -137,6 +155,22 @@ CREATE TABLE organizations (
 CREATE INDEX organizations_ein_idx  ON organizations (ein) WHERE deleted_at IS NULL;
 CREATE INDEX organizations_name_idx ON organizations (legal_name) WHERE deleted_at IS NULL;
 CREATE INDEX organizations_merge_idx ON organizations (merged_into_id);
+
+-- A merge must point at a LIVE, unmerged organization. Without this, A can be
+-- merged into B while B is merged into A, and any "walk to the surviving
+-- organization" loop hangs. Merging into a soft-deleted row is equally broken.
+CREATE TRIGGER organizations_merge_target_must_be_live
+BEFORE UPDATE OF merged_into_id, status ON organizations
+WHEN NEW.merged_into_id IS NOT NULL
+ AND NOT EXISTS (
+   SELECT 1 FROM organizations t
+    WHERE t.id = NEW.merged_into_id
+      AND t.deleted_at IS NULL
+      AND t.status <> 'merged'
+ )
+BEGIN
+  SELECT RAISE(ABORT, 'an organization can only be merged into a live, unmerged organization');
+END;
 
 -- =============================================================================
 -- contacts — people at an organization. Not all of them can log in.

@@ -61,6 +61,17 @@ BEGIN
   SELECT RAISE(ABORT, 'audit_log is append-only: rows cannot be deleted');
 END;
 
+-- INSERT OR REPLACE is the third statement form, and the one that slips past a
+-- naive append-only guard: SQLite's REPLACE conflict resolution deletes the
+-- conflicting row WITHOUT firing BEFORE DELETE triggers unless
+-- PRAGMA recursive_triggers is on, which it is not on D1. A BEFORE INSERT
+-- trigger does fire, so this is where a rewrite-by-replace is caught.
+CREATE TRIGGER audit_log_no_replace BEFORE INSERT ON audit_log
+WHEN EXISTS (SELECT 1 FROM audit_log WHERE id = NEW.id)
+BEGIN
+  SELECT RAISE(ABORT, 'audit_log is append-only: an existing row cannot be replaced');
+END;
+
 -- =============================================================================
 -- error_log — every handled and unhandled failure.
 --
@@ -108,4 +119,11 @@ END;
 CREATE TRIGGER error_log_no_delete BEFORE DELETE ON error_log
 BEGIN
   SELECT RAISE(ABORT, 'error_log is append-only: rows cannot be deleted');
+END;
+
+-- Same REPLACE hole as audit_log. See the note above.
+CREATE TRIGGER error_log_no_replace BEFORE INSERT ON error_log
+WHEN EXISTS (SELECT 1 FROM error_log WHERE id = NEW.id)
+BEGIN
+  SELECT RAISE(ABORT, 'error_log is append-only: an existing row cannot be replaced');
 END;

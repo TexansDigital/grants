@@ -43,12 +43,30 @@ export function isCycleAcceptingSubmission(args: {
   opensAt: string;
   closesAt: string;
   graceHours: number;
+  /** The cycle's administrative status. 'open' is the only accepting state. */
+  status?: string;
   draftStartedAt?: string | null;
   now?: string;
 }): { accepted: boolean; reason?: string } {
   const now = new Date(args.now ?? nowIso()).getTime();
   const opens = new Date(args.opensAt).getTime();
   const closes = new Date(args.closesAt).getTime();
+
+  // A malformed timestamp must never widen the window. `now < NaN` is false,
+  // so an unguarded comparison skipped the not-yet-open branch and behaved as
+  // though the cycle had opened.
+  if (!Number.isFinite(now) || !Number.isFinite(opens) || !Number.isFinite(closes)) {
+    return { accepted: false, reason: 'invalid_window' };
+  }
+  if (!Number.isFinite(args.graceHours) || args.graceHours < 0) {
+    return { accepted: false, reason: 'invalid_window' };
+  }
+
+  // Closing a cycle administratively is the action an admin actually takes; it
+  // must not require also rewriting an announced deadline.
+  if (args.status !== undefined && args.status !== 'open') {
+    return { accepted: false, reason: args.status === 'draft' ? 'not_yet_open' : 'closed' };
+  }
 
   if (now < opens) return { accepted: false, reason: 'not_yet_open' };
   if (now <= closes) return { accepted: true };

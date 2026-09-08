@@ -43,6 +43,8 @@ export type AuditAction =
   | 'organization.created'
   | 'organization.updated'
   | 'organization.merged'
+  | 'contact.created'
+  | 'contact.updated'
   | 'organization.ein_verified'
   // forms
   | 'form_definition.created'
@@ -51,6 +53,9 @@ export type AuditAction =
   | 'form_definition.version_created'
   // programs and cycles
   | 'program.created'
+  | 'program_stage.created'
+  | 'form_section.created'
+  | 'form_field.created'
   | 'program.updated'
   | 'cycle.created'
   | 'cycle.updated'
@@ -127,13 +132,27 @@ const NEVER_SNAPSHOT = new Set([
   'token_hash',
 ]);
 
+/**
+ * Applied RECURSIVELY, not just at the top level.
+ *
+ * A nested submission_ip previously slipped through because filtering happened
+ * only on the outermost object. audit_log is append-only with no supported
+ * delete path, so anything that lands here lands permanently.
+ */
+function stripNeverSnapshot(value: unknown, depth = 0): unknown {
+  if (depth > 8 || value === null || typeof value !== 'object') return value;
+  if (Array.isArray(value)) return value.map((v) => stripNeverSnapshot(v, depth + 1));
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+    if (NEVER_SNAPSHOT.has(k)) continue;
+    out[k] = stripNeverSnapshot(v, depth + 1);
+  }
+  return out;
+}
+
 function snapshot(value: Record<string, unknown> | null | undefined): string | null {
   if (value === null || value === undefined) return null;
-  const filtered: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(value)) {
-    if (!NEVER_SNAPSHOT.has(k)) filtered[k] = v;
-  }
-  return JSON.stringify(redact(filtered));
+  return JSON.stringify(redact(stripNeverSnapshot(value)));
 }
 
 /**
@@ -158,12 +177,26 @@ export function diffFields(
   return changed.sort();
 }
 
-const INSERT_SQL = `INSERT INTO audit_log (
+/**
+ * An optional guard makes the audit INSERT conditional on the same predicate as
+ * the mutation it accompanies. Without it, a batch whose mutations all no-op
+ * (the losing side of a race) still writes an audit row claiming the change
+ * happened -- an audit trail that records events that did not occur is worse
+ * than none, because it is believed.
+ */
+export interface AuditGuard {
+  sql: string;
+  binds: unknown[];
+}
+
+function insertSql(guard?: AuditGuard): string {
+  return `INSERT INTO audit_log (
    id, actor_user_id, actor_kind, actor_role, actor_organization_id,
    action, entity_type, entity_id,
    before_json, after_json, changed_fields_json,
    request_id, ip, user_agent, created_at
- ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`;
+ ) SELECT ?,?,?,?,?,?,?,?,?,?,?,?,?,?,? WHERE ${guard ? guard.sql : '1=1'}`;
+}
 
 /**
  * Build the audit INSERT as a prepared statement, to be placed in the same
@@ -173,6 +206,7 @@ export function auditStatement(
   db: D1Database,
   ctx: RequestContext,
   input: AuditInput,
+  guard?: AuditGuard,
 ): D1PreparedStatement {
   if (input.before == null && input.after == null) {
     // A mutating action must record at least one side. If both are absent, the
@@ -181,7 +215,7 @@ export function auditStatement(
   }
 
   const actorKind = ctx.session ? 'user' : 'anonymous';
-  return db.prepare(INSERT_SQL).bind(
+  return db.prepare(insertSql(guard)).bind(
     newId(),
     ctx.session?.userId ?? null,
     actorKind,
@@ -197,6 +231,7 @@ export function auditStatement(
     ctx.ip ?? null,
     ctx.userAgent ?? null,
     nowIso(),
+    ...(guard?.binds ?? []),
   );
 }
 
