@@ -16,7 +16,8 @@ import type { IdFactory } from './deterministicIds';
 import { nowIso } from '../lib/time';
 import { auditStatement } from '../lib/audit';
 import { assertUniversalCoverage, assertNoDuplicateTargets, DEFAULT_REQUIRED_MAPS_TO } from '../lib/mapsTo';
-import { loadFormDefinition, assertPublishable, allFields } from '../lib/forms';
+import { allFields } from '../lib/forms';
+import { loadFormDefinition, assertPublishable } from '../lib/loadForm';
 import type { FieldDef } from '../lib/fieldTypes';
 
 export interface SeededProgram {

@@ -86,6 +86,22 @@ export interface FieldDef {
   section_id: string;
 }
 
+/**
+ * One problem with one answer, in language an applicant can act on.
+ *
+ * Lives here rather than in errors.ts so that the pure form modules -- and the
+ * browser that imports them -- never have to pull in the Worker error and
+ * logging machinery. errors.ts re-exports it, so existing importers are
+ * unaffected.
+ */
+export interface FieldError {
+  /** field_key, so the UI can anchor to the input. */
+  field: string;
+  section?: string;
+  /** Plain language. An applicant reads this. */
+  message: string;
+}
+
 export type CoerceResult =
   | { ok: true; stored: StoredValue; empty: boolean }
   | { ok: false; message: string };

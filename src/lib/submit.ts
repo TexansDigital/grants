@@ -32,7 +32,8 @@
 import type { RequestContext, Session } from '../types';
 import { AppError, notFound, validationFailed, type FieldError } from './errors';
 import { auditStatement } from './audit';
-import { loadFormDefinition, validateSubmission, allFields, type FormDefinition } from './forms';
+import { validateSubmission, allFields, type FormDefinition } from './forms';
+import { loadFormDefinition } from './loadForm';
 import { promote } from './mapsTo';
 import { buildSearchDoc, reindexStatements } from './search';
 import { newId } from './ids';

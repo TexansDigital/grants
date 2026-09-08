@@ -327,6 +327,128 @@ describe('authenticated staff endpoints', () => {
     const res = await call('/api/nope', await mint('admin@example.org'));
     expect(res.status).toBe(404);
   });
+
+  it('lists form definitions as METADATA ONLY -- no sections, no fields', async () => {
+    const seeded = await seedProgram(db, ctxFor(adminSession()), INSPIRE_CHANGE);
+    const res = await call('/api/forms', await mint('admin@example.org'));
+    expect(res.status).toBe(200);
+
+    const body = (await res.json()) as {
+      forms: { id: string; program_name: string; stage_name: string | null; status: string }[];
+    };
+    const row = body.forms.find((f) => f.id === seeded.formDefinitionIds.application);
+    expect(row).toBeTruthy();
+    expect(row!.program_name).toBe('Inspire Change');
+    expect(row!.status).toBe('published');
+
+    // The list is a directory, not a payload. Fields belong to /api/forms/:id.
+    const json = JSON.stringify(body);
+    expect(json).not.toContain('field_key');
+    expect(json).not.toContain('sections');
+  });
+
+  it('filters the form list by program', async () => {
+    const seeded = await seedProgram(db, ctxFor(adminSession()), INSPIRE_CHANGE);
+    const mine = await call(
+      `/api/forms?program_id=${seeded.programId}`,
+      await mint('admin@example.org'),
+    );
+    const other = await call(`/api/forms?program_id=${newId()}`, await mint('admin@example.org'));
+    expect(((await mine.json()) as { forms: unknown[] }).forms.length).toBeGreaterThan(0);
+    expect(((await other.json()) as { forms: unknown[] }).forms).toHaveLength(0);
+  });
+
+  it('requires an Access assertion for the form list', async () => {
+    const res = await call('/api/forms');
+    expect(res.status).toBe(401);
+  });
+});
+
+/**
+ * The single-page app is served by the same Worker on the same hostname, so
+ * Cloudflare Access sits in front of both. These tests pin the two things that
+ * would otherwise rot silently: the shell carries the same security policy as
+ * an API response, and the Worker does NOT become a catch-all that answers 200
+ * to every mistyped URL.
+ */
+describe('serving the single-page app', () => {
+  const SHELL = '<!doctype html><html data-surface="internal"><body><div id="root"></div></body></html>';
+
+  function envWithAssets(): Env {
+    return workerEnv({
+      ASSETS: {
+        async fetch(input: RequestInfo | URL) {
+          const href = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+          if (new URL(href).pathname === '/index.html') {
+            return new Response(SHELL, { headers: { 'content-type': 'text/html' } });
+          }
+          return new Response('not found', { status: 404 });
+        },
+      } as unknown as Fetcher,
+    } as Partial<Env>);
+  }
+
+  it('serves the shell on a deep link so the client router can take over', async () => {
+    const res = await call('/forms/anything', undefined, envWithAssets());
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toContain('text/html');
+    expect(await res.text()).toContain('id="root"');
+  });
+
+  it('gives the shell the SAME security policy as an API response', async () => {
+    const shell = await call('/forms/anything', undefined, envWithAssets());
+    const apiRes = await call('/health', undefined, envWithAssets());
+    for (const h of [
+      'content-security-policy',
+      'x-content-type-options',
+      'x-frame-options',
+      'referrer-policy',
+      'cache-control',
+    ]) {
+      expect(shell.headers.get(h), `shell is missing ${h}`).toBe(apiRes.headers.get(h));
+    }
+  });
+
+  it('does NOT serve the shell for a path the app does not own', async () => {
+    // A catch-all would answer 200 to every scanner and make a real 404
+    // impossible to find in the logs.
+    for (const path of ['/not-a-page', '/forms', '/forms/a/b', '/admin']) {
+      const res = await call(path, undefined, envWithAssets());
+      expect(res.status, `${path} should 404`).toBe(404);
+    }
+  });
+
+  it('does not serve the shell for a non-GET request', async () => {
+    const res = await worker.fetch(
+      new Request('https://steward.example.org/forms/anything', { method: 'POST' }),
+      envWithAssets(),
+      exec,
+    );
+    expect(res.status).toBe(404);
+  });
+
+  it('404s rather than 500s when there is no asset binding at all', async () => {
+    // The binding is optional in the Env type so the Worker runs with no build
+    // output present. That path must degrade to a missing page, not to
+    // something that reads like an outage.
+    const bare = workerEnv();
+    delete (bare as { ASSETS?: unknown }).ASSETS;
+    const res = await call('/forms/anything', undefined, bare);
+    expect(res.status).toBe(404);
+  });
+
+  it('404s when the asset store has no shell in it', async () => {
+    const empty = workerEnv({
+      ASSETS: { async fetch() { return new Response('missing', { status: 404 }); } } as unknown as Fetcher,
+    } as Partial<Env>);
+    const res = await call('/forms/anything', undefined, empty);
+    expect(res.status).toBe(404);
+  });
+
+  it('leaves the API alone: /api still 401s with no assertion, shell or not', async () => {
+    const res = await call('/api/session', undefined, envWithAssets());
+    expect(res.status).toBe(401);
+  });
 });
 
 describe('the error boundary', () => {

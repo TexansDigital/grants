@@ -1,0 +1,21 @@
+# Headers for files served directly by Cloudflare's asset router, which runs
+# BEFORE the Worker and therefore never picks up the headers in
+# src/lib/httpHeaders.ts. Without this file the HTML shell and the JS/CSS
+# bundle would go out with none of the policy every API response carries.
+#
+# Kept deliberately identical to securityHeaders()/htmlHeaders(). If you change
+# one, change the other; test/routes.test.ts asserts they match.
+/*
+  X-Content-Type-Options: nosniff
+  X-Frame-Options: DENY
+  Referrer-Policy: strict-origin-when-cross-origin
+  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'
+
+# The shell names the hashed asset files for the CURRENT deployment, so it must
+# never be cached: a stale shell pointing at last deployment's bundle is a blank
+# page for whoever kept the tab open. The hashed assets themselves are immutable
+# and are left cacheable.
+/
+  Cache-Control: no-store
+/index.html
+  Cache-Control: no-store

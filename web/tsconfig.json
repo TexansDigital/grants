@@ -1,0 +1,31 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ES2022",
+    "moduleResolution": "Bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "isolatedModules": true,
+    "allowImportingTsExtensions": false,
+    // Deliberately NO "@cloudflare/workers-types" here.
+    //
+    // The browser bundle imports src/lib/forms.ts and src/lib/fieldTypes.ts so
+    // that visibility rules, coercion and validation are the SAME CODE on both
+    // sides. Those modules are pure by design. If a future edit makes one of
+    // them reach for D1, Env or a Worker global, this typecheck fails -- which
+    // is the point. Do not "fix" that by adding workers-types; move the
+    // database-touching part into src/lib/loadForm.ts instead.
+    "types": ["vite/client"]
+  },
+  // Only the client's own files are listed. Whatever it imports from ../src/lib
+  // is pulled in transitively and typechecked under THESE options -- so the
+  // shared modules are held to "no Cloudflare types" automatically, without
+  // having to enumerate them.
+  "include": ["src/**/*.ts", "src/**/*.tsx", "vite.config.ts"]
+}

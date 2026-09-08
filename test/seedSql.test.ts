@@ -3,7 +3,8 @@ import { db } from './helpers';
 import { emitSeedSql } from '../src/seed/emitSql';
 import { INSPIRE_CHANGE } from '../src/seed/inspireChange';
 import { seededId } from '../src/seed/deterministicIds';
-import { loadFormDefinition, allFields, lintFormDefinition } from '../src/lib/forms';
+import { allFields, lintFormDefinition } from '../src/lib/forms';
+import { loadFormDefinition } from '../src/lib/loadForm';
 import { assertUniversalCoverage } from '../src/lib/mapsTo';
 
 /**

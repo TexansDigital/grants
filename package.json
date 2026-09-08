@@ -3,11 +3,11 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Steward — multi-program grantmaking platform on Cloudflare",
+  "description": "Steward \u2014 multi-program grantmaking platform on Cloudflare",
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p web/tsconfig.json",
     "migrate:local": "wrangler d1 migrations apply steward-preview --local",
     "migrate:preview": "wrangler d1 migrations apply steward-preview --remote",
     "dev": "wrangler dev --env=\"\"",
@@ -16,9 +16,11 @@
     "seed:local": "wrangler d1 execute steward-preview --local --file=seeds/inspire-change.sql",
     "admin:sql": "esbuild scripts/buildAdmins.ts --bundle --platform=node --format=esm --outfile=.adminbuild.mjs --log-level=warning && node .adminbuild.mjs",
     "admin:apply": "wrangler d1 execute steward-preview --remote --file=seeds/admins.sql",
-    "deploy:preview": "wrangler deploy --env=\"\"",
+    "deploy:preview": "npm run build:web && wrangler deploy --env=\"\"",
     "check:config": "esbuild scripts/checkConfig.ts --bundle --platform=node --format=esm --outfile=.cfgcheck.mjs --log-level=warning && node .cfgcheck.mjs && rm -f .cfgcheck.mjs",
-    "verify": "npm run check:config && npm run typecheck && npm test"
+    "verify": "npm run check:config && npm run typecheck && npm test",
+    "build:web": "vite build web",
+    "dev:web": "vite web"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.12.21",

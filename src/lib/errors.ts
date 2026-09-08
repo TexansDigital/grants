@@ -19,6 +19,11 @@ import type { Env, RequestContext } from '../types';
 import { newId } from './ids';
 import { nowIso } from './time';
 import { securityHeaders } from './httpHeaders';
+import type { FieldError } from './fieldTypes';
+
+// Defined in fieldTypes.ts so the pure form modules can use it without pulling
+// this file (and the Env/D1 types behind it) into the browser bundle.
+export type { FieldError };
 
 export type Severity = 'warn' | 'error' | 'fatal';
 
@@ -46,14 +51,6 @@ const STATUS_BY_CODE: Record<ErrorCode, number> = {
   FORM_PUBLISHED: 409,
   INTERNAL: 500,
 };
-
-export interface FieldError {
-  /** field_key, so the UI can anchor to the input. */
-  field: string;
-  section?: string;
-  /** Plain language. An applicant reads this. */
-  message: string;
-}
 
 export class AppError extends Error {
   readonly code: ErrorCode;

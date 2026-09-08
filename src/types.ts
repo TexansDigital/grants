@@ -17,6 +17,14 @@ export interface Env {
    */
   ACCESS_TEAM_DOMAIN: string;
   ACCESS_AUD: string;
+  /**
+   * The built single-page app (wrangler `[assets]`).
+   *
+   * Optional so the Worker and its tests run with no build output present. When
+   * it is missing, the API is unaffected and the app routes 404 rather than
+   * failing in a way that looks like an outage.
+   */
+  ASSETS?: Fetcher;
 }
 
 export type Role = 'admin' | 'reviewer' | 'applicant' | 'grantee' | 'executive';

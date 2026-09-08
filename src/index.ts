@@ -15,9 +15,9 @@ import type { Env, RequestContext, Session } from './types';
 import { newRequestId } from './lib/ids';
 import { AppError, logError, notFound, toErrorResponse } from './lib/errors';
 import { nowIso, formatInZone } from './lib/time';
-import { securityHeaders } from './lib/httpHeaders';
+import { securityHeaders, htmlHeaders } from './lib/httpHeaders';
 import { requireStaffSession } from './lib/auth';
-import { loadFormDefinition } from './lib/forms';
+import { loadFormDefinition } from './lib/loadForm';
 
 /**
  * Client IP as Cloudflare reports it. X-Forwarded-For is never trusted: a
@@ -50,6 +50,35 @@ function segments(pathname: string): string[] {
   return pathname.split('/').filter((s) => s.length > 0);
 }
 
+/**
+ * The paths the single-page app owns.
+ *
+ * An explicit list, not a catch-all. A catch-all would answer 200 to every
+ * mistyped URL and to every scanner, which makes a genuine 404 impossible to
+ * see in the logs and makes the app look like it has pages it does not have.
+ */
+function isAppRoute(parts: string[]): boolean {
+  if (parts.length === 0) return true; // the shell itself
+  if (parts.length === 2 && parts[0] === 'forms') return true; // /forms/:id
+  return false;
+}
+
+/**
+ * Serve the app shell.
+ *
+ * Static files (the hashed JS and CSS) are served by Cloudflare's asset router
+ * before this Worker is invoked. This handles the deep links -- /forms/:id --
+ * which match no file on disk, by returning index.html so the client router can
+ * take over. Headers are re-applied here rather than inherited, so the shell
+ * carries the same policy as every API response.
+ */
+async function serveAppShell(request: Request, env: Env, ctx: RequestContext): Promise<Response> {
+  if (!env.ASSETS) throw notFound('page');
+  const shell = await env.ASSETS.fetch(new Request(new URL('/index.html', request.url), { method: 'GET' }));
+  if (!shell.ok) throw notFound('page');
+  return new Response(shell.body, { status: 200, headers: htmlHeaders(ctx.requestId) });
+}
+
 async function route(request: Request, env: Env, ctx: RequestContext): Promise<Response> {
   const url = new URL(request.url);
   const parts = segments(url.pathname);
@@ -69,6 +98,7 @@ async function route(request: Request, env: Env, ctx: RequestContext): Promise<R
   }
 
   if (parts[0] !== 'api') {
+    if (method === 'GET' && isAppRoute(parts)) return await serveAppShell(request, env, ctx);
     throw notFound('page');
   }
 
@@ -116,6 +146,27 @@ async function route(request: Request, env: Env, ctx: RequestContext): Promise<R
       },
       ctx,
     );
+  }
+
+  // GET /api/forms?program_id=... -- the definitions this deployment has.
+  //
+  // Metadata only: what forms exist, which program and stage they belong to,
+  // and their version and publication state. No sections, no fields, and
+  // nothing an applicant ever entered.
+  if (parts.length === 2 && parts[1] === 'forms' && method === 'GET') {
+    const programId = url.searchParams.get('program_id');
+    const sql = `SELECT f.id, f.program_id, f.form_key, f.stage_id, f.kind, f.name,
+                        f.version, f.status, f.published_at,
+                        p.name AS program_name, s.name AS stage_name
+                   FROM form_definitions f
+                   JOIN programs p ON p.id = f.program_id
+              LEFT JOIN program_stages s ON s.id = f.stage_id
+                  WHERE f.deleted_at IS NULL AND p.deleted_at IS NULL
+                    ${programId ? 'AND f.program_id = ?' : ''}
+                  ORDER BY p.name, s.sort_order, f.form_key, f.version DESC`;
+    const stmt = programId ? env.DB.prepare(sql).bind(programId) : env.DB.prepare(sql);
+    const { results } = await stmt.all<Record<string, unknown>>();
+    return json({ forms: results ?? [] }, ctx);
   }
 
   // GET /api/forms/:id -- THE CONTRACT.

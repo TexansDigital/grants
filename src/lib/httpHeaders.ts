@@ -38,3 +38,19 @@ export function securityHeaders(requestId: string): Record<string, string> {
     'content-security-policy': CSP,
   };
 }
+
+/**
+ * Headers for the HTML shell of the single-page app.
+ *
+ * Identical policy to every other response -- same CSP, same nosniff, same
+ * DENY -- differing only in content type. The shell is served with no-store
+ * because it is delivered from behind Cloudflare Access and names the hashed
+ * asset files for the current deployment; a cached shell pointing at assets
+ * from a previous deployment is a blank page for whoever kept the tab open.
+ */
+export function htmlHeaders(requestId: string): Record<string, string> {
+  return {
+    ...securityHeaders(requestId),
+    'content-type': 'text/html; charset=utf-8',
+  };
+}

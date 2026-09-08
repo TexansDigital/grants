@@ -3,7 +3,8 @@ import { db, ctxFor, adminSession } from './helpers';
 import { seedProgram } from '../src/seed/seedProgram';
 import { INSPIRE_CHANGE } from '../src/seed/inspireChange';
 import { SECOND_PROGRAM } from '../src/seed/secondProgram';
-import { loadFormDefinition, validateSubmission, allFields, lintFormDefinition } from '../src/lib/forms';
+import { validateSubmission, allFields, lintFormDefinition } from '../src/lib/forms';
+import { loadFormDefinition } from '../src/lib/loadForm';
 import type { ProgramSpec } from '../src/seed/types';
 
 const ctx = () => ctxFor(adminSession());

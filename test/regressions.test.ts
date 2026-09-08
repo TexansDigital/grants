@@ -12,7 +12,8 @@ import {
   APPLICANT_APPLICATION_COLUMNS,
   INTERNAL_ONLY_COLUMNS,
 } from '../src/lib/scope';
-import { isFieldVisible, validateSubmission, loadFormDefinition, allFields } from '../src/lib/forms';
+import { isFieldVisible, validateSubmission, allFields } from '../src/lib/forms';
+import { loadFormDefinition } from '../src/lib/loadForm';
 import { isCycleAcceptingSubmission, nowIso } from '../src/lib/time';
 import { newId } from '../src/lib/ids';
 import type { FieldDef, FieldType } from '../src/lib/fieldTypes';

@@ -134,11 +134,11 @@
   background: var(--blue);
   color: var(--white);
 }
-.nav .marker[data-state='error'] {
+.nav button .marker[data-state='error'] {
   background: var(--danger);
   color: var(--white);
 }
-.nav .marker[data-state='done'] {
+.nav button .marker[data-state='done'] {
   background: var(--ok);
   color: var(--white);
 }
@@ -201,10 +201,21 @@
 }
 
 .field > label,
-.field > .legend {
+.field fieldset > .legend {
   font-weight: 600;
   color: var(--ink);
   line-height: 1.4;
+}
+/* A legend is taken out of the fieldset's grid, so it needs its own gap. */
+.field fieldset > .legend {
+  margin-bottom: var(--space-2);
+  padding: 0;
+}
+/* Help text inside a grid fieldset would otherwise take a single column cell. */
+.choices.columns > .help,
+.address > .help {
+  grid-column: 1 / -1;
+  margin-bottom: var(--space-1);
 }
 
 .field .optional {
@@ -376,23 +387,27 @@
   padding: 0;
   margin: 0;
 }
-.address .line {
+.address .addr-line {
   grid-column: span 6;
 }
-.address .city {
+.address .addr-city {
   grid-column: span 3;
 }
-.address .state {
-  grid-column: span 1;
+/* Two characters plus the control's own padding. One column of six is too
+   narrow to type into on a laptop. */
+.address .addr-state {
+  grid-column: span 2;
 }
-.address .zip {
+.address .addr-zip {
   grid-column: span 2;
 }
 @media (max-width: 640px) {
-  .address .city,
-  .address .state,
-  .address .zip {
+  .address .addr-city,
+  .address .addr-zip {
     grid-column: span 6;
+  }
+  .address .addr-state {
+    grid-column: span 3;
   }
 }
 .address label {
@@ -488,6 +503,7 @@
 /* ---- privacy notice ------------------------------------------------------ */
 
 .privacy {
+  width: 100%;
   max-width: 1100px;
   margin: 0 auto;
   padding: var(--space-6) var(--space-5) var(--space-8);
@@ -505,7 +521,7 @@
   max-width: var(--measure);
 }
 
-/* ---- states -------------------------------------------------------------- */
+/* ---- whole-page states (loading, signed out, not found) ------------------ */
 
 .state {
   max-width: 640px;
