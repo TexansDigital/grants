@@ -74,9 +74,19 @@ function isAppRoute(parts: string[]): boolean {
  */
 async function serveAppShell(request: Request, env: Env, ctx: RequestContext): Promise<Response> {
   if (!env.ASSETS) throw notFound('page');
-  const shell = await env.ASSETS.fetch(new Request(new URL('/index.html', request.url), { method: 'GET' }));
-  if (!shell.ok) throw notFound('page');
-  return new Response(shell.body, { status: 200, headers: htmlHeaders(ctx.requestId) });
+
+  // Both spellings are tried. The asset router canonicalises /index.html to /
+  // with a 307 for ordinary browser requests; it does not do that through the
+  // binding today, but a change there would silently break every deep link
+  // while the root still worked -- the kind of breakage nobody notices until an
+  // applicant follows a link from an email.
+  for (const path of ['/index.html', '/']) {
+    const res = await env.ASSETS.fetch(new Request(new URL(path, request.url), { method: 'GET' }));
+    if (res.ok) {
+      return new Response(res.body, { status: 200, headers: htmlHeaders(ctx.requestId) });
+    }
+  }
+  throw notFound('page');
 }
 
 async function route(request: Request, env: Env, ctx: RequestContext): Promise<Response> {

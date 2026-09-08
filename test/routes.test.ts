@@ -437,6 +437,25 @@ describe('serving the single-page app', () => {
     expect(res.status).toBe(404);
   });
 
+  it('falls back to / when the asset router redirects /index.html', async () => {
+    // Pins the fallback: if the binding ever canonicalises /index.html the way
+    // the public router does, deep links must keep working.
+    const redirecting = workerEnv({
+      ASSETS: {
+        async fetch(input: RequestInfo | URL) {
+          const href = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+          const path = new URL(href).pathname;
+          if (path === '/index.html') return new Response(null, { status: 307, headers: { location: '/' } });
+          if (path === '/') return new Response(SHELL, { headers: { 'content-type': 'text/html' } });
+          return new Response('not found', { status: 404 });
+        },
+      } as unknown as Fetcher,
+    } as Partial<Env>);
+    const res = await call('/forms/anything', undefined, redirecting);
+    expect(res.status).toBe(200);
+    expect(await res.text()).toContain('id="root"');
+  });
+
   it('404s when the asset store has no shell in it', async () => {
     const empty = workerEnv({
       ASSETS: { async fetch() { return new Response('missing', { status: 404 }); } } as unknown as Fetcher,

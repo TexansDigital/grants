@@ -1,0 +1,9 @@
+# Files in the built asset directory that must NOT be uploaded or served.
+#
+# This file doubles as the placeholder that keeps ./public present in git, so a
+# fresh clone can run `wrangler dev` and the test suite before anything has been
+# built. Wrangler never uploads .assetsignore itself.
+#
+# Source maps are uploaded deliberately: the whole app is behind Cloudflare
+# Access, and a readable stack trace is how a staff member's bug report becomes
+# actionable. Remove the comment and add *.map here if that ever changes.

@@ -15,6 +15,7 @@ seeds/admins.sql
 .cfgcheck.mjs
 
 # Built single-page app (npm run build:web). The directory itself is kept so a
-# fresh clone can run wrangler dev and the tests before anything is built.
+# fresh clone can run wrangler dev and the tests before anything is built;
+# .assetsignore is the file that keeps it, and wrangler never uploads it.
 /public/*
-!/public/.gitkeep
+!/public/.assetsignore

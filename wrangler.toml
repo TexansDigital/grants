@@ -50,8 +50,9 @@ enabled = true
 # decides which unmatched paths are app routes and which are genuinely 404,
 # rather than every mistyped URL silently returning the app shell.
 #
-# The directory is committed empty (public/.gitkeep) so a fresh clone can run
-# `wrangler dev` and the test suite before anything has been built.
+# The directory is committed with only public/.assetsignore in it, so a fresh
+# clone can run `wrangler dev` and the test suite before anything has been
+# built. Wrangler never uploads .assetsignore, so nothing extra is served.
 [assets]
 directory = "./public"
 binding = "ASSETS"
