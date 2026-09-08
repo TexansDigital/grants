@@ -202,3 +202,51 @@ addresses. Test fixtures stay in the test suite.
   real value before Phase 2 opens a cycle.
 - **Declined applicants keeping portal access (open decision #4).** Has a schema
   implication for `users.is_active`. Wanted before Phase 2, not during it.
+
+## 12. Friendly-organization test data goes in a THIRD database, not preview
+
+Decided 2026-09-08, by the owner, after the roadmap review surfaced the
+conflict.
+
+CLAUDE.md verifies Phase 2 by having three real organizations submit real
+applications on their own devices. Today `database_id == preview_database_id`
+in `wrangler.toml` -- one database -- and `seed:preview`, `admin:apply` and
+`migrate:preview` all run against it with `--remote`. Putting real EINs and
+audited financial statements in the database that destructive scripts are
+routinely pointed at inverts the spirit of non-negotiable #2, even though that
+rule names production.
+
+So: a third D1, `steward-staging`. Preview stays the throwaway that seed and
+admin scripts hammer. Staging holds the friendly-organization submissions and
+never has a destructive script pointed at it. Production stays untouched and
+its bindings stay placeholders.
+
+Consequences:
+- `wrangler.toml` gains an `[env.staging]` block with its own D1, R2 and KV.
+- `scripts/checkConfig.ts` must be extended to assert that staging's ids are
+  distinct from both preview and production, so a copy-paste cannot quietly
+  point the friendly-org test at the throwaway database or the real one.
+- No seed or admin script gets a `:staging` variant without a deliberate
+  decision to add one.
+
+## 13. Eligibility becomes its own gating stage, not a section
+
+Decided 2026-09-08, by the owner.
+
+The seeded Inspire Change form currently carries eligibility as section 1 of a
+single-stage form (`src/seed/inspireChange.ts:52`). CLAUDE.md's submission flow
+step 2 wants a screen that fails fast and never collects a full application
+from an ineligible organization, which the section form does not do -- an
+ineligible org can fill in 34 fields and be rejected at submit.
+
+It becomes a separate `program_stages` entry with `gate_on_prior_decision`, so
+the full application is gated on passing eligibility.
+
+Settled now rather than later because published form definitions are immutable
+by trigger (`0003_form_engine.sql:121`). Changing it after the form has been
+served to real applicants means minting a new version while people may be
+mid-draft against the old one. The re-seed is cheap today and expensive the day
+after the cycle opens.
+
+This exercises the multi-stage path the form engine was built for, which until
+now only the second-program test covered.

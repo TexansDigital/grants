@@ -114,9 +114,15 @@ phases we know least about.
 
 ## Decisions needed
 
+**RESOLVED 2026-09-08** (see `docs/DECISIONS.md` §12, §13):
+- Friendly-organization test data goes in a third database, `steward-staging`.
+- Eligibility becomes its own gating stage, re-seeded before anyone uses the form.
+- First build: migration 0006, the router refactor with the first write routes,
+  and the Resend integration.
+
 **Blocking, in order of urgency:**
 
-1. **Where the friendly-organization test data lives.** CLAUDE.md verifies Phase
+1. ~~Where the friendly-organization test data lives.~~ RESOLVED — see above. CLAUDE.md verifies Phase
    2 by having three real organizations submit real applications. Today
    `database_id == preview_database_id` — one database — and `seed:preview`,
    `admin:apply` and `migrate:preview` all run against it with `--remote`. Real
@@ -128,7 +134,7 @@ phases we know least about.
 3. **The IRS Business Master File / Pub 78 data source** — which file, where it
    lives, refresh cadence, who refreshes it. `src/lib/ein.ts` defines the result
    type and has nothing behind it. Blocks the EIN check in item 5.
-4. **Eligibility: section or stage.** It is currently section 1 of a
+4. ~~Eligibility: section or stage.~~ RESOLVED — separate gating stage. Original note: It is currently section 1 of a
    single-stage form (`src/seed/inspireChange.ts:52`). CLAUDE.md wants a
    fail-fast screen that never collects a full application from an ineligible
    organization. Published form definitions are immutable, so changing this
