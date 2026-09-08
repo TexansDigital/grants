@@ -3,14 +3,17 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Steward — multi-program grantmaking platform on Cloudflare",
+  "description": "Steward \u2014 multi-program grantmaking platform on Cloudflare",
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json",
     "migrate:local": "wrangler d1 migrations apply steward-preview --local",
     "migrate:preview": "wrangler d1 migrations apply steward-preview --remote",
-    "dev": "wrangler dev"
+    "dev": "wrangler dev",
+    "seed:build": "esbuild scripts/buildSeed.ts --bundle --platform=node --format=esm --outfile=.seedbuild.mjs --log-level=warning && node .seedbuild.mjs && rm -f .seedbuild.mjs",
+    "seed:preview": "wrangler d1 execute steward-preview --remote --file=seeds/inspire-change.sql",
+    "seed:local": "wrangler d1 execute steward-preview --local --file=seeds/inspire-change.sql"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.12.21",

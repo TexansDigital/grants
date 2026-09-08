@@ -596,7 +596,7 @@ export async function submitApplication(
       entityId: app.id,
       before,
       after,
-    }, guard),
+    }, { guard }),
 
     // LAST. Everything above is a no-op if this would be.
     db
@@ -705,7 +705,7 @@ function organizationPromotionStatements(
       entityType: 'organization',
       entityId: organizationId,
       after: { promoted_from_application: columns },
-    }, guard),
+    }, { guard }),
   ];
 }
 
@@ -738,6 +738,6 @@ function contactPromotionStatements(
       entityType: 'contact',
       entityId: `${organizationId}:${contactEmail}`,
       after: { promoted_from_application: columns },
-    }, guard),
+    }, { guard }),
   ];
 }

@@ -161,6 +161,40 @@ wrangler 4 upgrade. They did not. What actually changed:
 - npm's only offered fix is pool 0.22, i.e. vitest 4 plus miniflare 5 alpha.
   Revisit when a stable miniflare 5 ships.
 
+## 10. Seeding is a checked-in SQL artifact, not an HTTP endpoint
+
+The obvious way to seed a remote database is a `/seed` route on the deployed
+Worker. That would put an unauthenticated WRITE endpoint on the public internet
+and ship seeding code inside the production bundle.
+
+Instead `npm run seed:build` emits `seeds/<slug>.sql`, applied by a human with
+an explicit command (`npm run seed:preview`). Zero seed code reaches the Worker,
+and the artifact can be reviewed as a diff before it touches anything.
+
+**The inserts are not written twice.** A hand-written second copy of every
+INSERT would drift from `seedProgram` the first time a column changed. The
+emitter RECORDS what the real seeder produces, through a D1-shaped fake that
+captures statements instead of executing them. The recorder deliberately
+implements no read methods, so if the seeder ever starts reading mid-insert it
+fails loudly rather than emitting a silently incomplete artifact.
+
+**Ids are deterministic** (`src/seed/deterministicIds.ts`), derived from the
+program slug. This is a safety property, not a convenience: nothing is
+hard-deleted and `audit_log` is append-only, so a seed run twice with random ids
+would leave a **permanent** duplicate program that cannot be removed. With
+derived ids the second run collides on the primary key and aborts. There is a
+test that runs the seed twice and asserts exactly one program survives.
+
+**The artifact is byte-stable.** `auditStatement` accepts an optional id and
+timestamp so a generated seed does not churn on every regeneration; runtime
+callers omit them and get a random id and the wall clock. Without this, ~40 of
+92 statements changed per run and the diff was unreviewable.
+
+**The seed contains the PROGRAM ONLY** -- no organizations, contacts or users.
+Planting fixture admin rows into a database that Cloudflare Access will later
+authenticate against is the wrong default, even with unroutable example.org
+addresses. Test fixtures stay in the test suite.
+
 ## Still open, and now blocking sooner than the brief implies
 
 - **Grace rule for late drafts (open decision #6).** Implemented as a per-cycle

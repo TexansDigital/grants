@@ -12,6 +12,7 @@
 import type { RequestContext } from '../types';
 import type { ProgramSpec, FieldSpec } from './types';
 import { newId } from '../lib/ids';
+import type { IdFactory } from './deterministicIds';
 import { nowIso } from '../lib/time';
 import { auditStatement } from '../lib/audit';
 import { assertUniversalCoverage, assertNoDuplicateTargets, DEFAULT_REQUIRED_MAPS_TO } from '../lib/mapsTo';
@@ -58,12 +59,24 @@ export async function seedProgram(
   db: D1Database,
   ctx: RequestContext,
   spec: ProgramSpec,
-  opts: { publish?: boolean } = {},
+  opts: {
+    publish?: boolean;
+    /**
+     * How row ids are produced. Defaults to random. A deterministic factory
+     * makes a seed re-runnable: the second run collides with the rows already
+     * present instead of silently creating a duplicate program that can never
+     * be cleaned up (nothing is hard-deleted, audit_log is append-only).
+     */
+    idFactory?: IdFactory;
+    /** Fixed timestamp, so a deterministic seed is byte-stable. */
+    now?: string;
+  } = {},
 ): Promise<SeededProgram> {
   const publish = opts.publish ?? true;
-  const now = nowIso();
+  const now = opts.now ?? nowIso();
+  const mint: IdFactory = opts.idFactory ?? (() => newId());
 
-  const programId = newId();
+  const programId = mint('program');
   const stageIds: Record<string, string> = {};
   const formDefinitionIds: Record<string, string> = {};
   const cycleIds: Record<string, string> = {};
@@ -100,12 +113,12 @@ export async function seedProgram(
       entityType: 'program',
       entityId: programId,
       after: { name: spec.name, slug: spec.slug, fiscal_year: spec.fiscalYear },
-    }),
+    }, { id: mint('audit/program.created'), now }),
   );
 
   // ---- stages and form definitions -------------------------------------------
   for (const [stageIndex, stage] of spec.stages.entries()) {
-    const stageId = newId();
+    const stageId = mint(`stage/${stage.key}`);
     stageIds[stage.key] = stageId;
 
     statements.push(
@@ -136,10 +149,10 @@ export async function seedProgram(
           name: stage.name,
           gate_on_prior_decision: stage.gateOnPriorDecision ? 1 : 0,
         },
-      }),
+      }, { id: mint(`audit/stage.created/${stage.key}`), now }),
     );
 
-    const formDefinitionId = newId();
+    const formDefinitionId = mint(`stage/${stage.key}/form`);
     formDefinitionIds[stage.key] = formDefinitionId;
 
     statements.push(
@@ -158,7 +171,7 @@ export async function seedProgram(
         entityType: 'form_definition',
         entityId: formDefinitionId,
         after: { program_id: programId, stage_key: stage.key, version: 1, status: 'draft' },
-      }),
+      }, { id: mint(`audit/form.created/${stage.key}`), now }),
     );
 
     // Assign ids up front so conditional references can be resolved without a
@@ -166,14 +179,14 @@ export async function seedProgram(
     const fieldIdByKey = new Map<string, string>();
     for (const section of stage.form.sections) {
       for (const field of section.fields) {
-        fieldIdByKey.set(field.key, newId());
+        fieldIdByKey.set(field.key, mint(`stage/${stage.key}/field/${field.key}`));
       }
     }
 
     const preflightFields: FieldDef[] = [];
 
     for (const [sectionIndex, section] of stage.form.sections.entries()) {
-      const sectionId = newId();
+      const sectionId = mint(`stage/${stage.key}/section/${section.key}`);
       statements.push(
         db
           .prepare(
@@ -195,7 +208,7 @@ export async function seedProgram(
           entityType: 'form_definition',
           entityId: formDefinitionId,
           after: { section_id: sectionId, section_key: section.key, title: section.title },
-        }),
+        }, { id: mint(`audit/section.created/${stage.key}/${section.key}`), now }),
       );
 
       for (const [fieldIndex, field] of section.fields.entries()) {
@@ -256,7 +269,7 @@ export async function seedProgram(
               is_required: field.required ? 1 : 0,
               maps_to: field.mapsTo ?? null,
             },
-          }),
+          }, { id: mint(`audit/field.created/${stage.key}/${field.key}`), now }),
         );
       }
     }
@@ -269,7 +282,7 @@ export async function seedProgram(
 
   // ---- cycles ---------------------------------------------------------------
   for (const cycle of spec.cycles) {
-    const cycleId = newId();
+    const cycleId = mint(`cycle/${cycle.name}`);
     cycleIds[cycle.name] = cycleId;
     statements.push(
       db
@@ -297,7 +310,7 @@ export async function seedProgram(
         entityType: 'cycle',
         entityId: cycleId,
         after: { program_id: programId, name: cycle.name, closes_at: cycle.closesAt },
-      }),
+      }, { id: mint(`audit/cycle.created/${cycle.name}`), now }),
     );
   }
 

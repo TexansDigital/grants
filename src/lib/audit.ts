@@ -206,8 +206,19 @@ export function auditStatement(
   db: D1Database,
   ctx: RequestContext,
   input: AuditInput,
-  guard?: AuditGuard,
+  opts: {
+    /** Make the audit row conditional on the same predicate as its mutation. */
+    guard?: AuditGuard;
+    /**
+     * Explicit row id and timestamp. Only the seeder supplies these, so a
+     * generated seed artifact is byte-stable and therefore reviewable as a
+     * diff. Runtime callers omit them and get a random id and the wall clock.
+     */
+    id?: string;
+    now?: string;
+  } = {},
 ): D1PreparedStatement {
+  const { guard, id, now } = opts;
   if (input.before == null && input.after == null) {
     // A mutating action must record at least one side. If both are absent, the
     // caller has misused the helper and we would be writing a contentless row.
@@ -216,7 +227,7 @@ export function auditStatement(
 
   const actorKind = ctx.session ? 'user' : 'anonymous';
   return db.prepare(insertSql(guard)).bind(
-    newId(),
+    id ?? newId(),
     ctx.session?.userId ?? null,
     actorKind,
     ctx.session?.role ?? null,
@@ -230,7 +241,7 @@ export function auditStatement(
     ctx.requestId,
     ctx.ip ?? null,
     ctx.userAgent ?? null,
-    nowIso(),
+    now ?? nowIso(),
     ...(guard?.binds ?? []),
   );
 }
