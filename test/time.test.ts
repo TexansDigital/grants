@@ -9,6 +9,31 @@ describe('deadlines', () => {
     expect(s).toContain('11:59');
   });
 
+  it('NAMES the zone, so a deadline is not just a bare wall-clock time', () => {
+    // Shipped without this once: the cycle list read "March 1, 2026 at
+    // 11:59 PM" and nothing said which 11:59 PM. An applicant two zones away
+    // reads that as their own and loses hours they did not know they had.
+    const s = formatInZone('2026-03-02T05:59:00.000Z', 'America/Chicago');
+    expect(s).toContain('CST');
+  });
+
+  it('follows daylight saving in the label without anyone editing a string', () => {
+    const winter = formatInZone('2026-01-15T18:00:00.000Z', 'America/Chicago');
+    const summer = formatInZone('2026-07-15T18:00:00.000Z', 'America/Chicago');
+    expect(winter).toContain('CST');
+    expect(summer).toContain('CDT');
+  });
+
+  it('honours an explicit style instead of throwing on mixed options', () => {
+    // Intl rejects dateStyle/timeStyle alongside timeZoneName. A caller that
+    // wants a style must get theirs, not a TypeError.
+    expect(() =>
+      formatInZone('2026-03-02T05:59:00.000Z', 'America/Chicago', { dateStyle: 'short' }),
+    ).not.toThrow();
+    expect(formatInZone('2026-03-02T05:59:00.000Z', 'America/Chicago', { dateStyle: 'short' }))
+      .toContain('3/1/26');
+  });
+
   it('handles the DST boundary without moving the deadline', () => {
     // 2026-03-08 is the US spring-forward date. A deadline stored in UTC does
     // not shift; one stored as local time would.

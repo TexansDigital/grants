@@ -15,20 +15,44 @@ export function toIso(d: Date): string {
 }
 
 /**
+ * Default shape for a human-facing timestamp.
+ *
+ * Explicit components rather than dateStyle/timeStyle, because Intl rejects
+ * combining those with timeZoneName -- and the zone name is not optional here.
+ */
+const ZONED_DEFAULTS: Intl.DateTimeFormatOptions = {
+  year: 'numeric',
+  month: 'long',
+  day: 'numeric',
+  hour: 'numeric',
+  minute: '2-digit',
+  timeZoneName: 'short',
+};
+
+/**
  * Format a stored UTC timestamp for a human, in the program's display timezone.
  * Cycle deadlines are announced in Central time; this is where that happens.
+ *
+ * The zone NAME is always part of the output. This previously used
+ * `dateStyle: 'long'` with `timeStyle: 'short'`, which cannot emit one, so the
+ * cycle list read "March 1, 2026 at 11:59 PM" with nothing saying which 11:59
+ * PM. That is a deadline a nonprofit is held to; an applicant two zones away
+ * reads it as their own and loses hours they did not know they had.
+ *
+ * "CST" and "CDT" come out of the zone data, so the label follows daylight
+ * saving by itself rather than being a string someone must remember to change
+ * twice a year.
  */
 export function formatInZone(
   iso: string,
   timeZone: string,
   opts: Intl.DateTimeFormatOptions = {},
 ): string {
-  return new Intl.DateTimeFormat('en-US', {
-    timeZone,
-    dateStyle: 'long',
-    timeStyle: 'short',
-    ...opts,
-  }).format(new Date(iso));
+  // A caller asking for a style wants a different shape entirely, and Intl
+  // throws if the two kinds of option are combined. Honour theirs alone.
+  const usesStyles = opts.dateStyle !== undefined || opts.timeStyle !== undefined;
+  const options = usesStyles ? { ...opts } : { ...ZONED_DEFAULTS, ...opts };
+  return new Intl.DateTimeFormat('en-US', { ...options, timeZone }).format(new Date(iso));
 }
 
 /**
