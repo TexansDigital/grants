@@ -30,6 +30,7 @@ export type Severity = 'warn' | 'error' | 'fatal';
 export type ErrorCode =
   | 'VALIDATION_FAILED'
   | 'NOT_FOUND'
+  | 'METHOD_NOT_ALLOWED'
   | 'UNAUTHENTICATED'
   | 'FORBIDDEN'
   | 'CONFLICT'
@@ -42,6 +43,7 @@ export type ErrorCode =
 const STATUS_BY_CODE: Record<ErrorCode, number> = {
   VALIDATION_FAILED: 400,
   NOT_FOUND: 404,
+  METHOD_NOT_ALLOWED: 405,
   UNAUTHENTICATED: 401,
   FORBIDDEN: 403,
   CONFLICT: 409,
@@ -351,8 +353,20 @@ export async function toErrorResponse(
 
   // Same headers as a success response. These previously diverged and error
   // responses shipped without a Content-Security-Policy.
+  const headers = securityHeaders(ctx.requestId);
+
+  // RFC 9110 requires Allow on a 405. Built here rather than at the throw site
+  // so there is one place a 405 can be constructed and one place it can be
+  // wrong. The methods come from the route table, never from the request.
+  if (appErr.code === 'METHOD_NOT_ALLOWED') {
+    const allow = appErr.context?.allow;
+    if (Array.isArray(allow) && allow.length > 0) {
+      headers['allow'] = allow.filter((m) => typeof m === 'string').join(', ');
+    }
+  }
+
   return new Response(JSON.stringify(body), {
     status: appErr.httpStatus,
-    headers: securityHeaders(ctx.requestId),
+    headers,
   });
 }

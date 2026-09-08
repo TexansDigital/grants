@@ -418,13 +418,20 @@ describe('serving the single-page app', () => {
     }
   });
 
-  it('does not serve the shell for a non-GET request', async () => {
+  it('answers 405 with Allow for a non-GET request, not the shell and not a 404', async () => {
+    // The route TABLE can tell "no such path" from "that path, another method";
+    // the if-chain it replaced could not, so a POST to a GET-only route read to
+    // the caller as though the endpoint did not exist. That sends the next
+    // person debugging it looking for a routing bug that is not there.
     const res = await worker.fetch(
       new Request('https://steward.example.org/forms/anything', { method: 'POST' }),
       envWithAssets(),
       exec,
     );
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(405);
+    expect(res.headers.get('allow')).toBe('GET, HEAD');
+    // Still no HTML: the shell is not served to a write attempt.
+    expect(res.headers.get('content-type')).toContain('application/json');
   });
 
   it('404s rather than 500s when there is no asset binding at all', async () => {
