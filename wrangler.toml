@@ -47,7 +47,7 @@ ENVIRONMENT = "preview"
 DISPLAY_TIMEZONE = "America/Chicago"
 # Cloudflare Access. Fill both in once the Access application exists; until then
 # every staff route fails closed. Neither is a secret.
-ACCESS_TEAM_DOMAIN = ""
+ACCESS_TEAM_DOMAIN = "texansdigital.cloudflareaccess.com"
 ACCESS_AUD = ""
 # Turnstile / Resend / Eloqua / R2 signing credentials are Wrangler SECRETS.
 # They are never listed here. See docs/SECRETS.md.
