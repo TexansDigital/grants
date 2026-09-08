@@ -92,14 +92,15 @@ if (customDomains.length > 0 && (team === '' || aud === '')) {
   );
 }
 
-// Both hostnames live at once is the correct state only while cutting over.
-// Left that way permanently it is an extra public surface that a later Access
-// policy change can forget about.
-if (customDomains.length > 0 && workersDev === 'true') {
-  console.warn(
-    `note: workers_dev is still true alongside ${customDomains.join(', ')}. ` +
-      `That is correct DURING cutover. Set it to false once the custom domain ` +
-      `is verified and the Access application covers it.`,
+// Once a custom domain exists, workers.dev is an extra public hostname with no
+// purpose. Both being live at once is correct only during a cutover, and that
+// cutover is done. A hard failure, not a warning: this script exists because an
+// extra hostname slipped through once already, and if workers.dev is ever
+// genuinely needed again, editing this rule is the review moment we want.
+if (customDomains.length > 0 && workersDev !== 'false') {
+  problems.push(
+    `workers_dev is ${workersDev} alongside the custom domain ${customDomains.join(', ')}. ` +
+      `Two public hostnames means two surfaces for an Access policy change to miss.`,
   );
 }
 

@@ -20,8 +20,8 @@ compatibility_flags = ["nodejs_compat"]
 # every hostname is something Cloudflare Access has to be put in front of
 # separately.
 #
-# workers.dev is on for now: it is the destination the Access application points
-# at until a custom domain exists. Turn it off once one does.
+# workers.dev is OFF. grants.houstontexansfoundation.org is the only hostname
+# this Worker answers on, and one hostname is one surface to reason about.
 #
 # Preview URLs are OFF. They mint a NEW hostname per deployed version
 # (<version>-steward.<subdomain>.workers.dev). An Access policy attached to the
@@ -34,7 +34,7 @@ compatibility_flags = ["nodejs_compat"]
 # [table] header. TOML assigns every key after a header to that table, so
 # putting them lower silently makes them "unexpected fields in observability"
 # and the setting never applies.
-workers_dev = true
+workers_dev = false
 preview_urls = false
 
 # The real hostname. A subdomain rather than the apex, so the apex stays free
@@ -45,9 +45,8 @@ preview_urls = false
 # version control: a public hostname that exists only as a dashboard setting is
 # a hostname nobody reviews.
 #
-# workers_dev stays TRUE until this domain is confirmed working AND the Access
-# application covers it. Turning it off first leaves no way in if the custom
-# domain misbehaves.
+# Verified working behind Access before workers_dev was turned off. Doing it in
+# the other order leaves no way in if the custom domain misbehaves.
 routes = [
   { pattern = "grants.houstontexansfoundation.org", custom_domain = true }
 ]
