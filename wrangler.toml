@@ -37,6 +37,21 @@ compatibility_flags = ["nodejs_compat"]
 workers_dev = true
 preview_urls = false
 
+# The real hostname. A subdomain rather than the apex, so the apex stays free
+# for the public "who we funded" page (Module 8) without that page and the
+# application portal sharing an origin, a CSP, or an Access policy.
+#
+# Declared here rather than clicked in the dashboard so the hostname is in
+# version control: a public hostname that exists only as a dashboard setting is
+# a hostname nobody reviews.
+#
+# workers_dev stays TRUE until this domain is confirmed working AND the Access
+# application covers it. Turning it off first leaves no way in if the custom
+# domain misbehaves.
+routes = [
+  { pattern = "grants.houstontexansfoundation.org", custom_domain = true }
+]
+
 [observability]
 enabled = true
 

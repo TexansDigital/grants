@@ -250,3 +250,35 @@ after the cycle opens.
 
 This exercises the multi-stage path the form engine was built for, which until
 now only the second-program test covered.
+
+## 14. The domain is houstontexansfoundation.org, app on a subdomain
+
+Purchased 2026-09-08 through Cloudflare Registrar, so DNS is in the same
+account as the Worker and nothing has to be delegated.
+
+**The app lives at `grants.houstontexansfoundation.org`, not the apex.** The
+apex stays free for the public "who we funded" page (Module 8), which is a
+different audience, a different threat model, and a different Access posture --
+one is behind staff authentication and the other is deliberately public. Giving
+them separate origins now costs nothing; separating them later means changing a
+URL that nonprofits have already bookmarked.
+
+**Mail sends from a `send.` subdomain, never the apex and never
+houstontexans.com.** Two reasons. The corporate domain is Microsoft 365 whose
+DNS this project does not control, and adding an SPF include there is an IT
+ticket with a real chance of breaking corporate mail. And confining sending to
+a subdomain means a future spam complaint damages the reputation of a hostname
+that only ever carries login links, not the domain the web application is on.
+
+**The route is declared in wrangler.toml, not clicked in the dashboard.** A
+public hostname that exists only as a dashboard setting is a hostname nobody
+reviews. `scripts/checkConfig.ts` now asserts that `routes` is top-level (below
+a `[table]` header TOML would assign it to that table and wrangler would ignore
+it -- the same failure that once left Preview URLs enabled), that the pattern is
+a plain hostname, and that a custom domain is never shipped while
+ACCESS_TEAM_DOMAIN or ACCESS_AUD is empty.
+
+`workers_dev` stays TRUE until the custom domain is confirmed working and the
+Access application covers it. Turning it off first leaves no way in if the new
+hostname misbehaves. checkConfig prints a note while both are live, because
+that state is correct during a cutover and wrong permanently.
