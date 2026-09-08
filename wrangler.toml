@@ -15,9 +15,6 @@ main = "src/index.ts"
 compatibility_date = "2025-01-15"
 compatibility_flags = ["nodejs_compat"]
 
-[observability]
-enabled = true
-
 # --- Hostname surface ---------------------------------------------------------
 # Explicit rather than defaulted, because each of these is a PUBLIC HOSTNAME and
 # every hostname is something Cloudflare Access has to be put in front of
@@ -25,7 +22,6 @@ enabled = true
 #
 # workers.dev is on for now: it is the destination the Access application points
 # at until a custom domain exists. Turn it off once one does.
-workers_dev = true
 #
 # Preview URLs are OFF. They mint a NEW hostname per deployed version
 # (<version>-steward.<subdomain>.workers.dev). An Access policy attached to the
@@ -33,7 +29,17 @@ workers_dev = true
 # around Access. The Worker still verifies the Access assertion itself and would
 # reject unauthenticated requests on any hostname -- but that is defence in
 # depth, not a reason to leave an extra door open.
+#
+# NOTE ON PLACEMENT: these are TOP-LEVEL keys and must stay above the first
+# [table] header. TOML assigns every key after a header to that table, so
+# putting them lower silently makes them "unexpected fields in observability"
+# and the setting never applies.
+workers_dev = true
 preview_urls = false
+
+[observability]
+enabled = true
+
 
 [vars]
 ENVIRONMENT = "preview"
