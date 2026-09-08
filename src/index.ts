@@ -17,12 +17,18 @@
 
 import type { Env, RequestContext, Session } from './types';
 import { newRequestId } from './lib/ids';
-import { AppError, logError, notFound, toErrorResponse } from './lib/errors';
+import { AppError, logError, notFound, toErrorResponse, validationFailed } from './lib/errors';
 import { nowIso, formatInZone } from './lib/time';
 import { securityHeaders, htmlHeaders } from './lib/httpHeaders';
 import { requireStaffSession } from './lib/auth';
 import { loadFormDefinition } from './lib/loadForm';
-import { listApplicationsForReviewer } from './lib/scope';
+import {
+  getApplicationDetailForStaff,
+  listApplicationsForReviewer,
+  listApplicationsForStaff,
+  organizationHistoryForStaff,
+} from './lib/scope';
+import { searchApplications } from './lib/search';
 import {
   ADMIN_ONLY,
   ANY_STAFF,
@@ -301,6 +307,83 @@ const routes: readonly Route[] = [
     roles: ANY_STAFF,
     handler: async ({ env, ctx, params }) =>
       json({ form: await loadFormDefinition(env.DB, params.id!) }, ctx),
+  },
+
+  // ---- applications (the pipeline) -----------------------------------------
+  {
+    method: 'GET',
+    path: '/api/applications',
+    roles: ['admin', 'reviewer'],
+    handler: async ({ env, ctx, url, session }) => {
+      const q = url.searchParams;
+
+      // Money arrives as a string on a query string. It is parsed as INTEGER
+      // CENTS and rejected if it is anything else, rather than coerced -- a
+      // filter that silently reads "50000" as fifty thousand dollars when the
+      // column holds cents returns a confidently wrong page of results.
+      const cents = (key: string): number | null => {
+        const raw = q.get(key);
+        if (raw === null || raw.trim() === '') return null;
+        if (!/^\d+$/.test(raw.trim())) {
+          throw validationFailed([
+            { field: key, message: `${key} must be a whole number of cents.` },
+          ]);
+        }
+        const n = Number(raw.trim());
+        if (!Number.isSafeInteger(n)) {
+          throw validationFailed([{ field: key, message: `${key} is too large.` }]);
+        }
+        return n;
+      };
+
+      const page = Number(q.get('limit') ?? '50');
+      const from = Number(q.get('offset') ?? '0');
+
+      const result = await listApplicationsForStaff(env.DB, session, {
+        programId: q.get('program_id'),
+        cycleId: q.get('cycle_id'),
+        stageId: q.get('stage_id'),
+        status: q.get('status'),
+        organizationId: q.get('organization_id'),
+        minAmountCents: cents('min_amount_cents'),
+        maxAmountCents: cents('max_amount_cents'),
+        limit: Number.isSafeInteger(page) ? page : 50,
+        offset: Number.isSafeInteger(from) ? from : 0,
+      });
+      return json(result, ctx);
+    },
+  },
+  {
+    method: 'GET',
+    path: '/api/applications/:id',
+    roles: ['admin', 'reviewer'],
+    handler: async ({ env, ctx, params, session }) =>
+      json(await getApplicationDetailForStaff(env.DB, session, params.id!), ctx),
+  },
+
+  // ---- search --------------------------------------------------------------
+  {
+    // "Have we ever funded youth mental health in Fort Bend County" as a query
+    // rather than an afternoon. Scoped by assignment, not merely by staff role.
+    method: 'GET',
+    path: '/api/search',
+    roles: ['admin', 'reviewer'],
+    handler: async ({ env, ctx, url, session }) => {
+      const q = url.searchParams.get('q') ?? '';
+      const hits = await searchApplications(env.DB, session, q, 50);
+      return json({ query: q, hits }, ctx);
+    },
+  },
+
+  // ---- organizations -------------------------------------------------------
+  {
+    // The applicant-history panel. Institutional memory that currently lives in
+    // one person's head.
+    method: 'GET',
+    path: '/api/organizations/:id/history',
+    roles: ['admin', 'reviewer'],
+    handler: async ({ env, ctx, params, session }) =>
+      json(await organizationHistoryForStaff(env.DB, session, params.id!), ctx),
   },
 
   // ---- review --------------------------------------------------------------

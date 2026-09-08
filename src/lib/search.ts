@@ -7,7 +7,7 @@
  */
 
 import type { Session } from '../types';
-import { isStaffRole } from './scope';
+import { isStaffRole, staffApplicationScope } from './scope';
 import { notFound } from './errors';
 import type { FormDefinition } from './forms';
 import { allFields } from './forms';
@@ -224,9 +224,24 @@ export async function searchApplications(
   const query = toFtsQuery(userInput);
   if (!query) return [];
 
-  // Joined to applications so soft-deleted and withdrawn work cannot surface.
-  // The FTS table has no lifecycle of its own; relying on remembering to call
-  // unindexStatements everywhere is how a withdrawn application stays findable.
+  /*
+   * SCOPED BY ASSIGNMENT, not merely by "is this person staff".
+   *
+   * This previously checked isStaffRole and nothing else, so a reviewer
+   * received a ranked snippet of the narrative of every application in the
+   * system -- including the ones nobody had assigned to them. It was latent
+   * while review_assignments did not exist and the reviewer detail path failed
+   * closed; it became real the moment assignments could be created. A snippet
+   * of another organization's narrative is seeing it.
+   *
+   * The scope comes from scope.ts so search, the detail view, the review queue
+   * and the pipeline list cannot disagree about what a reviewer may see.
+   *
+   * Joined to applications so soft-deleted and withdrawn work cannot surface.
+   * The FTS table has no lifecycle of its own; relying on remembering to call
+   * unindexStatements everywhere is how a withdrawn application stays findable.
+   */
+  const scope = staffApplicationScope(session);
   const { results } = await db
     .prepare(
       `SELECT f.application_id AS application_id,
@@ -234,13 +249,15 @@ export async function searchApplications(
               snippet(application_fts, 6, '[', ']', '...', 20) AS snippet
          FROM application_fts f
          JOIN applications a ON a.id = f.application_id
-        WHERE application_fts MATCH ?
+         ${scope.join}
+        WHERE ${scope.where}
+          AND application_fts MATCH ?
           AND a.deleted_at IS NULL
           AND a.status <> 'withdrawn'
         ORDER BY f.rank
         LIMIT ?`,
     )
-    .bind(query, Math.min(Math.max(limit, 1), 200))
+    .bind(...scope.binds, query, Math.min(Math.max(limit, 1), 200))
     .all<SearchHit>();
 
   return results ?? [];
