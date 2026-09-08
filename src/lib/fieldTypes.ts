@@ -44,6 +44,30 @@ export const EMPTY_VALUE: StoredValue = {
   value_json: null,
 };
 
+/**
+ * Is a stored answer actually empty?
+ *
+ * All four value columns null. This exists because "has a row" and "has an
+ * answer" are not the same thing and were being treated as if they were: a
+ * blank answer coerces to EMPTY_VALUE and was written as an all-NULL row, and
+ * required-ness then asked only whether a row existed. Every required field
+ * except the attestations could be defeated by answering it with "".
+ *
+ * An unchecked attestation has value_int = 0, which is NOT empty -- the
+ * applicant answered, and the answer was no. That distinction is the whole
+ * reason this is a function and not `Object.values(v).every(x => x === null)`
+ * written inline at three call sites.
+ */
+export function isStoredEmpty(value: StoredValue | undefined | null): boolean {
+  if (!value) return true;
+  return (
+    value.value_text === null &&
+    value.value_int === null &&
+    value.value_real === null &&
+    value.value_json === null
+  );
+}
+
 export interface FieldOption {
   value: string;
   label: string;

@@ -15,7 +15,7 @@
  */
 
 import type { FieldDef, FieldError, StoredValue } from './fieldTypes';
-import { coerceAnswer } from './fieldTypes';
+import { coerceAnswer, isStoredEmpty } from './fieldTypes';
 
 export interface SectionDef {
   id: string;
@@ -151,8 +151,14 @@ export function validateSubmission(
       : undefined;
 
     if (rawValue === undefined) {
-      // Not posted. If we have a stored answer it stands; otherwise it is empty.
-      emptyByFieldId.set(field.id, !coerced.has(field.id));
+      // Not posted. A STORED answer stands -- but only if it is actually an
+      // answer. Testing `coerced.has(field.id)` treated the existence of a row
+      // as proof of an answer, and a blanked field leaves an all-NULL row
+      // behind. That made every required field except the attestations
+      // defeatable: blank the form, submit an empty body, and validation saw
+      // thirty-three "answered" fields and passed. The application landed
+      // submitted with no requested amount, no EIN and no contact email.
+      emptyByFieldId.set(field.id, isStoredEmpty(coerced.get(field.id)));
       continue;
     }
     presentInRequest.add(field.id);

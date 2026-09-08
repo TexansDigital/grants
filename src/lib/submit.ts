@@ -41,6 +41,7 @@ import { nowIso, isCycleAcceptingSubmission } from './time';
 import { sessionOrgId } from './scope';
 import { assertCents } from './money';
 import type { StoredValue } from './fieldTypes';
+import { isStoredEmpty } from './fieldTypes';
 
 /**
  * D1 caps bound parameters per statement (100 on the remote service; SQLite's
@@ -174,6 +175,26 @@ function answerStatements(
   for (const [fieldId, stored] of answers) {
     const field = fieldsById.get(fieldId);
     if (!field) continue;
+
+    // A cleared answer is a DELETE, not an all-NULL row.
+    //
+    // Writing the row made "there is a row" and "there is an answer" different
+    // things, and required-ness was reading the first as the second -- which
+    // is how every required field except the attestations became defeatable by
+    // answering it with "". forms.ts now judges the value rather than the row,
+    // so this is the second of two independent defences; it also stops the
+    // answers table filling with rows that mean nothing.
+    if (isStoredEmpty(stored)) {
+      stmts.push(
+        db
+          .prepare(
+            `DELETE FROM application_answers
+              WHERE application_id = ? AND form_field_id = ? AND ${DRAFT_GUARD}`,
+          )
+          .bind(applicationId, fieldId, applicationId),
+      );
+      continue;
+    }
 
     // Last line of defence before a value reaches a money column. The database
     // CHECK cannot reject the STRING '2500007' -- SQLite's TEXT->INTEGER
