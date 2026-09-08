@@ -94,7 +94,7 @@ phases we know least about.
 | **1** | Migration 0006: rubrics, criteria, review assignments, scores; FK on `cycles.rubric_id` | — | Unblocks the reviewer path, which fails closed today |
 | **2** | Router refactor to a route table; first staff **write** routes (program / cycle / stage CRUD, cycle open-close) | — | Nothing mutating exists. Both the review flow and the public cutoff need this |
 | **3** | Resend integration: send helper, failure logging, template harness | — | The magic link is the first send; the confirmation email is the second |
-| **4** | **Domain**: purchase → Worker on custom domain → Access re-scoped to staff paths → `workers_dev = false` | — | Start immediately; DNS lead time. Blocks anything public |
+| **4** | **Domain**: ~~purchase~~ → ~~Worker on custom domain~~ → ~~Access on the staff hostname~~ → `workers_dev = false` → Resend DNS | — | Mostly DONE. Remaining: flip workers_dev once verified, and the Resend records |
 | **5** | 2a — applicant identity **including organization resolution**: magic link (single-use, hashed, 15-min, rate-limited), email→organization matching, EIN capture, returning-organization prefill | 3 | `users` requires a non-null `organization_id` for applicants, so signup *must* resolve an org. Prefill and EIN matching move here from 2d |
 | **6** | Staff read surface: pipeline list, filters, application detail, FTS search route, applicant-history panel | 1, 2 | The undone half of Phase 1. Parallel with 5 |
 | **7** | Draft create: application row, per-cycle limit, stage gate, **public published-only** form endpoint | 2, 5 | Not plumbing. The current form endpoint is staff-only and serves draft and retired definitions unfiltered |
@@ -129,8 +129,10 @@ phases we know least about.
    EINs and audited financials in the database people run destructive scripts
    against inverts the spirit of non-negotiable #2. Options: a third D1
    (`steward-staging`), or a deliberate production cutover before that test.
-2. **The domain**, and how Access is re-scoped once public paths share the
-   hostname.
+2. ~~The domain, and how Access is re-scoped once public paths share the
+   hostname.~~ RESOLVED — houstontexansfoundation.org is registered; staff on
+   `grants.`, applicants on `apply.`, Access covers the staff hostname
+   entirely and never touches the applicant one. See DECISIONS.md §14, §15.
 3. **The IRS Business Master File / Pub 78 data source** — which file, where it
    lives, refresh cadence, who refreshes it. `src/lib/ein.ts` defines the result
    type and has nothing behind it. Blocks the EIN check in item 5.

@@ -282,3 +282,38 @@ ACCESS_TEAM_DOMAIN or ACCESS_AUD is empty.
 Access application covers it. Turning it off first leaves no way in if the new
 hostname misbehaves. checkConfig prints a note while both are live, because
 that state is correct during a cutover and wrong permanently.
+
+## 15. Staff and applicants get SEPARATE hostnames, not path-scoped Access
+
+Decided 2026-09-08, by the owner, ahead of the public application flow.
+
+  grants.houstontexansfoundation.org   staff. Cloudflare Access covers the
+                                       entire hostname, no exceptions.
+  apply.houstontexansfoundation.org    applicants and grantees. Access never
+                                       touches it; the Worker authenticates
+                                       these users itself by magic link.
+
+The alternative was one hostname with Access scoped to `/api/*` and the staff
+shell, leaving applicant paths open. Rejected because the failure modes are not
+symmetrical. A path pattern that is too NARROW exposes a staff route to the
+public internet and nothing complains; a path pattern that is too WIDE locks
+applicants out, which at least announces itself. Betting the confidentiality of
+other organizations' financial statements on a correctly written path glob is a
+bet with no upside.
+
+"Access protects this entire hostname, no exceptions" is also a rule any person
+can verify at a glance, without reading a policy. That matters more than one
+saved DNS record.
+
+Consequences, none of them due yet:
+
+- One Worker serves both hostnames. The route table will need a host
+  constraint, and a staff route reached on apply. must 404 rather than fall
+  through to the Access check -- otherwise the separation is a convention
+  rather than a control. There is no host field on Route today; it goes in with
+  the first applicant route, not before, because an untested constraint that
+  nothing exercises is worse than an absent one.
+- The applicant hostname is NOT created until something serves it. A live
+  public hostname with nothing behind it is a surface with no purpose.
+- CSP, cookies and CORS stay simple: same-origin on each hostname separately,
+  and the two never need to talk to each other.
