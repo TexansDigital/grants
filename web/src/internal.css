@@ -7,10 +7,30 @@
  * form, which optimises for one long careful pass.
  */
 
-/* On the dark surface the masthead and the page ground are the same colour;
-   without a rule the band has no edge at all. */
-[data-surface='internal'] .masthead {
+/* The masthead is always the Deep Steel band -- it is brand, not a surface, so
+   it does not invert with the theme. In dark mode it is the same colour as the
+   page ground and needs an edge; in light mode the contrast supplies one. */
+[data-surface='internal'][data-theme='dark'] .masthead {
   border-bottom: 1px solid var(--line);
+}
+
+/* Theme toggle. Sits in the masthead, so its colours come from the band rather
+   than from the surface tokens underneath it. */
+.theme-toggle {
+  font: inherit;
+  font-size: var(--step--1);
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.86);
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: var(--radius);
+  padding: var(--space-2) var(--space-3);
+  min-height: 32px;
+  cursor: pointer;
+}
+.theme-toggle:hover {
+  background: rgba(255, 255, 255, 0.16);
+  color: var(--white);
 }
 
 main.wide {
@@ -105,12 +125,13 @@ th.num {
   border: 1px solid var(--line);
   color: var(--ink-2);
 }
-/* Blue is the active/affirmative state. Red stays reserved for alerts. */
+/* Blue is the active/affirmative state. Red stays reserved for alerts.
+   The border is the brand blue; the 11px label is the text-safe one. */
 .badge-active,
 .badge-open,
 .badge-published {
   border-color: var(--blue);
-  color: var(--blue);
+  color: var(--blue-ink);
 }
 .badge-draft {
   border-color: var(--line);

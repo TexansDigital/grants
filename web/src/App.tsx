@@ -18,6 +18,14 @@ import type { CycleRow, FormSummary, ProgramRow, SessionUser } from './api';
 import type { FormDefinition } from '../../src/lib/forms';
 import { Home } from './Home';
 import { FormRenderer } from './FormRenderer';
+import {
+  loadPreference,
+  savePreference,
+  resolveTheme,
+  nextPreference,
+  systemPrefersLight,
+  type ThemePreference,
+} from './theme';
 
 type Route = { name: 'home' } | { name: 'form'; id: string };
 
@@ -41,6 +49,8 @@ export function App(): ReactElement {
   const [form, setForm] = useState<FormDefinition | null>(null);
   const [error, setError] = useState<ApiError | null>(null);
   const [loading, setLoading] = useState(true);
+  const [themePref, setThemePref] = useState<ThemePreference>(loadPreference);
+  const [systemIsLight, setSystemIsLight] = useState(systemPrefersLight);
 
   const navigate = useCallback((path: string) => {
     window.history.pushState({}, '', path);
@@ -55,11 +65,41 @@ export function App(): ReactElement {
     return () => window.removeEventListener('popstate', onPop);
   }, []);
 
-  // The applicant form is light; staff views are dark. See web/src/theme.css.
+  // Follow the operating system while the preference is "system", live -- not
+  // only at load. Someone whose machine switches to light in the evening should
+  // not have to reload Steward.
+  useEffect(() => {
+    const mq = window.matchMedia?.('(prefers-color-scheme: light)');
+    if (!mq) return;
+    const onChange = (e: MediaQueryListEvent) => setSystemIsLight(e.matches);
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
+
+  const resolvedTheme = resolveTheme(themePref, systemIsLight);
+
+  /**
+   * Surface and theme, both on <html> so the ground behind the card switches
+   * with them rather than each component remembering to.
+   *
+   * The applicant form is pinned light whatever the staff preference says. A
+   * dark ground under a forty-field form filled in over an hour is a
+   * readability problem, and an applicant has no toggle to escape it with.
+   */
   useEffect(() => {
     const internal = route?.name !== 'form';
-    document.documentElement.dataset.surface = internal ? 'internal' : 'applicant';
-  }, [route]);
+    const html = document.documentElement;
+    html.dataset.surface = internal ? 'internal' : 'applicant';
+    html.dataset.theme = internal ? resolvedTheme : 'light';
+  }, [resolvedTheme, route]);
+
+  const cycleTheme = useCallback(() => {
+    setThemePref((prev) => {
+      const next = nextPreference(prev, resolvedTheme);
+      savePreference(next);
+      return next;
+    });
+  }, [resolvedTheme]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -158,6 +198,9 @@ export function App(): ReactElement {
       cycles={home.cycles}
       forms={home.forms}
       onOpenForm={(id) => navigate(`/forms/${encodeURIComponent(id)}`)}
+      themePref={themePref}
+      resolvedTheme={resolvedTheme}
+      onCycleTheme={cycleTheme}
     />
   );
 }

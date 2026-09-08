@@ -9,6 +9,7 @@
 
 import type { ReactElement } from 'react';
 import type { CycleRow, FormSummary, ProgramRow, SessionUser } from './api';
+import { labelFor, type ResolvedTheme, type ThemePreference } from './theme';
 
 interface Props {
   user: SessionUser;
@@ -16,9 +17,21 @@ interface Props {
   cycles: CycleRow[];
   forms: FormSummary[];
   onOpenForm: (id: string) => void;
+  themePref: ThemePreference;
+  resolvedTheme: ResolvedTheme;
+  onCycleTheme: () => void;
 }
 
-export function Home({ user, programs, cycles, forms, onOpenForm }: Props): ReactElement {
+export function Home({
+  user,
+  programs,
+  cycles,
+  forms,
+  onOpenForm,
+  themePref,
+  resolvedTheme,
+  onCycleTheme,
+}: Props): ReactElement {
   const cyclesByProgram = new Map<string, CycleRow[]>();
   for (const c of cycles) {
     const list = cyclesByProgram.get(c.program_id) ?? [];
@@ -46,6 +59,12 @@ export function Home({ user, programs, cycles, forms, onOpenForm }: Props): Reac
           <span className="program">
             {user.email} · {user.role}
           </span>
+          {/* Cycles system -> the opposite of what you see now -> back to
+              system. The label always states where you are, so nobody has to
+              press it to find out. */}
+          <button type="button" className="theme-toggle" onClick={onCycleTheme}>
+            {labelFor(themePref, resolvedTheme)}
+          </button>
         </div>
       </header>
 

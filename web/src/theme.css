@@ -3,7 +3,8 @@
  *
  * The applicant form is LIGHT themed. A dark ground under a forty-field form
  * that someone fills in over an hour is a readability problem, not a brand win.
- * Internal staff views are dark; those tokens live under [data-surface="internal"].
+ * Internal staff views default to dark, with a toggle; those tokens live under
+ * [data-surface="internal"][data-theme="dark"].
  *
  * Palette discipline:
  *   --steel  #021018  text, headings, the dark ground on internal views
@@ -21,6 +22,27 @@
   --red: #ed0028;
   --blue: #0080c6;
   --white: #ffffff;
+
+  /*
+   * Text-safe blues.
+   *
+   * #0080C6 measures 4.28:1 against white -- under WCAG AA's 4.5:1 for text
+   * below 18.66px bold. It fails the same way in reverse: white on #0080C6 is
+   * also 4.28:1. So the brand blue cannot carry small text in either
+   * direction, and the badges, the primary button and the active step marker
+   * all did exactly that.
+   *
+   * The brand blue is UNCHANGED and still used everywhere it is not carrying
+   * text: focus rings, borders, checkbox accents, the active-section bar.
+   * These two are derived from it for the cases where text is involved.
+   *
+   *   --blue-ink   blue TEXT on a page surface. Darkened toward Deep Steel on
+   *                light, lightened toward white on dark.
+   *   --blue-fill  a blue GROUND carrying white text. Darker in both themes,
+   *                because lightening it makes white on it worse.
+   */
+  --blue-ink: #0075b5; /* 4.99:1 on white */
+  --blue-fill: #0075b5; /* white on it: 4.99:1 */
 
   /* Neutrals: --steel at decreasing opacity over white, flattened to hex so
      they composite predictably over any background. */
@@ -76,8 +98,23 @@
   --shadow-2: 0 4px 12px rgba(2, 16, 24, 0.08), 0 2px 4px rgba(2, 16, 24, 0.06);
 }
 
-/* Internal staff surfaces: dense, dark, information-first. */
-[data-surface='internal'] {
+/*
+ * Internal staff surfaces.
+ *
+ * Dark is the default because these are dense, information-first screens that
+ * someone has open all day. It is a PREFERENCE, not a rule: the toggle in the
+ * masthead switches it and the choice is remembered, and an unset preference
+ * follows the operating system.
+ *
+ * The applicant form is exempt and always light. That is not a style choice --
+ * a dark ground under a forty-field form somebody fills in over an hour is a
+ * readability problem, and the person filling it in has no toggle and no
+ * reason to look for one.
+ */
+[data-surface='internal'][data-theme='dark'] {
+  /* Lightened rather than darkened: on a dark ground the text has to come up,
+     not down. 5.32:1 on --surface and 4.70:1 on the hover surface. */
+  --blue-ink: #2693cf;
   --ink: #eef1f3;
   --ink-2: #a9b4bd;
   --ink-3: #7b868f;
@@ -133,7 +170,7 @@ body {
 }
 
 a {
-  color: var(--blue);
+  color: var(--blue-ink);
   text-underline-offset: 2px;
 }
 a:hover {
