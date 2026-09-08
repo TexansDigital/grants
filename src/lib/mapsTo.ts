@@ -36,6 +36,70 @@ export const MAPS_TO_TARGETS = [
 export type MapsToTarget = (typeof MAPS_TO_TARGETS)[number];
 
 /**
+ * Which field types may promote into which target.
+ *
+ * This existed nowhere, and its absence was a silent 100x money error waiting
+ * to happen. Nothing tied `maps_to = 'requested_amount_cents'` to
+ * `field_type = 'currency'`: a short_text field mapped to that target promotes
+ * its value_text, `assertCents` is skipped because the value is a string, and
+ * SQLite's TEXT->INTEGER affinity then converts "25000" to the integer 25000
+ * BEFORE the column's CHECK runs. The CHECK passes. The application is stored
+ * as a $250.00 request. Nobody is told.
+ *
+ * "The last line of defence before a value reaches a money column" in submit.ts
+ * only covers field_type === 'currency', so a mis-mapped field walks straight
+ * past it. This table is the gate, applied at PUBLISH -- the one moment a human
+ * is deciding that a form is ready, and long before an applicant can be harmed
+ * by the answer.
+ *
+ * A target absent from this map accepts any field type.
+ */
+export const ALLOWED_FIELD_TYPES_BY_TARGET: Partial<Record<MapsToTarget, readonly string[]>> = {
+  // Money. Nothing but a currency field, ever.
+  requested_amount_cents: ['currency'],
+  annual_operating_budget_cents: ['currency'],
+  // Identity and contact, where a wrong type silently corrupts a lookup key.
+  ein: ['short_text'],
+  primary_contact_email: ['email'],
+  contact_phone: ['phone'],
+  organization_website: ['url'],
+  counties_served: ['multi_select'],
+  marketing_opt_in: ['consent_checkbox', 'checkbox_attestation'],
+  organization_name: ['short_text'],
+  project_title: ['short_text'],
+  contact_first_name: ['short_text'],
+  contact_last_name: ['short_text'],
+  contact_job_title: ['short_text'],
+  organization_mission: ['long_text', 'short_text'],
+};
+
+/**
+ * Problems with the maps_to wiring of a form, in publish-gate language.
+ *
+ * Returns plain sentences rather than throwing, so the caller can report every
+ * problem at once alongside the rest of the lint.
+ */
+export function mapsToTypeProblems(fields: readonly FieldDef[]): string[] {
+  const problems: string[] = [];
+  for (const field of fields) {
+    if (!field.maps_to) continue;
+    const target = field.maps_to as MapsToTarget;
+    if (!(MAPS_TO_TARGETS as readonly string[]).includes(target)) {
+      problems.push(`"${field.label}" promotes to an unknown target "${field.maps_to}".`);
+      continue;
+    }
+    const allowed = ALLOWED_FIELD_TYPES_BY_TARGET[target];
+    if (allowed && !allowed.includes(field.field_type)) {
+      problems.push(
+        `"${field.label}" is a ${field.field_type} field but promotes to ${target}, ` +
+          `which requires ${allowed.join(' or ')}.`,
+      );
+    }
+  }
+  return problems;
+}
+
+/**
  * The DEFAULT required set for an organization-based grant program: the minimum
  * needed for cross-program reporting, duplicate detection, and contacting an
  * applicant.

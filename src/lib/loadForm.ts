@@ -11,7 +11,8 @@
 
 import type { FieldDef, FieldOption, FieldType, FieldValidation } from './fieldTypes';
 import type { FormDefinition } from './forms';
-import { lintFormDefinition } from './forms';
+import { allFields, lintFormDefinition } from './forms';
+import { mapsToTypeProblems } from './mapsTo';
 import { AppError, notFound } from './errors';
 
 interface FieldRow {
@@ -124,9 +125,18 @@ export async function loadFormDefinition(
   };
 }
 
-/** Throw the lint result as a client-facing error, for the publish endpoint. */
+/**
+ * Throw the lint result as a client-facing error, for the publish endpoint.
+ *
+ * The maps_to type check lives HERE rather than in lintFormDefinition, because
+ * the target table it needs is defined beside the promotion code, and forms.ts
+ * is imported by the browser and must not reach anything that pulls in the Env
+ * or D1 types. Publishing is a server action, so the server-side gate is the
+ * right home for it -- the typecheck refused the alternative, which is the
+ * purity guard in web/tsconfig.json working as intended.
+ */
 export function assertPublishable(def: FormDefinition): void {
-  const problems = lintFormDefinition(def);
+  const problems = [...lintFormDefinition(def), ...mapsToTypeProblems(allFields(def))];
   if (problems.length > 0) {
     throw new AppError('VALIDATION_FAILED', 'This form cannot be published yet.', {
       internalMessage: `form definition ${def.id} failed lint`,

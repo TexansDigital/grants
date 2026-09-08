@@ -30,6 +30,7 @@ interface UserRow {
   role: Role;
   organization_id: string | null;
   is_active: number;
+  last_login_at: string | null;
 }
 
 /**
@@ -59,7 +60,7 @@ export async function requireStaffSession(
   );
 
   const user = await env.DB.prepare(
-    `SELECT id, email, role, organization_id, is_active
+    `SELECT id, email, role, organization_id, is_active, last_login_at
        FROM users
       WHERE email = ? AND deleted_at IS NULL`,
   )
@@ -81,7 +82,7 @@ export async function requireStaffSession(
     throw notFound('account');
   }
 
-  return {
+  const session: Session = {
     userId: user.id,
     email: user.email,
     role: user.role,
@@ -90,6 +91,38 @@ export async function requireStaffSession(
     // hand a staff session an organization scope.
     organizationId: null,
   };
+
+  /*
+   * Record the sign-in, at most once an hour per person.
+   *
+   * There is no login EVENT to hook: Cloudflare Access authenticates every
+   * request, so the Worker never sees a moment that is uniquely "signing in".
+   * recordLogin was written for that moment, and consequently was never called
+   * from anywhere -- which left no record at all of who had accessed a system
+   * holding other organizations' EINs and audited financial statements.
+   *
+   * Writing on every request is the obvious wrong answer: it turns every read
+   * into a write on a single-writer database. Staleness is the compromise. An
+   * hour is short enough that "who was in the system on Tuesday" is answerable
+   * and long enough that a busy admin costs one extra write per hour.
+   */
+  if (isLoginStale(user.last_login_at, opts?.now)) {
+    await recordLogin(env, ctx, session);
+  }
+
+  return session;
+}
+
+/** One hour. Long enough to be cheap, short enough to be useful evidence. */
+const LOGIN_RECORD_INTERVAL_MS = 60 * 60 * 1000;
+
+export function isLoginStale(lastLoginAt: string | null | undefined, now?: number): boolean {
+  if (!lastLoginAt) return true;
+  const previous = Date.parse(lastLoginAt);
+  // A malformed timestamp is treated as stale: recording an extra sign-in is
+  // harmless, and skipping one because a date could not be parsed is not.
+  if (!Number.isFinite(previous)) return true;
+  return (now ?? Date.now()) - previous >= LOGIN_RECORD_INTERVAL_MS;
 }
 
 /**

@@ -57,8 +57,21 @@ export interface Route {
 
 /** Every staff role that may change configuration. Admin only, deliberately. */
 export const ADMIN_ONLY: readonly Role[] = ['admin'];
-/** Anyone who signs in through Access. */
-export const ANY_STAFF: readonly Role[] = ['admin', 'reviewer', 'executive'];
+/**
+ * Staff who work inside the application.
+ *
+ * Executives are deliberately NOT here. CLAUDE.md's access table says
+ * "Executive | Nothing in the app | Nothing. Receives PDF and CSV exports",
+ * and the surrounding text is blunter still: "Executives never log in, so the
+ * export is the product for them and must stand alone."
+ *
+ * The constant was called ANY_STAFF and included them, which let an executive
+ * read every program, cycle and form definition including total budgets. No
+ * applicant data leaked -- staffApplicationScope returns `1 = 0` for the role --
+ * so this was the code and the constitution disagreeing rather than a breach.
+ * The constitution wins. Renamed so the name stops inviting the mistake.
+ */
+export const STAFF_READ: readonly Role[] = ['admin', 'reviewer'];
 
 interface Match {
   route: Route;

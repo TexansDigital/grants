@@ -31,7 +31,7 @@ import {
 import { searchApplications } from './lib/search';
 import {
   ADMIN_ONLY,
-  ANY_STAFF,
+  STAFF_READ,
   authorizeRoute,
   methodNotAllowed,
   resolve,
@@ -137,7 +137,7 @@ const routes: readonly Route[] = [
   {
     method: 'GET',
     path: '/api/session',
-    roles: ANY_STAFF,
+    roles: STAFF_READ,
     handler: async ({ ctx, session }) =>
       json({ user: { email: session.email, role: session.role } }, ctx),
   },
@@ -146,7 +146,7 @@ const routes: readonly Route[] = [
   {
     method: 'GET',
     path: '/api/programs',
-    roles: ANY_STAFF,
+    roles: STAFF_READ,
     handler: async ({ env, ctx }) => {
       const { results } = await env.DB.prepare(
         `SELECT id, name, slug, status, fiscal_year, compliance_policy,
@@ -187,7 +187,7 @@ const routes: readonly Route[] = [
   {
     method: 'GET',
     path: '/api/programs/:id/stages',
-    roles: ANY_STAFF,
+    roles: STAFF_READ,
     handler: async ({ env, ctx, params }) => {
       const { results } = await env.DB.prepare(
         `SELECT id, program_id, stage_key, name, sort_order, gate_on_prior_decision
@@ -216,7 +216,7 @@ const routes: readonly Route[] = [
   {
     method: 'GET',
     path: '/api/cycles',
-    roles: ANY_STAFF,
+    roles: STAFF_READ,
     handler: async ({ env, ctx, url }) => {
       const programId = url.searchParams.get('program_id');
       const sql = `SELECT id, program_id, name, opens_at, closes_at, decision_due_at,
@@ -281,7 +281,7 @@ const routes: readonly Route[] = [
     // and their version and publication state. No sections, no fields.
     method: 'GET',
     path: '/api/forms',
-    roles: ANY_STAFF,
+    roles: STAFF_READ,
     handler: async ({ env, ctx, url }) => {
       const programId = url.searchParams.get('program_id');
       const sql = `SELECT f.id, f.program_id, f.form_key, f.stage_id, f.kind, f.name,
@@ -304,7 +304,7 @@ const routes: readonly Route[] = [
     // promotion targets. No answers, no applicant data, no internal notes.
     method: 'GET',
     path: '/api/forms/:id',
-    roles: ANY_STAFF,
+    roles: STAFF_READ,
     handler: async ({ env, ctx, params }) =>
       json({ form: await loadFormDefinition(env.DB, params.id!) }, ctx),
   },

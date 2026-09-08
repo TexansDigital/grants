@@ -489,3 +489,32 @@ describe('request bodies', () => {
     expect(res.status).toBe(400);
   });
 });
+
+describe('executives have no access to the application at all', () => {
+  it('is refused every read route, per the access table', async () => {
+    // CLAUDE.md: "Executive | Nothing in the app | Nothing. Receives PDF and
+    // CSV exports." The router constant was called ANY_STAFF and included
+    // them, which let an executive read every program, cycle and form
+    // definition -- including total budgets.
+    await makeUser('exec2@example.org', 'executive');
+    const token = await mint('exec2@example.org');
+    for (const path of [
+      '/api/session',
+      '/api/programs',
+      '/api/cycles',
+      '/api/forms',
+      `/api/forms/${newId()}`,
+      '/api/applications',
+      '/api/search?q=x',
+      '/api/review/queue',
+    ]) {
+      const res = await call(path, { token });
+      expect(res.status, `${path} must not be readable by an executive`).toBe(403);
+    }
+  });
+
+  it('a reviewer keeps the reads an executive loses', async () => {
+    const res = await call('/api/programs', { token: reviewerToken });
+    expect(res.status).toBe(200);
+  });
+});

@@ -230,6 +230,7 @@ export function validateSubmission(
 export function lintFormDefinition(def: FormDefinition): string[] {
   const problems: string[] = [];
   const fields = allFields(def);
+
   const byId = new Map(fields.map((f) => [f.id, f]));
   const keys = new Set<string>();
 
