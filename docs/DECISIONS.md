@@ -117,6 +117,50 @@ parser is not a trade worth making for a once-a-cycle action.
 lines over `fflate`) rather than pulling in a spreadsheet-authoring dependency.
 It also documents exactly what file shape the parser must accept.
 
+## 9. Toolchain: wrangler 4, but deliberately NOT the newest test pool
+
+Upgraded: `wrangler` 3.114 to **4.129.1**, `@cloudflare/vitest-pool-workers`
+0.8.19 to **0.12.21**, `@cloudflare/workers-types` 4 to **5**, `vitest` 3.0.9 to
+**3.2.7**.
+
+**Why 0.12.x and not 0.22.x.** The pool's release lines split cleanly:
+
+| pool | vitest | miniflare |
+|---|---|---|
+| 0.12.x | 2.0.x - 3.2.x | 4.x stable |
+| 0.14.x - 0.18.x | ^4.1.0 | 4.x stable |
+| 0.20.x+ | ^4.1.0 | **5.x alpha** |
+
+0.12.21 is the last line that reaches wrangler 4 without also forcing a vitest
+major. Everything from 0.20 up ships an **alpha** miniflare, and an alpha
+runtime under the test suite of a system that records other people's grant
+money is not a trade worth making to clear dev-tree advisories.
+
+**Verified after the upgrade:** 167 tests pass, both tsconfigs typecheck, all
+five migrations apply locally under v4, `wrangler.toml` parses, and
+`--env production` still fails at config-parse time on the placeholder values.
+
+**`@cloudflare/workers-types` v5 dropped the dated entrypoints**
+(`.../2023-07-01`), so `tsconfig.json` now references the package root. Note the
+consequence: the type surface is no longer pinned to a compatibility date, so
+TypeScript will now accept APIs newer than `compatibility_date = 2025-01-15`.
+Generating types from the config with `wrangler types` would restore that
+coupling and is worth doing when Phase 1 adds bindings.
+
+**Honest correction on advisories.** I said these would mostly clear with the
+wrangler 4 upgrade. They did not. What actually changed:
+
+- The **critical** (vitest UI arbitrary file read) is **fixed** by vitest 3.2.7.
+- The **deploy-path wrangler is clean**: the advisory range is 4.16.0-4.113.0
+  and we run 4.129.1. The `wrangler` entry npm still reports is the pool's
+  *nested* 4.72.0.
+- Seven remain (6 high, 1 low): esbuild, miniflare, sharp, undici, ws, and that
+  nested wrangler. **All are dev-only** -- `npm audit --omit=dev` is clean, so
+  none of it reaches the Worker. They run on developer machines and CI against
+  local fixtures.
+- npm's only offered fix is pool 0.22, i.e. vitest 4 plus miniflare 5 alpha.
+  Revisit when a stable miniflare 5 ships.
+
 ## Still open, and now blocking sooner than the brief implies
 
 - **Grace rule for late drafts (open decision #6).** Implemented as a per-cycle
