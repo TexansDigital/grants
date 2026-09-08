@@ -10,26 +10,82 @@ Everything here is done once, by a human, in the Cloudflare dashboard. Until
 That is deliberate: an unconfigured deployment rejects everything rather than
 accepting everything.
 
+## 0. What the two config values actually are
+
+`wrangler.toml` needs `ACCESS_TEAM_DOMAIN` and `ACCESS_AUD`. Both are Cloudflare
+terms rather than general ones, so in plain language:
+
+**Team domain.** When you turn on Cloudflare Zero Trust you choose a team name
+once -- say `texans`. The team domain is then `texans.cloudflareaccess.com`. It
+is the address staff are sent to in order to sign in. There is one per
+Cloudflare account, and it is also just the URL you see when you sign in to Zero
+Trust yourself.
+
+**AUD tag.** Short for *audience*. Every Access application gets its own
+64-character hex string. It is how this Worker knows a sign-in was for THIS
+application and not some other application on the same account -- a token minted
+for a different app is correctly signed and must still be refused.
+
+Neither is a credential. The team domain is a public hostname and the AUD tag is
+an identifier, which is why both live in checked-in config where a missing value
+is obvious, rather than in secrets where it would be silently absent.
+
+**If Zero Trust has never been set up on this account:** open the Cloudflare
+dashboard and choose Zero Trust in the sidebar. It asks you to pick a team name;
+whatever you type becomes the team domain. Choose the free plan -- staff fit well
+inside the 50-seat limit, and applicants never touch Access.
+
 ## 1. Create the Access application
 
 Zero Trust → Access → Applications → Add an application → Self-hosted.
 
-- **Application domain:** the hostname the Worker serves on.
-- **Session duration:** 24 hours is reasonable for staff.
-- **Policy:** Allow → Emails, or Emails ending in your domain. Start with the
-  two people who will hold admin accounts.
+- **Application domain:** the hostname the Worker serves on. Before a custom
+  domain exists, use the `workers.dev` hostname, or a placeholder you correct
+  later.
+- **Session duration:** see the note on identity providers below. 30 days is
+  the right answer if you are using One-time PIN.
+- **Policy:** Allow → Emails, listing the people who will hold admin accounts.
 
-## 2. Copy two values into `wrangler.toml`
+## 2. Find the two values
 
-After creating the application, Cloudflare shows:
+**Team domain:** Zero Trust → Settings → Custom Pages (labelled General in some
+dashboard versions). Look for "Team domain".
 
-- **Team domain**, e.g. `yourteam.cloudflareaccess.com` → `ACCESS_TEAM_DOMAIN`
-- **Application Audience (AUD) tag**, a 64-character hex string → `ACCESS_AUD`
+**AUD tag:** open the application you just created; its Overview tab shows
+"Application Audience (AUD) Tag" with a copy button. This only exists after the
+application is saved.
 
-Neither is a secret. The team domain is a public hostname and the AUD tag is an
-application identifier, not a credential — which is why they live in config,
-where a missing value is visible, rather than in secrets, where it is silently
-absent.
+Put them in `wrangler.toml` as `ACCESS_TEAM_DOMAIN` and `ACCESS_AUD`.
+
+## 2a. Choosing an identity provider
+
+Access needs an *identity provider* — something that establishes who a person
+is. Duo, Google Authenticator and Microsoft Authenticator are MFA factors, not
+identity providers: they add a second proof after an IdP has already identified
+someone, so they cannot front Access on their own.
+
+The choice is reversible at zero cost. Access verification checks a signed
+assertion, and that assertion is identical whichever IdP produced it, so
+switching later is a dashboard change with no code change and no migration.
+
+**One-time PIN** is the default and needs no integration. Cloudflare emails a
+six-digit code. Two things make it workable if corporate mail filtering has
+eaten these before:
+
+- ask IT to allowlist the Cloudflare sender (confirm the exact envelope sender
+  from a test send rather than assuming it)
+- set the Access session to 30 days, so staff authenticate roughly monthly
+  instead of daily -- across two admins that is a couple of dozen emails a year
+
+**Okta, or any SAML/OIDC provider**, removes email from the login path entirely
+and lets existing MFA sit behind it. Offboarding someone in the directory also
+removes their access here. This is the better long-term answer.
+
+**Microsoft Entra ID** is the least-effort option for an organisation already on
+Microsoft 365, but it is not required.
+
+Starting on One-time PIN and moving to a real IdP later is a legitimate
+sequence, not technical debt.
 
 ## 3. Create the staff accounts
 
