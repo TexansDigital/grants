@@ -571,3 +571,71 @@ with organization fields already filled in, and CLAUDE.md's submission-flow
 step 4 wants the same for any returning organization. The data is in the
 `organizations` row; wiring it into a new draft is the next piece.
 
+
+## §24 — The confirmation time is formatted on the server, not in the browser
+
+The submit response carries `submittedAtDisplay`, already formatted in the
+program's display timezone with the zone name attached. The browser renders that
+string rather than formatting the ISO timestamp itself.
+
+**Why.** It was formatting it itself, and produced "September 9, 2026 at
+10:32 PM" — with nothing saying which 10:32, in whatever zone the applicant's
+laptop happens to be set to. The confirmation email, meanwhile, said Central,
+because it goes through `formatInZone` with the program's timezone. One
+submission, two different times, and an applicant in another zone with no way
+to tell which one the Foundation means. Cycle deadlines are announced in
+Central; a submission time that is not is a trap.
+
+Verified rather than assumed: with the browser set to `Europe/London` the
+screen reads "Submitted September 9, 2026 at 5:43 PM CDT".
+
+**Cost if wrong.** One more field on one response, and a browser that cannot
+re-render the time if it wants a different format later. Neither matters here.
+
+**The trap this sits next to.** Formatting in the response handler puts it
+*outside* the try/catch that protects a committed submit. The application is
+already written by the time the response is built, so a throw there — an
+invalid `DISPLAY_TIMEZONE` is enough — turns a successful submission into a
+500, and an applicant who submits twice. It is inside a catch, falling back to
+the ISO string and logging. This was introduced and caught by a test that
+already existed for the same hazard on the confirmation email.
+
+## §25 — A removed attachment is never deleted, only unclaimed
+
+Removing a file from a form before submitting drops the reference from the
+answer. The `attachments` row stays, with `parent_id` still null.
+
+**Why.** Submit only ever claims what the answer still points at, so an
+unclaimed row is inert. That makes "remove" a pure edit to an answer — no
+delete path, no R2 lifecycle call, nothing to get wrong at the moment somebody
+is trying to fix a mistake. It also matches the platform rule that nothing is
+hard-deleted; these are financial records, and a file an applicant attached and
+then removed is evidence of what happened, not litter.
+
+**Cost.** Orphaned objects accumulate in R2 — one per file an applicant
+attached and thought better of. At 100 to 400 applications a year that is tens
+of megabytes, not a problem to solve today.
+
+**To close later.** An R2 lifecycle rule expiring unclaimed objects, which
+wants the retention decision (`docs/BLOCKED-ON-YOU.md` §3.3) answered first. A
+sweep that deletes rows would be the wrong shape.
+
+## §26 — Autosave is a state machine with no framework in it
+
+`web/src/draftSync.ts` holds the coalescing, the single-flight rule, the retry
+policy and every decision about what the applicant is told. `useDraftSync.ts`
+is a thin React adapter over it.
+
+**Why.** The failure mode of autosave is not "it did not save", it is "it said
+Saved and did not", and somebody closes the laptop. That logic deserves direct
+tests with an injected clock, not tests through a component and a fake DOM.
+Sixteen tests and thirteen mutants live against the plain class.
+
+**What this deliberately does not claim.** Extracting the logic did not make
+the wiring safe, and the two bugs that actually shipped were both in the
+adapter: a `useMemo` instance disposed by StrictMode's remount, so every
+keystroke went into a dead object while the indicator read "Not saved yet"; and
+a handle rebuilt on every render, which made the autosave effect re-run, save,
+re-render, and loop until React killed the page. Neither was visible to any
+unit test. Both were found by driving it in a browser, which is why that step
+is not optional.
