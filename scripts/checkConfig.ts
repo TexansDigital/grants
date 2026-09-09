@@ -261,6 +261,28 @@ if (!/ENVIRONMENT = "preview"/.test(defaults)) {
   problems.push('the default ENVIRONMENT var is not "preview"');
 }
 
+// --- Email ------------------------------------------------------------------
+// Non-negotiable #8: no secrets in the repo. An API key pasted into a var block
+// is the single most likely way this rule gets broken, because it is the change
+// that makes email start working.
+for (const secretish of ['RESEND_API_KEY', 'TURNSTILE_SECRET', 'ELOQUA_PASSWORD', 'R2_SECRET_ACCESS_KEY']) {
+  if (new RegExp(`^\\s*${secretish}\\s*=`, 'm').test(src)) {
+    problems.push(
+      `${secretish} is assigned in wrangler.toml. Secrets live in Wrangler ` +
+        `secrets only: \`wrangler secret put ${secretish}\`.`,
+    );
+  }
+}
+
+// Staging holds the friendly-organization fixtures, whose addresses reach real
+// people. An EMAIL_FROM there is one secret away from mailing them.
+if (stagingSection && !/EMAIL_FROM = ""/.test(stagingSection)) {
+  problems.push(
+    'staging does not set EMAIL_FROM = "". Staging carries real contact ' +
+      'addresses; a send from it must throw rather than deliver.',
+  );
+}
+
 if (problems.length > 0) {
   console.error('wrangler.toml problems:\n' + problems.map((p) => `  - ${p}`).join('\n'));
   process.exit(1);

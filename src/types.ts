@@ -18,6 +18,21 @@ export interface Env {
   ACCESS_TEAM_DOMAIN: string;
   ACCESS_AUD: string;
   /**
+   * Outbound email.
+   *
+   * RESEND_API_KEY is a Wrangler secret and is absent everywhere it has not
+   * been deliberately set. That absence is the safety property: with no key,
+   * lib/email.ts records every send as 'suppressed' and calls nothing, so a
+   * preview run or a test cannot mail a real applicant.
+   *
+   * EMAIL_FROM and EMAIL_REPLY_TO are public addresses, not secrets, and live
+   * in wrangler.toml. From must be on a domain with SPF, DKIM and DMARC
+   * published, or mail will be filed as spam no matter what this code does.
+   */
+  RESEND_API_KEY?: string;
+  EMAIL_FROM?: string;
+  EMAIL_REPLY_TO?: string;
+  /**
    * The built single-page app (wrangler `[assets]`).
    *
    * Optional so the Worker and its tests run with no build output present. When

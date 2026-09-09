@@ -80,6 +80,11 @@ DISPLAY_TIMEZONE = "America/Chicago"
 # every staff route fails closed. Neither is a secret.
 ACCESS_TEAM_DOMAIN = "texansdigital.cloudflareaccess.com"
 ACCESS_AUD = "25afd7973df7c8d398d252df5aa7b5886bdff3b54b34168b3a752b24dda7b15d"
+# Outbound email. Both are public addresses, not secrets. The RESEND_API_KEY
+# that makes them do anything is a Wrangler secret and is deliberately unset in
+# preview, so a preview run records sends as 'suppressed' and mails nobody.
+EMAIL_FROM = "Houston Texans Foundation <grants@houstontexansfoundation.org>"
+EMAIL_REPLY_TO = "grants@houstontexansfoundation.org"
 # Turnstile / Resend / Eloqua / R2 signing credentials are Wrangler SECRETS.
 # They are never listed here. See docs/SECRETS.md.
 
@@ -146,6 +151,11 @@ DISPLAY_TIMEZONE = "America/Chicago"
 # needs to authenticate against it.
 ACCESS_TEAM_DOMAIN = ""
 ACCESS_AUD = ""
+# Staging must never mail anyone: the friendly-organization fixtures in this
+# database carry addresses that reach real people. No key is set, and an empty
+# EMAIL_FROM makes a send throw rather than silently pick a default.
+EMAIL_FROM = ""
+EMAIL_REPLY_TO = ""
 
 [[env.staging.d1_databases]]
 binding = "DB"
@@ -184,6 +194,8 @@ routes = []
 [env.production.vars]
 ENVIRONMENT = "production"
 DISPLAY_TIMEZONE = "America/Chicago"
+EMAIL_FROM = "Houston Texans Foundation <grants@houstontexansfoundation.org>"
+EMAIL_REPLY_TO = "grants@houstontexansfoundation.org"
 
 [[env.production.d1_databases]]
 binding = "DB"

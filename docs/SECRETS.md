@@ -22,7 +22,30 @@ reaches `error_log`, but redaction is a backstop, not a licence.
 | `ELOQUA_CLIENT_ID` / `ELOQUA_CLIENT_SECRET` | Marketing opt-in sync and bulk reminders | 7 |
 | `IRS_BMF_API_KEY` | EIN verification source, if the chosen source needs one | 2 |
 
-None of these exist yet. Phase 0 introduces no outbound integration.
+`RESEND_API_KEY` is now live code. The rest do not exist yet.
+
+## Email: what the absence of a key does
+
+`RESEND_API_KEY` is deliberately **unset in preview and staging**, and that
+absence is a safety property rather than an oversight:
+
+- With no key, `transportFor()` returns null, `sendEmail()` records every send
+  as `suppressed` in `email_messages`, and nothing is called. A preview run or
+  a test cannot mail a real applicant.
+- Staging additionally sets `EMAIL_FROM = ""`, so a send there throws rather
+  than delivering. Staging holds the friendly-organization fixtures, whose
+  addresses reach real people.
+- `npm run check:config` fails the build if any of these names is assigned in
+  `wrangler.toml`, and if staging's `EMAIL_FROM` is ever given a value.
+
+Setting the key on an environment is therefore the single action that makes
+that environment able to email real people. Treat it as a deploy step with a
+human in it, not a convenience.
+
+**Before setting it in production**, SPF, DKIM and DMARC must be published on
+`houstontexansfoundation.org` and the domain verified in Resend. Deliverability
+is not solved by code: a grantee who cannot receive a login link cannot file a
+report.
 
 ## Local development
 

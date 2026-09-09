@@ -84,8 +84,11 @@ phases we know least about.
 - **0006 now** — rubrics, rubric_criteria, review_assignments, review_scores,
   and the FK on `cycles.rubric_id`. It has a live consumer today: the reviewer
   path is dead until it exists.
-- **0007 immediately before awards work.**
-- **0008 immediately before reporting work.**
+- **0008 immediately before awards work.**
+- **0009 immediately before reporting work.**
+
+(0007 was taken by `email_messages`, which the send path needed first. The
+numbers are ordering, not reservations.)
 
 ## Order
 
@@ -93,21 +96,21 @@ phases we know least about.
 |---|---|---|---|
 | **1** | Migration 0006: rubrics, criteria, review assignments, scores; FK on `cycles.rubric_id` | — | Unblocks the reviewer path, which fails closed today |
 | **2** | Router refactor to a route table; first staff **write** routes (program / cycle / stage CRUD, cycle open-close) | — | Nothing mutating exists. Both the review flow and the public cutoff need this |
-| **3** | Resend integration: send helper, failure logging, template harness | — | The magic link is the first send; the confirmation email is the second |
+| **3** | ~~Resend integration: send helper, failure logging, template harness~~ | — | **DONE.** Migration 0007 (`email_messages`), `lib/email.ts`, `lib/emailTemplates.ts`. Not done: the token behind the sign-in link (item 5), retry/backoff, bounce webhooks |
 | **4** | **Domain**: ~~purchase~~ → ~~Worker on custom domain~~ → ~~Access on the staff hostname~~ → `workers_dev = false` → Resend DNS | — | Mostly DONE. Remaining: flip workers_dev once verified, and the Resend records |
 | **5** | 2a — applicant identity **including organization resolution**: magic link (single-use, hashed, 15-min, rate-limited), email→organization matching, EIN capture, returning-organization prefill | 3 | `users` requires a non-null `organization_id` for applicants, so signup *must* resolve an org. Prefill and EIN matching move here from 2d |
 | **6** | Staff read surface: pipeline list, filters, application detail, FTS search route, applicant-history panel | 1, 2 | The undone half of Phase 1. Parallel with 5 |
 | **7** | Draft create: application row, per-cycle limit, stage gate, **public published-only** form endpoint | 2, 5 | Not plumbing. The current form endpoint is staff-only and serves draft and retired definitions unfiltered |
-| **8** | 2c — uploads: presigned PUT via aws4fetch, bucket CORS, R2 lifecycle | 7 | **Before submit.** The seeded form has three *required* upload fields, so submit can never pass on it until uploads exist |
+| **8** | 2c — uploads: presigned PUT via aws4fetch, bucket CORS, R2 lifecycle | 7 | **Before submit.** The seeded form has two *required* upload fields, so submit can never pass on it until uploads exist |
 | **9** | Autosave + whole-form validate + submit + confirmation read-back email; compliance-policy hook as a no-op | 7, 8, 3 | Rewrites the renderer's autosave from localStorage to the server |
 | **10** | Rubric upload and parse, assignment, conflict-of-interest declaration at assignment | 1, 6 | |
 | **11** | Scoring, weighted totals, normalization view, offline export/import, decision recording | 10 | |
 | **12** | Cron D1→R2 export; SPF, DKIM, DMARC | 4 | Fills the stub at `src/index.ts:223` |
 | **13** | Conduct the human security review; accessibility pass with real assistive technology | 8, 9, 4 | Gate, not a task. I cannot perform either |
 | **14** | 2d — public cycle page, Turnstile, privacy notice, hard cutoff, grace rule | 8, 9, 12, 13 | The first public endpoint. Nothing public ships before 13 |
-| **15** | Migration 0007: awards, amendments, payments | 11 | |
+| **15** | Migration 0008: awards, amendments, payments | 11 | |
 | **16** | Phase 4 — awards, payments, decision communication (embargo, acceptances before declines, human review before send), optimistic locking on awards | 15, 3, 11 | |
-| **17** | Migration 0008: report periods, submissions, metrics | 16 | |
+| **17** | Migration 0009: report periods, submissions, metrics | 16 | |
 | **18** | Phase 5 — grantee reporting; **enable** the compliance gate built at 9 | 17, 16 | |
 | **19** | Phase 6 — dashboard and exports | 16, 18 | |
 | **20** | Phase 7 residual — Eloqua opt-in sync, Formstack import, organization merge tool, data health | 9, 16 | Do not let this evaporate. `organizations` deliberately has no unique index on EIN because duplicates are expected and an admin merges them; without the tool they accumulate from the day 9 ships |
