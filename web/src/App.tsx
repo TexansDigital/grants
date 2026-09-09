@@ -14,6 +14,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ReactElement, ReactNode } from 'react';
 import { ApiError, api } from './api';
+import { applicantApi, type DraftResponse } from './applicantApi';
 import type { CycleRow, FormSummary, ProgramRow, SessionUser } from './api';
 import type { FormDefinition } from '../../src/lib/forms';
 import { Home } from './Home';
@@ -34,7 +35,8 @@ type Route =
   | { name: 'home' }
   | { name: 'pipeline' }
   | { name: 'application'; id: string }
-  | { name: 'form'; id: string };
+  | { name: 'form'; id: string }
+  | { name: 'apply'; id: string };
 
 function parseRoute(pathname: string): Route | null {
   const parts = pathname.split('/').filter((s) => s.length > 0);
@@ -45,6 +47,9 @@ function parseRoute(pathname: string): Route | null {
     return { name: 'application', id: parts[1] };
   }
   if (parts.length === 2 && parts[0] === 'forms' && parts[1]) return { name: 'form', id: parts[1] };
+  // The applicant's own application. Not behind Cloudflare Access -- an
+  // applicant holds an app-native session from a magic link.
+  if (parts.length === 2 && parts[0] === 'apply' && parts[1]) return { name: 'apply', id: parts[1] };
   return null;
 }
 
@@ -59,6 +64,7 @@ export function App(): ReactElement {
   const [route, setRoute] = useState<Route | null>(() => parseRoute(window.location.pathname));
   const [home, setHome] = useState<HomeData | null>(null);
   const [form, setForm] = useState<FormDefinition | null>(null);
+  const [draft, setDraft] = useState<DraftResponse | null>(null);
   const [error, setError] = useState<ApiError | null>(null);
   const [loading, setLoading] = useState(true);
   const [themePref, setThemePref] = useState<ThemePreference>(loadPreference);
@@ -124,7 +130,7 @@ export function App(): ReactElement {
    * readability problem, and an applicant has no toggle to escape it with.
    */
   useEffect(() => {
-    const internal = route?.name !== 'form';
+    const internal = route?.name !== 'form' && route?.name !== 'apply';
     const html = document.documentElement;
     html.dataset.surface = internal ? 'internal' : 'applicant';
     html.dataset.theme = internal ? resolvedTheme : 'light';
@@ -144,6 +150,7 @@ export function App(): ReactElement {
       application: 'Application · Steward',
       home: 'Configuration · Steward',
       form: 'Form preview · Steward',
+      apply: 'Your application · Steward',
     };
     document.title = route ? (titles[route.name] ?? 'Steward') : 'Page not found · Steward';
     if (loading) return;
@@ -181,6 +188,9 @@ export function App(): ReactElement {
         } else if (route?.name === 'form') {
           const { form: def } = await api.form(route.id, signal);
           setForm(def);
+        } else if (route?.name === 'apply') {
+          const d = await applicantApi.draft(route.id, signal);
+          setDraft(d);
         }
       } catch (e) {
         if (e instanceof DOMException && e.name === 'AbortError') return;
@@ -243,6 +253,30 @@ export function App(): ReactElement {
       <Message title="Loading">
         <p aria-live="polite">Loading…</p>
       </Message>
+    );
+  }
+
+  if (route.name === 'apply') {
+    if (!draft) return <Message title="Loading"><p>Loading…</p></Message>;
+    // An application that is no longer a draft is read-only. Rendering an
+    // editable form over a submitted application would let somebody type for
+    // an hour into answers the server will refuse.
+    if (draft.application.status !== 'draft') {
+      return (
+        <Message title="This application has been submitted">
+          <p>
+            Submitted work cannot be changed. A copy of everything you sent was emailed to
+            you when you submitted.
+          </p>
+        </Message>
+      );
+    }
+    return (
+      <FormRenderer
+        def={draft.form}
+        onBack={() => navigate('/')}
+        draft={{ applicationId: draft.application.id, initialValues: draft.answers }}
+      />
     );
   }
 

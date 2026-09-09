@@ -247,6 +247,10 @@ const routes: readonly Route[] = [
       ),
   },
   { method: 'GET', path: '/forms/:id', roles: [], public: true, handler: serveAppShell },
+  // The applicant's own application. The shell is public; every API call it
+  // makes is scoped by the session behind it, and a signed-out applicant gets
+  // a 401 from the draft endpoint rather than a blank page.
+  { method: 'GET', path: '/apply/:id', roles: [], public: true, handler: serveAppShell },
 
   // ---- session -------------------------------------------------------------
   {

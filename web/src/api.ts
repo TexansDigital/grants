@@ -1,3 +1,5 @@
+import { request } from './http';
+
 /**
  * The client's view of the staff API.
  *
@@ -102,73 +104,10 @@ export interface OrganizationHistory {
   summary: { total_applications: number; by_status: Record<string, number> };
 }
 
-export class ApiError extends Error {
-  readonly status: number;
-  readonly code: string;
-  readonly requestId: string | null;
+export { ApiError } from './http';
 
-  constructor(status: number, code: string, message: string, requestId: string | null) {
-    super(message);
-    this.name = 'ApiError';
-    this.status = status;
-    this.code = code;
-    this.requestId = requestId;
-  }
-
-  /** Access has expired or was never established. The page must be reloaded. */
-  get isSignedOut(): boolean {
-    return this.status === 401;
-  }
-}
-
-async function get<T>(path: string, signal?: AbortSignal): Promise<T> {
-  let res: Response;
-  try {
-    res = await fetch(path, {
-      method: 'GET',
-      headers: { accept: 'application/json' },
-      credentials: 'same-origin',
-      signal,
-    });
-  } catch (e) {
-    if (e instanceof DOMException && e.name === 'AbortError') throw e;
-    throw new ApiError(0, 'NETWORK', 'Could not reach Steward. Check your connection.', null);
-  }
-
-  const requestId = res.headers.get('x-request-id');
-
-  if (!res.ok) {
-    // A failing response is still expected to be JSON. If it is not -- an edge
-    // error page, an Access interstitial -- do not try to render its body.
-    let code = 'INTERNAL';
-    let message = 'Something went wrong. Please try again.';
-    try {
-      const body = (await res.json()) as { error?: { code?: string; message?: string } };
-      if (body.error?.code) code = body.error.code;
-      if (body.error?.message) message = body.error.message;
-    } catch {
-      if (res.status === 401 || res.status === 403) {
-        code = 'UNAUTHENTICATED';
-        message = 'Please sign in to continue.';
-      }
-    }
-    throw new ApiError(res.status, code, message, requestId);
-  }
-
-  // The failure path already guarded this; the SUCCESS path did not, so an
-  // Access interstitial or an edge error page arriving with a 200 surfaced as
-  // `SyntaxError: Unexpected token '<'` in front of the user.
-  try {
-    return (await res.json()) as T;
-  } catch {
-    throw new ApiError(
-      res.status,
-      'BAD_RESPONSE',
-      'Steward returned something unexpected. Reload and try again.',
-      requestId,
-    );
-  }
-}
+const get = <T,>(path: string, signal?: AbortSignal): Promise<T> =>
+  request<T>(path, signal ? { signal } : {});
 
 export const api = {
   session: (signal?: AbortSignal) => get<{ user: SessionUser }>('/api/session', signal),

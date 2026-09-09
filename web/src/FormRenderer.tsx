@@ -1,13 +1,19 @@
 /**
  * The applicant form.
  *
- * What this is, precisely: the Phase 1 renderer for a form DEFINITION. It
- * proves that a program's form -- any program's form -- renders correctly from
- * data alone, with every field type, conditional reveals, live validation and a
- * review screen. It does NOT submit: the draft, autosave and submit endpoints
- * are Phase 2. Answers live in this browser's localStorage and nowhere else,
- * and the banner at the top says so, because a form that looks like it saved
- * and did not is the worst possible failure on a deadline.
+ * It renders a form DEFINITION -- any program's, from data alone -- with every
+ * field type, conditional reveals, live validation and a review screen.
+ *
+ * TWO MODES, and the difference is where answers go.
+ *
+ *   APPLICANT. `draft` is supplied, and every answer is autosaved to the
+ *   SERVER against a real application. A director who starts on a phone at 9pm
+ *   continues on a laptop the next morning, and a closed tab costs nothing.
+ *
+ *   PREVIEW. No `draft`, so staff can walk any form without creating an
+ *   application. Answers go to this browser's localStorage and NOWHERE else,
+ *   and the banner says so -- a form that looks like it saved and did not is
+ *   the worst possible failure on a deadline.
  *
  * Everything about which fields are visible, what an answer coerces to and
  * which answers are missing comes from src/lib -- the same modules the Worker
@@ -22,6 +28,8 @@ import type { FormDefinition, SectionDef } from '../../src/lib/forms';
 import { isFieldVisible, validateSubmission } from '../../src/lib/forms';
 import { formatCents } from '../../src/lib/money';
 import { Field } from './Field';
+import { saveStateLabel, type DraftSyncState } from './draftSync';
+import { useDraftSync } from './useDraftSync';
 
 type Values = Record<string, unknown>;
 
@@ -44,15 +52,32 @@ function loadDraft(formId: string): Values {
   }
 }
 
+/** Supplied when this is a real application rather than a staff preview. */
+export interface DraftBinding {
+  applicationId: string;
+  /** Answers already on the server. The starting state, not a merge base. */
+  initialValues: Values;
+}
+
 interface Props {
   def: FormDefinition;
   onBack: () => void;
+  draft?: DraftBinding;
 }
 
-export function FormRenderer({ def, onBack }: Props): ReactElement {
-  const [values, setValues] = useState<Values>(() => loadDraft(def.id));
+export function FormRenderer({ def, onBack, draft }: Props): ReactElement {
+  const isPreview = draft === undefined;
+  const [values, setValues] = useState<Values>(() =>
+    draft ? draft.initialValues : loadDraft(def.id),
+  );
+  // Preview only. The applicant path gets its state from the sync engine.
   const [savedAt, setSavedAt] = useState<Date | null>(null);
   const [saveFailed, setSaveFailed] = useState(false);
+  // Destructured, never held as one object: `change` and `flush` are stable
+  // per sync instance and go into dependency arrays; `state` is not.
+  const { state: draftState, change: pushDraft, flush: flushDraft } = useDraftSync(
+    draft?.applicationId ?? null,
+  );
   // Which fields have been interacted with. An error is not shown on a field
   // nobody has touched yet -- a form that is red before you start is hostile.
   const [touched, setTouched] = useState<ReadonlySet<string>>(new Set());
@@ -65,7 +90,8 @@ export function FormRenderer({ def, onBack }: Props): ReactElement {
 
   const headingRef = useRef<HTMLHeadingElement>(null);
   const summaryRef = useRef<HTMLDivElement>(null);
-  const firstRender = useRef(true);
+  /** The answers this form opened with, by identity. */
+  const initialValues = useRef(values);
 
   // ---- shared rules ---------------------------------------------------------
 
@@ -112,11 +138,13 @@ export function FormRenderer({ def, onBack }: Props): ReactElement {
      * requirement, and the section says so on screen rather than silently
      * passing. When 2c ships, delete this block and the note with it.
      */
-    for (const field of fields) {
-      if (field.field_type === 'file_upload') map.delete(field.field_key);
+    if (isPreview) {
+      for (const field of fields) {
+        if (field.field_type === 'file_upload') map.delete(field.field_key);
+      }
     }
     return map;
-  }, [def, fields, values]);
+  }, [def, fields, isPreview, values]);
 
   /** Sections carrying an upload field, so the preview can explain itself. */
   const uploadFieldCount = useMemo(
@@ -158,12 +186,21 @@ export function FormRenderer({ def, onBack }: Props): ReactElement {
 
   // ---- persistence ----------------------------------------------------------
 
-  // Autosave. Debounced so typing is not a write per keystroke, and flushed on
-  // blur by the same effect because every blur changes `touched`.
+  // Autosave.
+  //
+  // On the applicant path the debouncing, coalescing and honesty about what is
+  // actually on the server all live in DraftSync; this effect only tells it
+  // that something changed. In preview it is the localStorage write, kept
+  // deliberately separate rather than pretending the two are the same thing.
   useEffect(() => {
-    if (firstRender.current) {
-      firstRender.current = false;
-      return;
+    // Nothing has been typed. Not a `firstRender` flag: the sync engine is
+    // created by an effect and so arrives a commit late, which would make a
+    // one-shot flag fire on the wrong render and push the server's own answers
+    // straight back at it.
+    if (values === initialValues.current) return undefined;
+    if (!isPreview) {
+      pushDraft(values);
+      return undefined;
     }
     const id = window.setTimeout(() => {
       try {
@@ -177,7 +214,7 @@ export function FormRenderer({ def, onBack }: Props): ReactElement {
       }
     }, 800);
     return () => window.clearTimeout(id);
-  }, [values, def.id]);
+  }, [values, def.id, isPreview, pushDraft]);
 
   // Moving between steps moves focus to the new heading. Without this a
   // keyboard or screen-reader user presses Continue and lands nowhere.
@@ -191,9 +228,15 @@ export function FormRenderer({ def, onBack }: Props): ReactElement {
     setValues((prev) => ({ ...prev, [key]: value }));
   }, []);
 
-  const markTouched = useCallback((key: string) => {
-    setTouched((prev) => (prev.has(key) ? prev : new Set(prev).add(key)));
-  }, []);
+  const markTouched = useCallback(
+    (key: string) => {
+      setTouched((prev) => (prev.has(key) ? prev : new Set(prev).add(key)));
+      // Blur is the moment somebody looks away from the screen. Write now
+      // rather than waiting out a debounce that a closed laptop cancels.
+      void flushDraft();
+    },
+    [flushDraft],
+  );
 
   const errorFor = useCallback(
     (f: FieldDef, sectionIndex: number): string | null => {
@@ -271,16 +314,32 @@ export function FormRenderer({ def, onBack }: Props): ReactElement {
         Skip to the form
       </a>
 
+      {/*
+        The masthead is the only part of this page that differs by audience,
+        and it has to: the form definition's VERSION and STATUS are internal
+        facts, and "Close preview" is a staff control. An applicant reading
+        "Version 1 · published" above a form they are about to spend an hour on
+        learns nothing and wonders what it means.
+      */}
       <header className="masthead">
         <div className="masthead-inner">
           <h1>{def.name}</h1>
-          <span className="program">
-            Version {def.version} · {def.status}
-          </span>
-          <span className="spacer" />
-          <button type="button" className="btn secondary" onClick={onBack}>
-            Close preview
-          </button>
+          {isPreview ? (
+            <>
+              <span className="program">
+                Version {def.version} · {def.status}
+              </span>
+              <span className="spacer" />
+              <button type="button" className="btn secondary" onClick={onBack}>
+                Close preview
+              </button>
+            </>
+          ) : (
+            <>
+              <span className="program">Houston Texans Foundation</span>
+              <span className="spacer" />
+            </>
+          )}
         </div>
       </header>
 
@@ -338,11 +397,19 @@ export function FormRenderer({ def, onBack }: Props): ReactElement {
         </nav>
 
         <main id="main" tabIndex={-1} className="card">
-          <p className="banner">
-            <strong>Preview.</strong> This renders the form definition exactly as it is stored.
-            Answers are kept in this browser only — nothing is sent to Steward and nothing is
-            submitted. Draft saving, file uploads and submission are Phase 2.
-          </p>
+          {isPreview && (
+            <p className="banner">
+              <strong>Preview.</strong> This renders the form definition exactly as it is
+              stored. Answers are kept in this browser only — nothing is sent to Steward and
+              nothing is submitted. This is not what an applicant sees.
+            </p>
+          )}
+          {draftState.status === 'signed_out' && (
+            <p className="banner danger" role="alert">
+              <strong>Your sign-in has expired.</strong> Your answers up to the last save are
+              safe. Open the link in your email again to carry on.
+            </p>
+          )}
 
           {onReview ? (
             <ReviewStep
@@ -406,7 +473,11 @@ export function FormRenderer({ def, onBack }: Props): ReactElement {
               </button>
             )}
             <span className="spacer" />
-            <SaveState savedAt={savedAt} failed={saveFailed} />
+            {isPreview ? (
+              <SaveState savedAt={savedAt} failed={saveFailed} />
+            ) : (
+              <ServerSaveState state={draftState} />
+            )}
           </div>
 
           {/*
@@ -415,11 +486,13 @@ export function FormRenderer({ def, onBack }: Props): ReactElement {
             the primary button somebody presses on every one of these steps.
             A confirm dialog is not a reason to leave it there.
           */}
-          <div className="danger-row">
-            <button type="button" className="linklike danger" onClick={clearDraft}>
-              Clear all answers and start over
-            </button>
-          </div>
+          {isPreview && (
+            <div className="danger-row">
+              <button type="button" className="linklike danger" onClick={clearDraft}>
+                Clear all answers and start over
+              </button>
+            </div>
+          )}
         </main>
       </div>
 
@@ -498,6 +571,44 @@ function ErrorSummary({
  * A polite live region: an applicant using a screen reader hears "Saved 2:14 PM"
  * without having it interrupt what they are typing.
  */
+/**
+ * The saved-state indicator on the applicant path.
+ *
+ * The sentence itself comes from saveStateLabel, which is tested on its own --
+ * this component decides only WHEN to interrupt a screen-reader user.
+ *
+ * Announcing every autosave would read "Saved at 9:51 PM" over somebody in the
+ * middle of a 500-word narrative, every few seconds. Only a change of STATUS is
+ * worth interrupting for; a fresher timestamp in the same status is not. A
+ * failure is assertive, because it is the one the applicant has to act on.
+ *
+ * It re-renders on a timer so "just now" becomes "40 seconds ago" without an
+ * answer changing. A stale relative time is worse than none: it is the number
+ * somebody uses to decide whether it is safe to close the tab.
+ */
+function ServerSaveState({ state }: { state: DraftSyncState }): ReactElement {
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const id = window.setInterval(() => setTick((n) => n + 1), 15_000);
+    return () => window.clearInterval(id);
+  }, []);
+
+  const announced = useRef(state.status);
+  const changed = announced.current !== state.status;
+  announced.current = state.status;
+  const bad = state.status === 'failed' || state.status === 'signed_out';
+
+  return (
+    <span
+      className={bad ? 'counter danger' : 'counter'}
+      role={bad ? 'status' : undefined}
+      aria-live={bad ? 'assertive' : changed ? 'polite' : 'off'}
+    >
+      {saveStateLabel(state)}
+    </span>
+  );
+}
+
 function SaveState({ savedAt, failed }: { savedAt: Date | null; failed: boolean }): ReactElement {
   // The timestamp changes on every autosave, so a live region re-announced
   // "Saved at 9:51 PM" behind somebody in the middle of a 500-word narrative.
