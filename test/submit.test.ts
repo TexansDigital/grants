@@ -235,6 +235,54 @@ describe('submit', () => {
   });
 });
 
+describe('the EIN is not rewritable by an application', () => {
+  it('leaves an organization’s existing EIN alone, and records what was submitted', async () => {
+    /*
+     * The EIN is the deduplication key AND the key findOrganizationByEin uses
+     * to decide who belongs where, so a freely writable one let any applicant
+     * point their own organization row at another nonprofit's number. The real
+     * holder then hit "we have more than one record for that EIN" and could
+     * not apply at all.
+     */
+    const s = await setup();
+    const before = await db.prepare(`SELECT ein FROM organizations WHERE id=?`)
+      .bind(s.org.organizationId).first<{ ein: string }>();
+    expect(before!.ein).toBeTruthy();
+
+    await submitApplication(db, s.ctx, s.session, s.applicationId,
+      fullPayload(s.atts, { ein: '00-7654321' }));
+
+    const after = await db.prepare(`SELECT ein FROM organizations WHERE id=?`)
+      .bind(s.org.organizationId).first<{ ein: string }>();
+    expect(after!.ein, 'the stored EIN is untouched').toBe(before!.ein);
+
+    // Not silently dropped either: a mismatch is a question for a human, and
+    // the audit row is where that human finds it.
+    const audit = await db
+      .prepare(`SELECT after_json FROM audit_log WHERE action='organization.updated' AND entity_id=?
+                 ORDER BY created_at DESC LIMIT 1`)
+      .bind(s.org.organizationId).first<{ after_json: string }>();
+    // Deliberately not named ein_*: the audit redaction matches that substring
+    // in a key and would scrub the flag itself to "[redacted]".
+    expect(JSON.parse(audit!.after_json).submitted_tax_id_differs).toBe(true);
+  });
+
+  it('still fills an EIN that is missing', async () => {
+    // COALESCE, not "never write": an organization imported without one, or
+    // created before the column existed, is exactly who this should help.
+    const s = await setup();
+    await db.prepare(`UPDATE organizations SET ein=NULL WHERE id=?`)
+      .bind(s.org.organizationId).run();
+
+    await submitApplication(db, s.ctx, s.session, s.applicationId,
+      fullPayload(s.atts, { ein: '00-7654321' }));
+
+    const after = await db.prepare(`SELECT ein FROM organizations WHERE id=?`)
+      .bind(s.org.organizationId).first<{ ein: string }>();
+    expect(after!.ein).toBe('007654321');
+  });
+});
+
 describe('autosave', () => {
   it('saves a partial draft and audits it', async () => {
     const s = await setup();

@@ -194,26 +194,50 @@ describe('creating an applicant identity', () => {
     }
   });
 
-  it('reuses the organization when a second person applies for it', async () => {
+  it('does NOT put an unknown email inside an existing organization by EIN alone', async () => {
+    /*
+     * An EIN is public -- IRS Business Master File, Publication 78, the face of
+     * every Form 990. It identifies an organization; it does not prove you may
+     * act for one. This used to join: type a nonprofit's EIN on the public
+     * eligibility screen with your own email, get a magic link at your address,
+     * and hold a session scoped to that nonprofit.
+     */
     const e = ein();
     const first = await resolveApplicantIdentity(db, ctx(), identity({ ein: e }));
-    const second = await resolveApplicantIdentity(db, ctx(), identity({ ein: e }));
-    if (first.kind !== 'ready' || second.kind !== 'ready') throw new Error('expected ready');
+    const stranger = await resolveApplicantIdentity(db, ctx(), identity({ ein: e }));
+    if (first.kind !== 'ready' || stranger.kind !== 'ready') throw new Error('expected ready');
 
-    expect(second.organizationId).toBe(first.organizationId);
-    expect(second.createdOrganization).toBe(false);
-    expect(second.contactId).not.toBe(first.contactId);
-    // The second contact does not displace the first as primary.
-    const c = await db.prepare(`SELECT is_primary FROM contacts WHERE id=?`)
-      .bind(second.contactId).first<{ is_primary: number }>();
-    expect(c!.is_primary).toBe(0);
+    expect(stranger.organizationId).not.toBe(first.organizationId);
+    expect(stranger.createdOrganization).toBe(true);
+
+    // A duplicate is the intended outcome -- this platform expects them and
+    // merges them. The audit row is what puts it in front of an admin.
+    const audit = await db
+      .prepare(`SELECT after_json FROM audit_log WHERE action='organization.created' AND entity_id=?`)
+      .bind(stranger.organizationId).first<{ after_json: string }>();
+    const after = JSON.parse(audit!.after_json) as Record<string, unknown>;
+    expect(after.needs_merge_review).toBe(true);
+    expect(after.duplicate_of_organization_id).toBe(first.organizationId);
+  });
+
+  it('lets the SAME person come back to the organization they already belong to', async () => {
+    // The legitimate half of the rule above: a returning applicant is known by
+    // their email, not by the number they typed.
+    const input = identity();
+    const first = await resolveApplicantIdentity(db, ctx(), input);
+    const again = await resolveApplicantIdentity(db, ctx(), input);
+    if (first.kind !== 'ready' || again.kind !== 'ready') throw new Error('expected ready');
+    expect(again.organizationId).toBe(first.organizationId);
+    expect(again.createdOrganization).toBe(false);
   });
 
   it('reapplies onto the surviving organization after a merge', async () => {
     // End to end, not just through findOrganizationByEin: an organization
     // merged last year must not split again the moment it returns.
     const survivorEin = ein();
-    const first = await resolveApplicantIdentity(db, ctx(), identity({ ein: survivorEin }));
+    const firstInput = identity({ ein: survivorEin });
+    const firstEmail = firstInput.email;
+    const first = await resolveApplicantIdentity(db, ctx(), firstInput);
     if (first.kind !== 'ready') throw new Error('expected ready');
 
     const oldEin = ein();
@@ -222,8 +246,18 @@ describe('creating an applicant identity', () => {
       .prepare(`UPDATE organizations SET status='merged', merged_into_id=? WHERE id=?`)
       .bind(first.organizationId, oldId)
       .run();
+    // Their user row still points at the row that was merged AWAY, which is
+    // the state a real merge leaves behind. Resolution has to walk the chain
+    // from there; comparing raw ids would send a known person off to found a
+    // third duplicate.
+    await db.prepare(`UPDATE users SET organization_id=? WHERE id=?`)
+      .bind(oldId, first.userId).run();
 
-    const again = await resolveApplicantIdentity(db, ctx(), identity({ ein: oldEin }));
+    // The SAME person, whose user row still points at the merged-away id.
+    // Resolving through the chain is what stops them founding a third row.
+    const again = await resolveApplicantIdentity(
+      db, ctx(), { ...identity({ ein: oldEin }), email: firstEmail },
+    );
     expect(again).toMatchObject({
       kind: 'ready', organizationId: first.organizationId, createdOrganization: false,
     });

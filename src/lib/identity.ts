@@ -208,9 +208,49 @@ export async function resolveApplicantIdentity(
   const now = nowIso();
   const statements: D1PreparedStatement[] = [];
 
+  /*
+   * AN EIN IS NOT A CREDENTIAL, and this is where that nearly went wrong.
+   *
+   * A matching EIN used to be enough to put a brand-new email inside an
+   * existing organization. EINs are public -- they are in the IRS Business
+   * Master File, in Publication 78, and on the face of every Form 990 -- so
+   * anyone who could read a nonprofit's 990 could type its EIN on the public
+   * eligibility screen, receive a magic link at their own address, and hold a
+   * session scoped to that nonprofit. From there they inherited its
+   * eligibility pass, filed applications under its name, and on submit
+   * overwrote its legal name, mission and operating budget through promotion.
+   *
+   * So a match only JOINS when the email already belongs to that organization
+   * -- a returning applicant. Any other email with a matching EIN gets its own
+   * new organization row, which is a duplicate, which is a case this platform
+   * already expects and already has an answer for: match on EIN at submit and
+   * let an admin merge. That turns a security hole into a data-quality task
+   * that was always going to exist.
+   *
+   * The cost is real and is the right trade: a genuine second person at the
+   * same nonprofit, applying with a different address, creates a duplicate an
+   * admin has to merge. Making them wait for a human beats letting a stranger
+   * in.
+   */
+  /*
+   * Which organization this email ALREADY belongs to, resolved through the
+   * merge chain rather than read off the row.
+   *
+   * A merge leaves the user pointing at the row that was merged away, so raw
+   * id equality answers "no" for a person who plainly still belongs there --
+   * and both decisions below hang on that answer.
+   */
+  const existingUserOrganizationId =
+    existingUser?.organization_id != null
+      ? await resolveMergeTarget(db, existingUser.organization_id)
+      : null;
+
+  const joinsExistingOrganization =
+    match.kind === 'matched' && existingUserOrganizationId === match.organizationId;
+
   let organizationId: string;
   let createdOrganization = false;
-  if (match.kind === 'matched') {
+  if (match.kind === 'matched' && joinsExistingOrganization) {
     // Already the survivor: findOrganizationByEin excludes merged rows from a
     // live match and resolves the chain itself on the merged-away path, and
     // 0002 CHECKs that merged_into_id is set exactly when status is 'merged'.
@@ -232,15 +272,32 @@ export async function resolveApplicantIdentity(
         entityId: organizationId,
         // ein_verified_at stays null: matching the IRS file is a separate step
         // and a mismatch there is a flag for a human, never a rejection.
-        after: { legal_name: legalName, ein, status: 'active', source: 'eligibility_screen' },
+        after: {
+          legal_name: legalName,
+          ein,
+          status: 'active',
+          source: 'eligibility_screen',
+          /*
+           * The merge queue's input. A duplicate created because an unknown
+           * email presented a known EIN is exactly the row an admin needs to
+           * look at, and burying that in "we made an organization" would mean
+           * the merge tool has to rediscover it by scanning for EIN
+           * collisions later.
+           */
+          ...(match.kind === 'matched'
+            ? { duplicate_of_organization_id: match.organizationId, needs_merge_review: true }
+            : {}),
+        },
       }),
     );
   }
 
-  if (existingUser && existingUser.organization_id !== organizationId) {
+  if (existingUser && existingUserOrganizationId !== organizationId) {
     return {
       kind: 'email_belongs_to_other_organization',
-      existingOrganizationId: existingUser.organization_id ?? '',
+      // The SURVIVOR's id, not the merged-away one the user row happens to
+      // hold. An admin sent to look at a merged row learns nothing.
+      existingOrganizationId: existingUserOrganizationId ?? '',
     };
   }
 

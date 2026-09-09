@@ -597,6 +597,16 @@ export async function submitApplication(
     .bind(app.organization_id, contactEmail, contactEmail, contactEmail)
     .first<{ id: string }>();
 
+  // One row, once per submit. Needed only so a submitted EIN that disagrees
+  // with the stored one can be flagged for a human rather than written.
+  const storedEin =
+    (
+      await db
+        .prepare(`SELECT ein FROM organizations WHERE id = ? AND deleted_at IS NULL`)
+        .bind(app.organization_id)
+        .first<{ ein: string | null }>()
+    )?.ein ?? null;
+
   const submittedAt = nowIso();
 
   const before = {
@@ -653,7 +663,9 @@ export async function submitApplication(
     ...clearHiddenStatements(db, app.id, outcome.hiddenFieldIds),
     ...claimAttachmentStatements(db, app.id, attachments.ids),
     ...reindexStatements(db, searchDoc, submittedAt, guard),
-    ...organizationPromotionStatements(db, ctx, app.organization_id, promoted.organization, guard),
+    ...organizationPromotionStatements(
+      db, ctx, app.organization_id, promoted.organization, guard, storedEin,
+    ),
     ...contactPromotionStatements(db, ctx, app.organization_id, contactEmail, promoted.contact, guard),
 
     // Guarded like everything else: the losing side of a race must not leave an
@@ -756,11 +768,41 @@ function organizationPromotionStatements(
   organizationId: string,
   values: Record<string, string | number | null>,
   guard: { sql: string; binds: unknown[] },
+  /** The organization's EIN as it stands, so a mismatch can be flagged. */
+  storedEin: string | null,
 ): D1PreparedStatement[] {
   const columns = Object.keys(values).filter((c) => values[c] !== null);
   if (columns.length === 0) return [];
 
-  const assignments = columns.map((c) => `${c} = ?`).join(', ');
+  /*
+   * THE EIN IS SET ONCE AND NEVER REWRITTEN BY AN APPLICATION.
+   *
+   * Every other promoted column is a fact about the organization that an
+   * applicant is the right person to update -- a new website, a revised
+   * mission, this year's budget. The EIN is not one of those. It is the
+   * deduplication key, and it is what findOrganizationByEin uses to decide
+   * which organization a person belongs to, so a freely writable EIN let any
+   * applicant point their own organization row at another nonprofit's number.
+   *
+   * Two things that bought:
+   *   - The real holder of that EIN then hit "we have more than one record for
+   *     that EIN and cannot tell which is yours" and could not apply at all,
+   *     until an admin merged rows with a tool that does not exist yet.
+   *   - Or, if they had not registered yet, they were placed inside the
+   *     squatter's organization when they did.
+   *
+   * COALESCE, so it still fills a blank -- an organization imported without
+   * one, or created before this field existed -- and is otherwise inert. A
+   * submitted EIN that disagrees with the stored one is a question for a human,
+   * not a write; `ein_mismatch` on the audit row is how that human finds it.
+   */
+  const submittedEin = typeof values.ein === 'string' ? values.ein : null;
+  // Only a DIFFERENCE is worth a flag. Every application restates the EIN, so
+  // flagging every submission would make the signal worthless.
+  const einDiffers = submittedEin !== null && submittedEin !== storedEin && storedEin !== null;
+  const assignments = columns
+    .map((c) => (c === 'ein' ? `ein = COALESCE(ein, ?)` : `${c} = ?`))
+    .join(', ');
   return [
     db
       .prepare(
@@ -772,7 +814,26 @@ function organizationPromotionStatements(
       action: 'organization.updated',
       entityType: 'organization',
       entityId: organizationId,
-      after: { promoted_from_application: columns },
+      after: {
+        promoted_from_application: columns,
+        /*
+         * A FLAG, not the number.
+         *
+         * The submitted EIN is already on the application row as
+         * `ein_at_submit` and in `application_answers`, so repeating it here
+         * would duplicate a sensitive identifier into an operational log that
+         * more people read than need it -- and the audit redaction scrubs it
+         * on the way in anyway, which is how this was caught. What an admin
+         * needs from the audit trail is "these two disagree, go and look",
+         * and that is what this is.
+         *
+         * Not named `ein_*` on purpose: the audit redaction matches the
+         * substring "ein" in a key and would scrub this flag to "[redacted]",
+         * leaving an admin a row that says a field exists and refuses to say
+         * what it is. Found by a test, not by reading the pattern.
+         */
+        ...(einDiffers ? { submitted_tax_id_differs: true } : {}),
+      },
     }, { guard }),
   ];
 }
