@@ -294,7 +294,10 @@ export async function seedProgram(
     assertNoDuplicateTargets(preflightFields);
     assertUniversalCoverage(
       preflightFields,
-      stage.requiredMapsTo ?? spec.requiredMapsTo ?? DEFAULT_REQUIRED_MAPS_TO,
+      // Same non-empty rule as the publish gate below, for the same reason.
+      stage.requiredMapsTo?.length
+        ? stage.requiredMapsTo
+        : (spec.requiredMapsTo?.length ? spec.requiredMapsTo : DEFAULT_REQUIRED_MAPS_TO),
     );
   }
 
@@ -381,7 +384,13 @@ export async function publishFormDefinition(
     if (program?.req) {
       try {
         const parsed = JSON.parse(program.req);
-        if (Array.isArray(parsed)) required = parsed.map(String);
+        // A NON-EMPTY array only. `[]` is valid JSON, is a valid array, and is
+        // truthy -- so an empty override used to disable the coverage gate
+        // entirely, letting a form that promotes nothing publish clean. That
+        // contradicts CLAUDE.md's rule that every program's form maps the
+        // universal set, and it fails open, which is the wrong direction for a
+        // gate. An empty list is treated as absent.
+        if (Array.isArray(parsed) && parsed.length > 0) required = parsed.map(String);
       } catch {
         // Malformed configuration falls back to the safe default rather than
         // publishing a form that collects nothing.

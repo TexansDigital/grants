@@ -184,6 +184,70 @@ describe('form loading and validation', () => {
     ).toContain('You must confirm');
   });
 
+  it('refuses to PUBLISH a form that does not collect the universal set', async () => {
+    // Isolated from the seeder's pre-flight. Seeding a deficient spec is
+    // rejected at pre-flight, so it cannot tell whether the publish-time gate
+    // exists at all -- deleting that call left the whole suite green. This
+    // widens the requirement AFTER seeding, which is the real case: an admin
+    // narrows a stage, then the program's required set changes underneath it.
+    const p = await seedProgram(db, ctx(), INSPIRE_CHANGE);
+    const eligId = p.formDefinitionIds.eligibility!;
+
+    // The eligibility form legitimately promotes only three targets. Clear its
+    // override so it inherits the program's full universal set, then mint a
+    // fresh draft version of it and try to publish that.
+    const draftId = newId();
+    const now = nowIso();
+    await db
+      .prepare(
+        `INSERT INTO form_definitions (id, program_id, form_key, stage_id, kind, name,
+           version, status, required_maps_to_json, created_at, updated_at)
+         SELECT ?, program_id, form_key, stage_id, kind, name, 2, 'draft', NULL, ?, ?
+           FROM form_definitions WHERE id = ?`,
+      )
+      .bind(draftId, now, now, eligId)
+      .run();
+    await db
+      .prepare(
+        `INSERT INTO form_sections (id, form_definition_id, section_key, title, sort_order,
+           created_at)
+         SELECT ?, ?, section_key, title, sort_order, ?
+           FROM form_sections WHERE form_definition_id = ? LIMIT 1`,
+      )
+      .bind(newId(), draftId, now, eligId)
+      .run();
+
+    await expect(publishFormDefinition(db, ctx(), draftId)).rejects.toThrow(
+      /missing universal maps_to targets/,
+    );
+  });
+
+  it('treats an empty promotion override as absent, not as "require nothing"', async () => {
+    // `[]` is valid JSON, a valid array, and truthy, so an empty override
+    // disabled the coverage gate entirely and a form promoting nothing
+    // published clean -- failing open, against CLAUDE.md's rule that every
+    // program's form maps the universal set.
+    const spec: ProgramSpec = {
+      ...INSPIRE_CHANGE,
+      slug: 'empty-override',
+      stages: [
+        {
+          key: 'only',
+          name: 'Only',
+          requiredMapsTo: [],
+          form: {
+            name: 'Promotes nothing',
+            sections: [
+              { key: 's', title: 'S', fields: [{ key: 'note', label: 'Note', type: 'long_text' }] },
+            ],
+          },
+        },
+      ],
+      cycles: [],
+    };
+    await expect(seedProgram(db, ctx(), spec)).rejects.toThrow();
+  });
+
   it('does not require a hidden conditional field', async () => {
     const p = await seedProgram(db, ctx(), INSPIRE_CHANGE);
     const def = await loadFormDefinition(db, p.formDefinitionIds.application!);

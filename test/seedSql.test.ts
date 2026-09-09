@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { db } from './helpers';
 import { emitSeedSql } from '../src/seed/emitSql';
+import { newId } from '../src/lib/ids';
 import { INSPIRE_CHANGE } from '../src/seed/inspireChange';
 import { seededId } from '../src/seed/deterministicIds';
 import { allFields, lintFormDefinition } from '../src/lib/forms';
@@ -84,6 +85,75 @@ describe('seed artifact', () => {
 
     const counties = fields.find((f) => f.field_key === 'counties_served')!;
     expect(counties.options.length).toBe(18);
+  });
+
+  it('pins the exact field keys of both forms, so a field cannot vanish', async () => {
+    // A previous commit replaced a literal count with one derived from the
+    // spec, and claimed that lost nothing. It did: deriving both sides from
+    // INSPIRE_CHANGE means deleting a field from the spec changes expectation
+    // and actual together, and the whole suite stays green. Verified by the
+    // audit -- removing volunteer_engagement, contact_first_name, or the EIN
+    // validation pattern was invisible to all 467 tests.
+    //
+    // The same reasoning the county list already carries: a question quietly
+    // dropped from a live form is not something a reviewer will notice.
+    await applySeed();
+
+    const app = await loadFormDefinition(db, seededId(`${INSPIRE_CHANGE.slug}/stage/application/form`));
+    expect(allFields(app).map((f) => f.field_key)).toEqual([
+      'salutation', 'contact_first_name', 'contact_last_name', 'contact_email',
+      'contact_phone', 'contact_job_title',
+      'organization_name', 'ein', 'organization_website', 'organization_address',
+      'mission_statement', 'annual_operating_budget',
+      'project_title', 'requested_amount', 'funding_type', 'funding_type_other',
+      'area_of_focus', 'counties_served', 'itemized_budget',
+      'advancing_opportunity', 'project_summary', 'community_need',
+      'implementation_timeline', 'individuals_benefiting', 'estimated_individuals_count',
+      'leadership_lived_experience', 'partial_funding_plan', 'volunteer_engagement',
+      'financial_statements', 'operating_budget_doc',
+      'guidelines_attestation', 'marketing_opt_in',
+    ]);
+
+    const elig = await loadFormDefinition(db, seededId(`${INSPIRE_CHANGE.slug}/stage/eligibility/form`));
+    expect(allFields(elig).map((f) => f.field_key)).toEqual([
+      'entity_type_confirmation', 'guidelines_attestation', 'authorization_attestation',
+      'organization_name', 'ein', 'contact_first_name', 'contact_last_name', 'contact_email',
+    ]);
+
+    // Validation that gates a real applicant is pinned per field, not counted.
+    const eligEin = allFields(elig).find((f) => f.field_key === 'ein')!;
+    expect(eligEin.validation.pattern).toBe('^\\d{2}-?\\d{7}$');
+    expect(eligEin.is_required).toBe(true);
+  });
+
+  it('refuses a malformed promotion override, at insert and at update', async () => {
+    // Both of migration 0009's triggers were entirely dead: nothing in the
+    // suite ever wrote a bad required_maps_to_json, so deleting either one
+    // left 467 tests green. That is the standard test/migrations.test.ts sets
+    // for itself -- a constraint never exercised is a comment.
+    await applySeed();
+    const id = seededId(`${INSPIRE_CHANGE.slug}/stage/application/form`);
+
+    for (const bad of ['{"a":1}', 'not json', 'null', '42']) {
+      await expect(
+        db.prepare(`UPDATE form_definitions SET required_maps_to_json = ? WHERE id = ?`)
+          .bind(bad, id).run(),
+        `update accepted ${bad}`,
+      ).rejects.toThrow(/must be a JSON array/);
+    }
+
+    await expect(
+      db.prepare(
+        `INSERT INTO form_definitions (id, program_id, form_key, stage_id, kind, name,
+           version, status, required_maps_to_json, created_at, updated_at)
+         SELECT ?, program_id, 'bad', stage_id, kind, name, 99, 'draft', '{"a":1}',
+                created_at, updated_at FROM form_definitions WHERE id = ?`,
+      ).bind(newId(), id).run(),
+    ).rejects.toThrow(/must be a JSON array/);
+
+    // A well-formed array is still accepted.
+    await db.prepare(`UPDATE form_definitions SET required_maps_to_json = ? WHERE id = ?`)
+      .bind('["ein"]', id).run();
   });
 
   it('preserves the conditional wiring, not just the rows', async () => {

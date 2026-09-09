@@ -140,8 +140,17 @@ const SECRET_VALUE_PATTERNS: [RegExp, string][] = [
   [/([?&](?:token|t|code|key|sig|signature|access_token)=)[^&\s]+/gi, '$1[redacted]'],
   // Long unbroken base64/hex runs: almost never prose, often a credential.
   [/\b[A-Fa-f0-9]{32,}\b/g, '[redacted-hex]'],
+  // base64 AND base64url. The url alphabet ('-' and '_') matters: this
+  // codebase's own magic-link tokens are base64url, and with the standard
+  // alphabet alone a single '-' or '_' broke the run below the threshold and
+  // let the token through verbatim. Measured on real tokens, roughly seven in
+  // ten survived. error_log is append-only with no delete path, so one that
+  // slips through is permanent.
+  //
+  // The cost is over-redaction of long hyphenated slugs in diagnostics. That
+  // is the right direction to be wrong in.
   [
-    /\b(?=[A-Za-z0-9+/]*[0-9])(?=[A-Za-z0-9+/]*[A-Za-z])[A-Za-z0-9+/]{40,}={0,2}\b/g,
+    /(?=[A-Za-z0-9+/_-]*[0-9])(?=[A-Za-z0-9+/_-]*[A-Za-z])[A-Za-z0-9+/_-]{40,}={0,2}/g,
     '[redacted-b64]',
   ],
 ];

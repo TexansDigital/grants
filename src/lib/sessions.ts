@@ -195,7 +195,11 @@ export function isRevoked(issuedAt: string, validFrom: string | null | undefined
   if (Number.isNaN(cutoff)) return true;
   const issued = Date.parse(issuedAt);
   if (Number.isNaN(issued)) return true;
-  return issued < cutoff;
+  // Inclusive. Workers freeze Date.now() between I/O, so two requests on one
+  // edge genuinely share a timestamp -- an in-flight magic-link redemption
+  // racing a sign-out is the realistic case, and a strict comparison lets that
+  // session survive the sign-out that was meant to kill it.
+  return issued <= cutoff;
 }
 
 /**

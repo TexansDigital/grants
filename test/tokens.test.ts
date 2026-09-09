@@ -65,6 +65,38 @@ describe('token generation', () => {
     expect(seen.size).toBe(500);
   });
 
+  it('draws its full length from the CSPRNG, not just a prefix', async () => {
+    // The length regex above passes with 4 of 32 bytes random and the rest
+    // zeroes -- the token stays 43 characters. Entropy was asserted nowhere.
+    // Decode and check every byte position actually varies across samples.
+    const decode = (t: string): Uint8Array => {
+      const b64 = t.replace(/-/g, '+').replace(/_/g, '/').padEnd(44, '=');
+      return Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+    };
+    const samples = Array.from({ length: 300 }, () => decode(generateToken()));
+    expect(samples[0]!.length).toBe(32);
+    for (let i = 0; i < 32; i++) {
+      const distinct = new Set(samples.map((s) => s[i]));
+      // 300 draws from 256 values: seeing fewer than 50 distinct means this
+      // byte is not random. A constant byte yields exactly 1.
+      expect(distinct.size, `byte ${i} is not random`).toBeGreaterThan(50);
+    }
+  });
+
+  it('hashes the WHOLE token, not a prefix of it', async () => {
+    // The pinned digest below uses 'abc', which is shorter than any plausible
+    // truncation, so hashToken(token.slice(0, 8)) passed every assertion --
+    // including the round-trip check, which runs both sides through it.
+    const a = `${'x'.repeat(40)}AAAA`;
+    const b = `${'x'.repeat(40)}BBBB`;
+    expect(await hashToken(a)).not.toBe(await hashToken(b));
+    // Independent pin on a long input.
+    expect(await hashToken('a'.repeat(43))).toBe(
+      await hashToken('a'.repeat(43)),
+    );
+    expect(await hashToken('a'.repeat(43))).not.toBe(await hashToken('a'.repeat(42)));
+  });
+
   it('hashes to 64 hex characters, deterministically', async () => {
     const h = await hashToken('abc');
     expect(h).toMatch(/^[0-9a-f]{64}$/);
@@ -147,9 +179,34 @@ describe('consuming', () => {
     const { token } = await issueLoginToken(db, ctx(), {
       userId, email: 'a@example.org', now: issuedAt,
     });
-    // One millisecond before expiry still works; exactly at expiry does not.
+    // BOTH halves. Only the first was asserted, so > vs >= was invisible.
     const justBefore = new Date(issuedAt.getTime() + TOKEN_TTL_MS - 1);
     expect((await consumeLoginToken(db, ctx(), token, { now: justBefore })).ok).toBe(true);
+
+    const second = await issueLoginToken(db, ctx(), {
+      userId: await makeUser(), email: 'b@example.org', now: issuedAt,
+    });
+    const exactly = new Date(issuedAt.getTime() + TOKEN_TTL_MS);
+    expect(await consumeLoginToken(db, ctx(), second.token, { now: exactly })).toEqual({
+      ok: false, reason: 'expired',
+    });
+  });
+
+  it('refuses a token whose account was deactivated after it was sent', async () => {
+    // Checked in the WHERE clause, not by the caller: resolveSession would
+    // catch it on the next request, but a route trusting ok:true would already
+    // have set a cookie and said "you're signed in".
+    const userId = await makeUser();
+    const { token } = await issueLoginToken(db, ctx(), { userId, email: 'a@example.org' });
+    await db.prepare(`UPDATE users SET is_active = 0 WHERE id = ?`).bind(userId).run();
+    expect((await consumeLoginToken(db, ctx(), token)).ok).toBe(false);
+  });
+
+  it('refuses a token whose account was soft-deleted', async () => {
+    const userId = await makeUser();
+    const { token } = await issueLoginToken(db, ctx(), { userId, email: 'a@example.org' });
+    await db.prepare(`UPDATE users SET deleted_at = ? WHERE id = ?`).bind(nowIso(), userId).run();
+    expect((await consumeLoginToken(db, ctx(), token)).ok).toBe(false);
   });
 
   it('refuses a token that was never issued', async () => {
@@ -174,17 +231,31 @@ describe('consuming', () => {
 
 // ---------------------------------------------------------------------------
 describe('superseding', () => {
-  it('a newer link kills the older one', async () => {
+  it('a newer link kills the older one, with no ordering for a caller to get wrong', async () => {
+    // issueLoginToken supersedes internally. The old shape -- issue, then call
+    // supersede -- voided the link that was already in the email, silently,
+    // and nothing in the signature stopped you.
     const userId = await makeUser();
     const first = await issueLoginToken(db, ctx(), { userId, email: 'a@example.org' });
-
-    expect(await supersedeOutstandingTokens(db, userId)).toBe(1);
     const second = await issueLoginToken(db, ctx(), { userId, email: 'a@example.org' });
 
     expect(await consumeLoginToken(db, ctx(), first.token)).toEqual({
       ok: false, reason: 'superseded',
     });
     expect((await consumeLoginToken(db, ctx(), second.token)).ok).toBe(true);
+  });
+
+  it('leaves an already-expired token reported as expired, not superseded', async () => {
+    // Superseding an expired token would change what the person is told, from
+    // "your link expired, request another" to "we sent you a newer one".
+    const userId = await makeUser();
+    const t0 = new Date('2026-03-01T12:00:00.000Z');
+    const old = await issueLoginToken(db, ctx(), { userId, email: 'a@example.org', now: t0 });
+    const later = new Date(t0.getTime() + TOKEN_TTL_MS + 60_000);
+    await issueLoginToken(db, ctx(), { userId, email: 'a@example.org', now: later });
+    expect(await consumeLoginToken(db, ctx(), old.token, { now: later })).toEqual({
+      ok: false, reason: 'expired',
+    });
   });
 
   it('does not mark an unused link as if somebody signed in with it', async () => {
@@ -275,6 +346,143 @@ describe('the database refuses to weaken a token', () => {
     ).rejects.toThrow(/frozen/);
   });
 
+  it('a superseded token cannot be un-superseded or rewritten', async () => {
+    // Only the consumed half of login_tokens_single_use was covered; deleting
+    // the superseded half was invisible.
+    const userId = await makeUser();
+    const first = await issueLoginToken(db, ctx(), { userId, email: 'a@example.org' });
+    await issueLoginToken(db, ctx(), { userId, email: 'a@example.org' });
+    await expect(
+      db.prepare(`UPDATE login_tokens SET superseded_at = NULL WHERE id = ?`)
+        .bind(first.tokenId).run(),
+    ).rejects.toThrow(/settled token cannot be modified/);
+  });
+
+  it('INSERT OR REPLACE cannot collide on the primary key either', async () => {
+    // The both-keys guard was only tested on token_hash; the id half was
+    // deletable with the whole suite green.
+    const t = await aToken();
+    await expect(
+      db.prepare(
+        `INSERT OR REPLACE INTO login_tokens
+           (id, token_hash, user_id, sent_to_email, purpose, issued_at, expires_at, created_at)
+         VALUES (?,?,?,?,'sign_in',?,?,?)`,
+      ).bind(t.tokenId, 'f'.repeat(64), t.userId, 'a@example.org',
+             '2026-01-01T00:00:00.000Z', '2030-01-01T00:00:00.000Z',
+             '2026-01-01T00:00:00.000Z').run(),
+    ).rejects.toThrow(/already exists/);
+  });
+
+  it('freezes the hash, the recipient and the issue time as well', async () => {
+    // Three of the five frozen columns were unasserted.
+    const t = await aToken();
+    for (const [col, val] of [
+      ['token_hash', 'a'.repeat(64)],
+      ['sent_to_email', 'attacker@example.org'],
+      ['issued_at', '2020-01-01T00:00:00.000Z'],
+    ] as const) {
+      await expect(
+        db.prepare(`UPDATE login_tokens SET ${col} = ? WHERE id = ?`).bind(val, t.tokenId).run(),
+      ).rejects.toThrow(/frozen/);
+    }
+  });
+
+  it('freezes the request forensics, which cannot be reconstructed later', async () => {
+    const t = await aToken();
+    await expect(
+      db.prepare(`UPDATE login_tokens SET requested_ip = '9.9.9.9' WHERE id = ?`)
+        .bind(t.tokenId).run(),
+    ).rejects.toThrow(/forensics are frozen/);
+    await expect(
+      db.prepare(`UPDATE login_tokens SET requested_user_agent = 'wiped' WHERE id = ?`)
+        .bind(t.tokenId).run(),
+    ).rejects.toThrow(/forensics are frozen/);
+  });
+
+  it('refuses a redemption forged to a date after the token expired', async () => {
+    // This killed a live link AND wrote permanent false evidence of a sign-in,
+    // on a table with no delete path.
+    const t = await aToken();
+    await expect(
+      db.prepare(`UPDATE login_tokens SET consumed_at = '2099-01-01T00:00:00.000Z' WHERE id = ?`)
+        .bind(t.tokenId).run(),
+    ).rejects.toThrow(/cannot be after expires_at/);
+  });
+
+  it('refuses a non-ISO expiry, which the string comparison would misread', async () => {
+    // '2026-03-01T14:00:00+02:00' sorts after '2026-03-01T12:00:00.500Z', so
+    // an offset-form row stayed valid two hours past its real expiry.
+    await expect(
+      db.prepare(
+        `INSERT INTO login_tokens (id, token_hash, user_id, sent_to_email, purpose,
+           issued_at, expires_at, created_at)
+         VALUES (?,?,?,?,'sign_in',?,?,?)`,
+      ).bind(newId(), 'b'.repeat(64), await makeUser(), 'a@example.org',
+             '2026-03-01T12:00:00.000Z', '2026-03-01T14:00:00+02:00',
+             '2026-03-01T12:00:00.000Z').run(),
+    ).rejects.toThrow(/ISO-8601 UTC/);
+  });
+
+  it('refuses a hash that is not a SHA-256, and a duplicate hash', async () => {
+    const t = await aToken();
+    // t.userId is real, so a rejection here is the hash constraint, not the FK.
+    const insert = (hash: string) =>
+      db.prepare(
+        `INSERT INTO login_tokens (id, token_hash, user_id, sent_to_email, purpose,
+           issued_at, expires_at, created_at)
+         VALUES (?,?,?,?,'sign_in',?,?,?)`,
+      ).bind(newId(), hash, t.userId, 'a@example.org', '2026-03-01T12:00:00.000Z',
+             '2026-03-01T12:15:00.000Z', '2026-03-01T12:00:00.000Z').run();
+    await expect(insert('a'.repeat(64))).resolves.toBeTruthy(); // control
+    await expect(insert('tooshort')).rejects.toThrow();
+    await expect(insert(await hashToken(t.token))).rejects.toThrow(/already exists/);
+  });
+
+  it('refuses an unnormalized recipient and an unknown purpose', async () => {
+    // A REAL user id. Binding a nonexistent one made the FK throw first, so
+    // these assertions passed with the CHECK under test deleted.
+    const userId = await makeUser();
+    let n = 0;
+    const insert = (email: string, purpose: string) =>
+      db.prepare(
+        `INSERT INTO login_tokens (id, token_hash, user_id, sent_to_email, purpose,
+           issued_at, expires_at, created_at)
+         VALUES (?,?,?,?,?,?,?,?)`,
+      ).bind(newId(), String(++n).padStart(64, 'e'), userId, email, purpose,
+             '2026-03-01T12:00:00.000Z', '2026-03-01T12:15:00.000Z',
+             '2026-03-01T12:00:00.000Z').run();
+
+    // The control: identical insert with valid values must SUCCEED, so a
+    // rejection above cannot be blamed on the surrounding statement.
+    await expect(insert('a@example.org', 'sign_in')).resolves.toBeTruthy();
+    await expect(insert('MixedCase@example.org', 'sign_in')).rejects.toThrow();
+    await expect(insert('b@example.org', 'password_reset')).rejects.toThrow();
+  });
+
+  it('refuses an expiry at or before issue', async () => {
+    await expect(
+      db.prepare(
+        `INSERT INTO login_tokens (id, token_hash, user_id, sent_to_email, purpose,
+           issued_at, expires_at, created_at)
+         VALUES (?,?,?,?,'sign_in',?,?,?)`,
+      ).bind(newId(), 'c'.repeat(64), await makeUser(), 'a@example.org',
+             '2026-03-01T12:00:00.000Z', '2026-03-01T12:00:00.000Z',
+             '2026-03-01T12:00:00.000Z').run(),
+    ).rejects.toThrow();
+  });
+
+  it('refuses a token for a user that does not exist', async () => {
+    await expect(
+      db.prepare(
+        `INSERT INTO login_tokens (id, token_hash, user_id, sent_to_email, purpose,
+           issued_at, expires_at, created_at)
+         VALUES (?,?,?,?,'sign_in',?,?,?)`,
+      ).bind(newId(), 'd'.repeat(64), 'no-such-user', 'a@example.org',
+             '2026-03-01T12:00:00.000Z', '2026-03-01T12:15:00.000Z',
+             '2026-03-01T12:00:00.000Z').run(),
+    ).rejects.toThrow();
+  });
+
   it('a token cannot be both used and replaced', async () => {
     const t = await aToken();
     await expect(
@@ -300,10 +508,35 @@ describe('sessions', () => {
     const userId = await makeUser();
     const now = new Date('2026-03-01T12:00:00.000Z');
     const { sessionToken, expiresAt } = await createSession(testEnv, userId, { now });
-    expect(Date.parse(expiresAt) - now.getTime()).toBe(SESSION_TTL_MS);
 
-    const after = new Date(now.getTime() + SESSION_TTL_MS + 1000);
-    expect(await resolveSession(testEnv, sessionToken, { now: after })).toBeNull();
+    // Pin the constant absolutely. Comparing the computed expiry to the same
+    // constant that computed it is a tautology -- it passed with the TTL set
+    // to 30 days and to 365 days.
+    expect(SESSION_TTL_MS).toBe(7 * 24 * 60 * 60 * 1000);
+    expect(expiresAt).toBe('2026-03-08T12:00:00.000Z');
+
+    // Both sides of the boundary: exactly at expiry is dead, not just after.
+    const exactly = new Date(now.getTime() + SESSION_TTL_MS);
+    expect(await resolveSession(testEnv, sessionToken, { now: exactly })).toBeNull();
+    const justBefore = new Date(now.getTime() + SESSION_TTL_MS - 1);
+    expect(await resolveSession(testEnv, sessionToken, { now: justBefore })).not.toBeNull();
+  });
+
+  it('draws the session token from the CSPRNG at full length', async () => {
+    // There was no session analogue of the token entropy test at all.
+    const decode = (t: string): Uint8Array => {
+      const b64 = t.replace(/-/g, '+').replace(/_/g, '/').padEnd(44, '=');
+      return Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+    };
+    const userId = await makeUser();
+    const samples: Uint8Array[] = [];
+    for (let i = 0; i < 120; i++) {
+      samples.push(decode((await createSession(testEnv, userId)).sessionToken));
+    }
+    expect(samples[0]!.length).toBe(32);
+    for (let i = 0; i < 32; i++) {
+      expect(new Set(samples.map((x) => x[i])).size, `byte ${i}`).toBeGreaterThan(30);
+    }
   });
 
   it('refuses an unknown or empty token', async () => {
@@ -326,8 +559,43 @@ describe('sessions', () => {
     const userId = await makeUser();
     const { sessionToken } = await createSession(testEnv, userId);
     const raw = await testEnv.SESSIONS.get(`session:${await hashToken(sessionToken)}`);
-    expect(raw).not.toContain('applicant');
-    expect(raw).not.toContain('organization');
+    // Structural, not two substring probes. The old assertions were
+    // not.toContain('applicant') and not.toContain('organization'), which a
+    // record caching `role: 'grantee'` or a key spelled `orgId` walked past.
+    expect(Object.keys(JSON.parse(raw!)).sort()).toEqual(['expiresAt', 'issuedAt', 'userId']);
+  });
+
+  it('never invents an organization when the row has none', async () => {
+    // An APPLICANT with a null organization_id -- the users CHECK forbids the
+    // row, so it takes a stub Env to present it. Using an admin instead makes
+    // the role guard fire first, and a fallback like
+    // `organization_id ?? 'some-org'` would scope somebody to an organization
+    // that is not theirs with the whole suite green.
+    const stub = {
+      SESSIONS: {
+        get: async () =>
+          JSON.stringify({
+            userId: 'u1',
+            issuedAt: '2026-03-01T12:00:00.000Z',
+            expiresAt: '2099-01-01T00:00:00.000Z',
+          }),
+      },
+      DB: {
+        prepare: () => ({
+          bind: () => ({
+            first: async () => ({
+              id: 'u1',
+              email: 'a@example.org',
+              role: 'applicant' as Role,
+              organization_id: null,
+              is_active: 1,
+              sessions_valid_from: null,
+            }),
+          }),
+        }),
+      },
+    } as unknown as Env;
+    expect(await resolveSession(stub, 'any-token')).toBeNull();
   });
 
   it('drops a session the moment the user is deactivated', async () => {
@@ -350,6 +618,40 @@ describe('sessions', () => {
     const adminId = await makeUser({ role: 'admin', organizationId: null });
     const { sessionToken } = await createSession(testEnv, adminId);
     expect(await resolveSession(testEnv, sessionToken)).toBeNull();
+  });
+
+  it('rejects a staff role even when the row somehow carries an organization', async () => {
+    // My previous commit claimed this "cannot be made to" fail a test, because
+    // the users CHECK forbids a staff row with an organization_id. That was
+    // wrong: resolveSession touches env only through SESSIONS.get and
+    // DB.prepare, so a stub Env can present exactly the row the CHECK forbids.
+    // This is the case the guard exists for -- the day that CHECK is relaxed.
+    const stub = {
+      SESSIONS: {
+        get: async () =>
+          JSON.stringify({
+            userId: 'staff-1',
+            issuedAt: '2026-03-01T12:00:00.000Z',
+            expiresAt: '2099-01-01T00:00:00.000Z',
+          }),
+      },
+      DB: {
+        prepare: () => ({
+          bind: () => ({
+            first: async () => ({
+              id: 'staff-1',
+              email: 'admin@example.org',
+              role: 'admin' as Role,
+              organization_id: 'org-1', // the shape the CHECK forbids
+              is_active: 1,
+              sessions_valid_from: null,
+            }),
+          }),
+        }),
+      },
+    } as unknown as Env;
+
+    expect(await resolveSession(stub, 'any-token')).toBeNull();
   });
 
   it('names exactly which roles may hold a magic-link session', () => {
@@ -404,6 +706,41 @@ describe('sign out is immediate, despite KV', () => {
     expect(await resolveSession(testEnv, laptop.sessionToken)).toBeNull();
   });
 
+  it('removes the KV record, not only the cutoff', async () => {
+    // The KV delete is called housekeeping in the comment, and was untested --
+    // sign-out passed purely on sessions_valid_from, so an abandoned record
+    // could have lingered for its full seven days.
+    const userId = await makeUser();
+    const { sessionToken } = await createSession(testEnv, userId);
+    const key = `session:${await hashToken(sessionToken)}`;
+    expect(await testEnv.SESSIONS.get(key)).toBeTruthy();
+    await signOut(testEnv, sessionToken, userId);
+    expect(await testEnv.SESSIONS.get(key)).toBeNull();
+  });
+
+  it('refuses to move the revocation cutoff backwards', async () => {
+    // Sign-out is only irreversible if the cutoff never decreases. Nulling it
+    // resurrected every session revoked in the previous seven days.
+    const userId = await makeUser();
+    await signOut(testEnv, null, userId);
+    await expect(
+      db.prepare(`UPDATE users SET sessions_valid_from = NULL WHERE id = ?`).bind(userId).run(),
+    ).rejects.toThrow(/cannot move backwards/);
+    await expect(
+      db.prepare(`UPDATE users SET sessions_valid_from = '2000-01-01T00:00:00.000Z' WHERE id = ?`)
+        .bind(userId).run(),
+    ).rejects.toThrow(/cannot move backwards/);
+  });
+
+  it('a revoked session stays revoked after an attempt to clear the cutoff', async () => {
+    const userId = await makeUser();
+    const { sessionToken } = await createSession(testEnv, userId);
+    await signOut(testEnv, null, userId);
+    await db.prepare(`UPDATE users SET sessions_valid_from = NULL WHERE id = ?`)
+      .bind(userId).run().catch(() => undefined);
+    expect(await resolveSession(testEnv, sessionToken)).toBeNull();
+  });
+
   it('lets a fresh sign-in work again afterwards', async () => {
     const userId = await makeUser();
     const old = await createSession(testEnv, userId);
@@ -418,7 +755,11 @@ describe('sign out is immediate, despite KV', () => {
     expect(isRevoked('2026-03-01T12:00:00.000Z', 'not-a-date')).toBe(true);
     expect(isRevoked('not-a-date', '2026-03-01T12:00:00.000Z')).toBe(true);
     expect(isRevoked('2026-03-01T11:59:59.999Z', '2026-03-01T12:00:00.000Z')).toBe(true);
-    expect(isRevoked('2026-03-01T12:00:00.000Z', '2026-03-01T12:00:00.000Z')).toBe(false);
+    // Inclusive: Workers freeze Date.now() between I/O, so a redemption and a
+    // sign-out on the same edge genuinely share a millisecond. A strict
+    // comparison let that session outlive the sign-out meant to kill it.
+    expect(isRevoked('2026-03-01T12:00:00.000Z', '2026-03-01T12:00:00.000Z')).toBe(true);
+    expect(isRevoked('2026-03-01T12:00:00.001Z', '2026-03-01T12:00:00.000Z')).toBe(false);
   });
 });
 
@@ -427,7 +768,9 @@ describe('the session cookie', () => {
   it('carries the attributes the __Host- prefix requires', () => {
     const c = sessionCookie('abc', 3600);
     expect(c).toContain(`${SESSION_COOKIE}=abc`);
-    expect(c).toContain('Path=/');
+    // Exact: 'Path=/app' contains 'Path=/', and the __Host- prefix requires
+    // exactly Path=/ or the browser silently rejects the cookie.
+    expect(c.split('; ')).toContain('Path=/');
     expect(c).toContain('HttpOnly');
     expect(c).toContain('Secure');
     // Lax, not Strict: a magic link arrives from an email client, and Strict

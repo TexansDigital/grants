@@ -73,10 +73,17 @@ export async function issueLoginToken(
   ctx: RequestContext,
   opts: { userId: string; email: string; now?: Date },
 ): Promise<IssuedToken> {
+  const now = opts.now ?? new Date();
+  // Supersede FIRST, then issue. Doing it the other way round -- which the old
+  // standalone helper invited, and whose docstring actively suggested -- kills
+  // the link that is already in the email, silently, for every applicant. The
+  // order is not something a caller should be able to get wrong, so it is not
+  // a caller's decision any more.
+  await supersedeOutstandingTokens(db, opts.userId, { now });
+
   const token = generateToken();
   const tokenHash = await hashToken(token);
   const tokenId = newId();
-  const now = opts.now ?? new Date();
   const issuedAt = now.toISOString();
   const expiresAt = new Date(now.getTime() + TOKEN_TTL_MS).toISOString();
 
@@ -140,7 +147,17 @@ export async function consumeLoginToken(
         WHERE token_hash = ?
           AND consumed_at IS NULL
           AND superseded_at IS NULL
-          AND expires_at > ?`,
+          AND expires_at > ?
+          -- The account must still be live AT REDEMPTION, checked here rather
+          -- than by the caller: resolveSession would catch a dead account on
+          -- the next request, but any route that trusts ok:true would first
+          -- have set a cookie and told somebody they were signed in.
+          AND EXISTS (
+            SELECT 1 FROM users u
+             WHERE u.id = login_tokens.user_id
+               AND u.is_active = 1
+               AND u.deleted_at IS NULL
+          )`,
     )
     .bind(now, ctx.ip, ctx.userAgent, tokenHash, now)
     .run();
@@ -174,7 +191,11 @@ export async function consumeLoginToken(
 }
 
 /**
- * Void every outstanding token for a user, because a newer one was issued.
+ * Void every outstanding token for a user.
+ *
+ * Called BY `issueLoginToken`, before it mints the replacement. Exported for
+ * an admin revoking access, not for the issue path -- calling it after issuing
+ * voids the link you just sent.
  *
  * Without this, every link ever sent stays live for its full fifteen minutes.
  * Somebody who clicks "send me another" because the first did not arrive would
