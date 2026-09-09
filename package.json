@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Steward \u2014 multi-program grantmaking platform on Cloudflare",
+  "description": "Steward — multi-program grantmaking platform on Cloudflare",
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
@@ -40,6 +40,7 @@
     "wrangler": "^4.129.1"
   },
   "dependencies": {
+    "aws4fetch": "^1.0.20",
     "read-excel-file": "^9.3.10"
   }
 }

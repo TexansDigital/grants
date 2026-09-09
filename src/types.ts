@@ -39,6 +39,15 @@ export interface Env {
    */
   TURNSTILE_SECRET_KEY?: string;
   /**
+   * R2 signing, for presigned uploads. The key and secret are Wrangler
+   * secrets; the bucket and account id are not credentials and live in
+   * wrangler.toml. Absent them, uploads refuse rather than half-work.
+   */
+  R2_ACCESS_KEY_ID?: string;
+  R2_SECRET_ACCESS_KEY?: string;
+  R2_BUCKET_NAME?: string;
+  R2_ACCOUNT_ID?: string;
+  /**
    * Origin applicants reach, e.g. https://applications.houstontexansfoundation.org.
    *
    * Used to build sign-in links. NOT derived from the incoming request: a

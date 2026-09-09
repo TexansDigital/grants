@@ -26,6 +26,7 @@ import {
 } from './lib/authRoutes';
 import { submitEligibility } from './lib/eligibility';
 import { createApplication, readDraft, autosaveDraft } from './lib/applicantRoutes';
+import { presignUpload } from './lib/uploads';
 import { requireStaffSession } from './lib/auth';
 import { loadFormDefinition } from './lib/loadForm';
 import {
@@ -186,6 +187,25 @@ const routes: readonly Route[] = [
     roles: EXTERNAL_USER,
     auth: 'applicant',
     handler: ({ request, env, ctx, session }) => createApplication(request, env, ctx, session),
+  },
+  {
+    method: 'POST',
+    path: '/api/applications/:id/uploads',
+    roles: EXTERNAL_USER,
+    auth: 'applicant',
+    handler: async ({ request, env, ctx, session, params }) => {
+      const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+      const result = await presignUpload(env, ctx, session, params.id!, {
+        fieldKey: String(body.fieldKey ?? ''),
+        filename: String(body.filename ?? ''),
+        mimeType: String(body.mimeType ?? ''),
+        sizeBytes: Number(body.sizeBytes ?? 0),
+      });
+      return new Response(JSON.stringify(result), {
+        status: 201,
+        headers: { 'content-type': 'application/json', 'cache-control': 'no-store' },
+      });
+    },
   },
   {
     method: 'GET',

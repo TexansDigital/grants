@@ -90,6 +90,11 @@ EMAIL_REPLY_TO = "grants@houstontexansfoundation.org"
 # built from one would send an applicant to an address of the attacker's
 # choosing carrying a live token.
 APPLICANT_BASE_URL = "https://applications.houstontexansfoundation.org"
+# R2, for presigned uploads. Neither is a credential: the bucket name is the
+# same one bound below, and the account id is visible in any Cloudflare URL.
+# The key and secret that make them usable are Wrangler secrets.
+R2_BUCKET_NAME = "steward-preview-files"
+R2_ACCOUNT_ID = "FILL_IN_ONCE_KNOWN"
 # Turnstile / Resend / Eloqua / R2 signing credentials are Wrangler SECRETS.
 # They are never listed here. See docs/SECRETS.md.
 
