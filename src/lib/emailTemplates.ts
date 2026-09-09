@@ -90,6 +90,11 @@ interface LayoutParts {
   /** Body blocks, already HTML-escaped by the caller. */
   blocks: string[];
   action?: { label: string; url: string };
+  /**
+   * Plain text. Escaped here, unlike `blocks`, because a footer is a sentence
+   * rather than markup -- and the moment one carries an organization name, an
+   * unescaped footer is an injection with nothing to catch it.
+   */
   footer: string;
 }
 
@@ -139,7 +144,7 @@ function layout(parts: LayoutParts): string {
       </td></tr>
       <tr><td style="padding:16px 28px 22px 28px;border-top:1px solid ${RULE};
                      font-family:Arial,Helvetica,sans-serif;font-size:13px;
-                     line-height:1.5;color:${INK_SOFT};">${parts.footer}</td></tr>
+                     line-height:1.5;color:${INK_SOFT};">${escapeHtml(parts.footer)}</td></tr>
     </table>
   </td></tr>
 </table>

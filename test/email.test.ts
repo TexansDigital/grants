@@ -8,6 +8,7 @@ import {
   type EmailTransport,
   type OutboundEmail,
   type TransportResult,
+  PROVIDER_TIMEOUT_MS,
 } from '../src/lib/email';
 import {
   SIGN_IN_LINK,
@@ -37,8 +38,29 @@ function recorder(result: TransportResult = { ok: true, providerMessageId: 'prov
   return { sent, transport };
 }
 
+/**
+ * A long, distinctive token. A three-character one collides with a random UUID
+ * in the row often enough to fail spuriously (~1 run in 56), and a spurious
+ * failure here reads as a credential leak.
+ */
+const TOKEN = 'TOKENDONOTSTORE8f2c41d9b7e6a350cc19';
+
+const RECEIVED_VARS = {
+  organizationName: 'Bayou Reach Collective & Friends',
+  programName: 'Inspire Change',
+  projectTitle: 'Literacy Lab',
+  requestedAmount: '$25,000.00',
+  submittedAtDisplay: 'March 1, 2026 at 4:12 PM CST',
+  confirmationCode: 'IC-2026-0042',
+  answers: [
+    { section: 'Organization', label: 'Mission statement', value: 'Literacy for <all>' },
+    { section: 'Organization', label: 'Website', value: '' },
+    { section: 'Your request', label: 'Counties served', value: 'Harris County\nFort Bend County' },
+  ],
+};
+
 const SIGN_IN_VARS = {
-  url: 'https://grants.example.org/signin?t=abc',
+  url: `https://grants.example.org/signin?t=${TOKEN}`,
   expiresInMinutes: 15,
   destination: 'Inspire Change application',
 };
@@ -76,9 +98,16 @@ describe('sending', () => {
     expect(sent[0]!.text).toContain(SIGN_IN_VARS.url);
     expect(sent[0]!.html).toContain(SIGN_IN_VARS.url);
 
+    expect(sent[0]!.subject).toBe('Your sign-in link');
+
     const r = await row(out.messageId);
     expect(r!.status).toBe('sent');
     expect(r!.template_key).toBe('sign_in_link');
+    // The subject is the one part of the body the table keeps, precisely so a
+    // human can answer "what did we send them".
+    expect(r!.subject).toBe('Your sign-in link');
+    expect(r!.to_email).toBe('Person@Example.org');
+    expect(r!.provider).toBe('resend');
     expect(r!.provider_message_id).toBe('prov-1');
     expect(r!.sent_at).toBeTruthy();
     expect(r!.request_id).toBeTruthy();
@@ -103,8 +132,8 @@ describe('sending', () => {
     // later would slip past an assertion that only checks the ones we know.
     const r = await row(out.messageId);
     const serialized = JSON.stringify(r);
-    expect(serialized).not.toContain('signin?t=abc');
-    expect(serialized).not.toContain('abc');
+    expect(serialized).not.toContain('signin?t=');
+    expect(serialized).not.toContain(TOKEN);
     expect(r!.context_json).toBe('{"application_id":"app-1"}');
   });
 
@@ -129,6 +158,39 @@ describe('sending', () => {
       .prepare(`SELECT code, message FROM error_log WHERE code = 'EMAIL_SEND_FAILED'`)
       .first<{ code: string; message: string }>();
     expect(logged?.message).toContain('sign_in_link');
+  });
+
+  it('scrubs a provider error before storing it in an undeletable row', async () => {
+    // The provider chooses this string. A validation error that quotes the
+    // request back would otherwise put a live magic link into a table with a
+    // no-delete trigger and no delete path.
+    const leak = `{"error":"invalid","html":"https://grants.example.org/signin?t=${TOKEN}"}`;
+    const { transport } = recorder({ ok: false, code: 'PROVIDER_422', message: leak });
+    const out = await sendEmail(
+      mailEnv(), ctx(),
+      { template: SIGN_IN_LINK, vars: SIGN_IN_VARS, to: 'a@example.org', idempotencyKey: key() },
+      transport,
+    );
+    const stored = String((await row(out.messageId))!.error_message);
+    expect(stored).not.toContain(TOKEN);
+    expect(stored).toContain('[redacted]');
+  });
+
+  it('never puts the rendered body into the error log either', async () => {
+    // email_messages is tested for this above; error_log is the other
+    // append-only table on this path and was covered by a comment alone.
+    const { transport } = recorder({ ok: false, code: 'PROVIDER_500', message: 'boom' });
+    await sendEmail(
+      mailEnv(), ctx(),
+      { template: SIGN_IN_LINK, vars: SIGN_IN_VARS, to: 'a@example.org', idempotencyKey: key() },
+      transport,
+    );
+    const rows = await db
+      .prepare(`SELECT message, context_json FROM error_log WHERE code='EMAIL_SEND_FAILED'`)
+      .all<{ message: string; context_json: string | null }>();
+    for (const r of rows.results) {
+      expect(`${r.message} ${r.context_json ?? ''}`).not.toContain(TOKEN);
+    }
   });
 
   it('suppresses rather than sends when no provider is configured', async () => {
@@ -171,6 +233,28 @@ describe('sending', () => {
     expect(r).not.toBeNull();
     expect(r!.status).toBe('queued');
     expect(r!.template_key).toBe('sign_in_link');
+  });
+
+  it('wires env -> transportFor -> resendTransport with the configured key', async () => {
+    // The production path, executed end to end with an injected fetcher so no
+    // network is involved. Previously nothing ran it: sendEmail defaulted to
+    // transportFor(env) and every test overrode that default.
+    let auth = '';
+    const fake: typeof fetch = async (_u, init) => {
+      auth = (init!.headers as Record<string, string>).authorization ?? '';
+      return new Response('{"id":"p"}', { status: 200, headers: { 'content-type': 'application/json' } });
+    };
+    const t = transportFor(mailEnv({ RESEND_API_KEY: 'secret-from-wrangler' }), fake);
+    expect(t).not.toBeNull();
+
+    const out = await sendEmail(
+      mailEnv({ RESEND_API_KEY: 'secret-from-wrangler' }),
+      ctx(),
+      { template: SIGN_IN_LINK, vars: SIGN_IN_VARS, to: 'a@example.org', idempotencyKey: key() },
+      t,
+    );
+    expect(out.status).toBe('sent');
+    expect(auth).toBe('Bearer secret-from-wrangler');
   });
 
   it('an env without an API key produces no transport at all', () => {
@@ -221,6 +305,50 @@ describe('idempotency', () => {
     expect(results.filter((r) => r.deduplicated)).toHaveLength(1);
   });
 
+  it('refuses a key already held by a different recipient', async () => {
+    // Without this, a key derived from an entity alone -- application_received
+    // for an application with two contacts -- silently drops the second copy
+    // and reports 'sent'. The system says we emailed them, the row says we
+    // emailed them, and nobody did.
+    const { sent, transport } = recorder();
+    const k = key();
+    const base = { template: SIGN_IN_LINK, vars: SIGN_IN_VARS, idempotencyKey: k };
+    await sendEmail(mailEnv(), ctx(), { ...base, to: 'first@example.org' }, transport);
+    await expect(
+      sendEmail(mailEnv(), ctx(), { ...base, to: 'second@example.org' }, transport),
+    ).rejects.toThrow(/already belongs to a different message/);
+    expect(sent).toHaveLength(1);
+  });
+
+  it('refuses a key already held by a different template', async () => {
+    const { sent, transport } = recorder();
+    const k = key();
+    await sendEmail(
+      mailEnv(), ctx(),
+      { template: SIGN_IN_LINK, vars: SIGN_IN_VARS, to: 'a@example.org', idempotencyKey: k },
+      transport,
+    );
+    await expect(
+      sendEmail(
+        mailEnv(), ctx(),
+        { template: APPLICATION_RECEIVED, vars: RECEIVED_VARS, to: 'a@example.org', idempotencyKey: k },
+        transport,
+      ),
+    ).rejects.toThrow(/already belongs to a different message/);
+    expect(sent).toHaveLength(1);
+  });
+
+  it('reports a deduplicated failure as failed, not as sent', async () => {
+    const { transport } = recorder({ ok: false, code: 'PROVIDER_500', message: 'boom' });
+    const k = key();
+    const opts = { template: SIGN_IN_LINK, vars: SIGN_IN_VARS, to: 'a@example.org', idempotencyKey: k };
+    await sendEmail(mailEnv(), ctx(), opts, transport);
+    const second = await sendEmail(mailEnv(), ctx(), opts, transport);
+    expect(second.deduplicated).toBe(true);
+    expect(second.status).toBe('failed');
+    expect(second.errorCode).toBe('PROVIDER_500');
+  });
+
   it('a different key to the same person is a different message', async () => {
     const { sent, transport } = recorder();
     const opts = { template: SIGN_IN_LINK, vars: SIGN_IN_VARS, to: 'a@example.org' };
@@ -269,6 +397,46 @@ describe('the database refuses to lose a send record', () => {
     ).rejects.toThrow(/idempotency_key cannot change/);
   });
 
+  it('INSERT OR REPLACE cannot destroy a settled row by colliding on its key', async () => {
+    // The hole 0007 left open: idempotency_key is a SECOND unique index, and a
+    // REPLACE colliding there deletes the owning row without firing
+    // BEFORE DELETE. One statement hard-deleted a send record, freed its key,
+    // and raised no error.
+    const k = key();
+    const out = await sendEmail(
+      mailEnv(), ctx(),
+      { template: SIGN_IN_LINK, vars: SIGN_IN_VARS, to: 'victim@example.org', idempotencyKey: k },
+      null,
+    );
+    await expect(
+      db.prepare(
+        `INSERT OR REPLACE INTO email_messages (id, idempotency_key, template_key, to_email,
+           subject, status, created_at, updated_at) VALUES (?,?,?,?,?,'queued',?,?)`,
+      ).bind(crypto.randomUUID(), k, 'attacker', 'evil@example.org', 's', '2026-01-01', '2026-01-01').run(),
+    ).rejects.toThrow(/already claimed/);
+
+    const survivor = await row(out.messageId);
+    expect(survivor).not.toBeNull();
+    expect(survivor!.to_email).toBe('victim@example.org');
+    expect(survivor!.status).toBe('suppressed');
+  });
+
+  it('a queued row cannot have its recipient or releaser rewritten', async () => {
+    const out = await sendEmail(
+      mailEnv(), ctx(),
+      { template: SIGN_IN_LINK, vars: SIGN_IN_VARS, to: 'a@example.org', idempotencyKey: key() },
+      { async send() { throw new Error('left queued'); } },
+    ).catch(() => null);
+    void out;
+    const queued = await db
+      .prepare(`SELECT id FROM email_messages WHERE status='queued' LIMIT 1`)
+      .first<{ id: string }>();
+    await expect(
+      db.prepare(`UPDATE email_messages SET to_email='attacker@example.org' WHERE id=?`)
+        .bind(queued!.id).run(),
+    ).rejects.toThrow(/frozen/);
+  });
+
   it('a failed row must say why', async () => {
     await expect(
       db.prepare(
@@ -305,6 +473,21 @@ describe('the decline rule is enforced by the send path', () => {
       sendEmail(
         mailEnv(), ctx(),
         { template: RELEASE_REQUIRED, vars: { name: 'A' }, to: 'a@example.org', idempotencyKey: key() },
+        transport,
+      ),
+    ).rejects.toThrow(/requires a human release/);
+    expect(sent).toHaveLength(0);
+  });
+
+  it('refuses a releaser that is only whitespace', async () => {
+    // Truthiness is not enough: '   ' recorded in released_by_user_id is an
+    // audit row that resolves to nobody.
+    const { sent, transport } = recorder();
+    await expect(
+      sendEmail(
+        mailEnv(), ctx(),
+        { template: RELEASE_REQUIRED, vars: { name: 'A' }, to: 'a@example.org',
+          idempotencyKey: key(), releasedByUserId: '   ' },
         transport,
       ),
     ).rejects.toThrow(/requires a human release/);
@@ -362,34 +545,44 @@ describe('inputs that must be refused', () => {
 
 // ---------------------------------------------------------------------------
 describe('templates', () => {
+  /**
+   * One fixture per registered template, keyed by template key.
+   *
+   * The previous version of this test looped over TEMPLATES but re-derived the
+   * render from a hardcoded ternary, so any template that was not
+   * sign_in_link fell into the else branch and was "checked" by re-rendering
+   * a different template. A third template with an empty subject, no
+   * plain-text body, no doctype and an emoji in it passed. This map has no
+   * else branch: a new template with no fixture fails outright.
+   */
+  const FIXTURES: Record<string, unknown> = {
+    sign_in_link: SIGN_IN_VARS,
+    application_received: RECEIVED_VARS,
+  };
+
   it('every registered template renders a subject, a text body and HTML', () => {
-    for (const [key, t] of Object.entries(TEMPLATES)) {
-      expect(t.key).toBe(key);
-      const r =
-        t.key === 'sign_in_link'
-          ? SIGN_IN_LINK.render(SIGN_IN_VARS)
-          : APPLICATION_RECEIVED.render(RECEIVED_VARS);
-      expect(r.subject.length).toBeGreaterThan(0);
-      expect(r.text.trim().length).toBeGreaterThan(0);
-      expect(r.html).toContain('<!doctype html>');
+    const keys = Object.keys(TEMPLATES);
+    expect(keys.length).toBeGreaterThan(0);
+
+    for (const k of keys) {
+      const t = TEMPLATES[k as keyof typeof TEMPLATES] as EmailTemplate<unknown>;
+      expect(t.key).toBe(k);
+      const fixture = FIXTURES[k];
+      expect(fixture, `no fixture for template '${k}' -- add one`).toBeDefined();
+
+      // The registered object is rendered, not a stand-in for it.
+      const r = t.render(fixture);
+      expect(r.subject.trim().length, `${k}: empty subject`).toBeGreaterThan(0);
+      expect(r.subject).not.toMatch(/TODO|TBD|placeholder|lorem/i);
+      expect(r.text.trim().length, `${k}: empty text body`).toBeGreaterThan(0);
+      expect(r.html, `${k}: no doctype`).toContain('<!doctype html>');
       // No emoji anywhere in the interface, per CLAUDE.md.
-      expect(/\p{Extended_Pictographic}/u.test(r.subject + r.text + r.html)).toBe(false);
+      expect(
+        /\p{Extended_Pictographic}/u.test(r.subject + r.text + r.html),
+        `${k}: contains an emoji`,
+      ).toBe(false);
     }
   });
-
-  const RECEIVED_VARS = {
-    organizationName: 'Bayou Reach Collective & Friends',
-    programName: 'Inspire Change',
-    projectTitle: 'Literacy Lab',
-    requestedAmount: '$25,000.00',
-    submittedAtDisplay: 'March 1, 2026 at 4:12 PM CST',
-    confirmationCode: 'IC-2026-0042',
-    answers: [
-      { section: 'Organization', label: 'Mission statement', value: 'Literacy for <all>' },
-      { section: 'Organization', label: 'Website', value: '' },
-      { section: 'Your request', label: 'Counties served', value: 'Harris County\nFort Bend County' },
-    ],
-  };
 
   it('escapes applicant-supplied text in the HTML body', () => {
     const r = APPLICATION_RECEIVED.render(RECEIVED_VARS);
@@ -419,6 +612,27 @@ describe('templates', () => {
     expect(r.html).toContain('Harris County<br>Fort Bend County');
   });
 
+  it('escapes every interpolation site, not just the two that were tested', () => {
+    // Escaping was only pinned at fact values and answer values. Un-escaping
+    // the label, section title, <title>, preheader, button label or the
+    // sign-in destination each left the whole suite green -- and labels and
+    // section titles come from admin-entered form_fields/form_sections rows.
+    const XSS = '</p><script>alert(1)</script>';
+
+    const received = APPLICATION_RECEIVED.render({
+      ...RECEIVED_VARS,
+      programName: XSS, // reaches the heading, the preview line, and a block
+      confirmationCode: XSS, // reaches the preheader
+      answers: [{ section: XSS, label: XSS, value: XSS }],
+    });
+    expect(received.html).not.toContain('<script>');
+    expect(received.html).toContain('&lt;script&gt;');
+
+    const signIn = SIGN_IN_LINK.render({ ...SIGN_IN_VARS, destination: XSS });
+    expect(signIn.html).not.toContain('<script>');
+    expect(signIn.html).toContain('&lt;script&gt;');
+  });
+
   it('escapeHtml closes the attribute-breaking characters', () => {
     expect(escapeHtml(`<&">'`)).toBe('&lt;&amp;&quot;&gt;&#39;');
   });
@@ -444,10 +658,21 @@ describe('the Resend transport itself', () => {
 
     const h = seen!.init.headers as Record<string, string>;
     expect(seen!.url).toBe('https://api.resend.com/emails');
+    expect(seen!.init.method).toBe('POST'); // Resend's /emails rejects anything else.
     expect(h.authorization).toBe('Bearer secret-key');
+    expect(h['content-type']).toBe('application/json');
     expect(h['idempotency-key']).toBe('k-1');
-    const body = JSON.parse(seen!.init.body as string);
-    expect(body).toMatchObject({ from: 'b@example.org', to: ['a@example.org'], subject: 's', reply_to: ['r@example.org'] });
+    // Exact, not toMatchObject: a subset matcher let `html` or `text` be
+    // dropped from the payload entirely with the suite still green, and an
+    // email with no plain-text body is one CLAUDE.md requires us not to send.
+    expect(JSON.parse(seen!.init.body as string)).toEqual({
+      from: 'b@example.org',
+      to: ['a@example.org'],
+      subject: 's',
+      text: 't',
+      html: '<p>t</p>',
+      reply_to: ['r@example.org'],
+    });
   });
 
   it('omits reply_to entirely when there is none', async () => {
@@ -464,6 +689,58 @@ describe('the Resend transport itself', () => {
     const fake: typeof fetch = async () => new Response('{"message":"domain not verified"}', { status: 403 });
     const res = await resendTransport('k', fake).send(msg);
     expect(res).toEqual({ ok: false, code: 'PROVIDER_403', message: '{"message":"domain not verified"}' });
+  });
+
+  it('still gives a diagnosis when the error body is empty', async () => {
+    // The fallback chain exists precisely for this case, and dropping it left
+    // the suite green: a failed row would record a blank reason.
+    const fake: typeof fetch = async () => new Response('', { status: 429, statusText: 'Too Many Requests' });
+    expect(await resendTransport('k', fake).send(msg)).toEqual({
+      ok: false, code: 'PROVIDER_429', message: 'Too Many Requests',
+    });
+  });
+
+  it('actually aborts a hung provider through its AbortController', async () => {
+    // The synthetic AbortError test below proves the code path is mapped, not
+    // that the timeout is wired: shortening PROVIDER_TIMEOUT_MS to 1ms left
+    // the suite green while every real send would have aborted instantly.
+    // This drives the real controller with a fetcher that hangs until aborted.
+    const hanging: typeof fetch = (_u, init) =>
+      new Promise((_resolve, reject) => {
+        init!.signal!.addEventListener('abort', () => {
+          const e = new Error('aborted');
+          e.name = 'AbortError';
+          reject(e);
+        });
+      });
+    const res = await resendTransport('k', hanging, 20).send(msg);
+    expect(res).toMatchObject({ ok: false, code: 'PROVIDER_TIMEOUT' });
+  });
+
+  it('gives a hung provider ten seconds by default', () => {
+    // Pins the constant itself; the test above pins the mechanism.
+    expect(PROVIDER_TIMEOUT_MS).toBe(10_000);
+  });
+
+  it('reports a timeout distinctly from an unreachable provider', async () => {
+    // Nothing exercised the abort path, so PROVIDER_TIMEOUT was unreachable by
+    // test and the whole AbortController could be deleted silently.
+    const fake: typeof fetch = async () => {
+      const e = new Error('The operation was aborted');
+      e.name = 'AbortError';
+      throw e;
+    };
+    expect(await resendTransport('k', fake).send(msg)).toMatchObject({ ok: false, code: 'PROVIDER_TIMEOUT' });
+  });
+
+  it('passes the API key through to the authorization header', async () => {
+    let auth = '';
+    const fake: typeof fetch = async (_u, init) => {
+      auth = (init!.headers as Record<string, string>).authorization ?? '';
+      return new Response('{"id":"x"}', { status: 200, headers: { 'content-type': 'application/json' } });
+    };
+    await resendTransport('key-from-the-secret', fake).send(msg);
+    expect(auth).toBe('Bearer key-from-the-secret');
   });
 
   it('survives an error page that is not JSON', async () => {

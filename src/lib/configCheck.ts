@@ -1,0 +1,348 @@
+/**
+ * Guard wrangler.toml against silent misconfiguration.
+ *
+ *   npm run check:config
+ *
+ * This exists because a real mistake got through: `workers_dev` and
+ * `preview_urls` were written below a [table] header, so TOML assigned them to
+ * that table and wrangler ignored them. The deploy reported success and Preview
+ * URLs stayed enabled -- an extra public hostname that Cloudflare Access does
+ * not cover. Only a warning in the deploy output revealed it.
+ *
+ * Config that fails silently is worse than config that fails loudly.
+ */
+/**
+ * The checks themselves, as a PURE function of the file's text.
+ *
+ * Split out from the CLI so the guards are covered by the test suite. Every
+ * previous version of this file was verified by running it once by hand, and
+ * twice a guard was later found to match nothing at all -- a check that is
+ * never exercised is indistinguishable from a check that passes.
+ */
+export function configProblems(src: string): string[] {
+  const lines = src.split('\n');
+  const problems: string[] = [];
+
+  const firstTable = lines.findIndex((l) => /^\s*\[/.test(l));
+
+  // Access configuration. Empty is allowed -- that is the fail-closed state
+  // before Access is set up -- but a MALFORMED value is not, because it would
+  // make every staff login fail with an error pointing at the token instead of
+  // at the config.
+  function defaultEnvLines(): string[] {
+    const end = lines.findIndex((l) => /^\s*\[env\./.test(l));
+    return end === -1 ? lines : lines.slice(0, end);
+  }
+  const defaultsEarly = defaultEnvLines().join('\n');
+
+  // Scoped to the DEFAULT section. This regexed the whole file and relied on the
+  // default block happening to appear first; staging now declares its own
+  // (deliberately empty) Access vars, so "first match in the file" is a
+  // coincidence to stop depending on.
+  const team = /ACCESS_TEAM_DOMAIN = "([^"]*)"/.exec(defaultsEarly)?.[1] ?? '';
+  const aud = /ACCESS_AUD = "([^"]*)"/.exec(defaultsEarly)?.[1] ?? '';
+
+  /**
+   * A key that must be top-level, i.e. above the first [table] header.
+   *
+   * Returns the value so a caller can reason about it; `allowed` constrains it.
+   */
+  function requireTopLevel(key: string, allowed: readonly string[]): string | null {
+    const idx = lines.findIndex((l) => new RegExp(`^\\s*${key}\\s*=`).test(l));
+    if (idx === -1) {
+      problems.push(`${key} is missing; it would be defaulted rather than chosen`);
+      return null;
+    }
+    if (firstTable !== -1 && idx > firstTable) {
+      problems.push(
+        `${key} is on line ${idx + 1}, below the first [table] header on line ${firstTable + 1}. ` +
+          `TOML assigns it to that table, so wrangler ignores it.`,
+      );
+    }
+    const value = lines[idx]!.split('=')[1]!.trim();
+    if (!allowed.includes(value)) {
+      problems.push(`${key} is ${value}, expected one of ${allowed.join(' | ')}`);
+    }
+    return value;
+  }
+
+  // Every additional hostname is a surface Access must be placed in front of
+  // separately. Preview URLs mint one per deployed version, which no policy
+  // attached to a named hostname can cover.
+  const workersDev = requireTopLevel('workers_dev', ['true', 'false']);
+  requireTopLevel('preview_urls', ['false']);
+
+  // --- the custom domain -------------------------------------------------------
+  //
+  // `routes` must also be top-level. Below a [table] header TOML would assign it
+  // to that table and wrangler would ignore it -- the exact failure this whole
+  // script exists because of.
+  const routesIdx = lines.findIndex((l) => /^\s*routes\s*=/.test(l));
+  const customDomains = [...src.matchAll(/pattern\s*=\s*"([^"]+)"[^}]*custom_domain\s*=\s*true/g)].map(
+    (m) => m[1]!,
+  );
+
+  if (routesIdx !== -1 && firstTable !== -1 && routesIdx > firstTable) {
+    problems.push(
+      `routes is on line ${routesIdx + 1}, below the first [table] header. ` +
+        `wrangler would ignore it and the custom domain would silently not exist.`,
+    );
+  }
+
+  for (const pattern of customDomains) {
+    if (!/^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(pattern)) {
+      problems.push(`custom domain "${pattern}" is not a plain hostname`);
+    }
+    if (pattern.includes('*') || pattern.includes('/')) {
+      problems.push(`custom domain "${pattern}" must be a hostname, not a route pattern`);
+    }
+  }
+
+  // A published hostname with no Access configuration is a staff API that fails
+  // closed -- safe, but it means nobody can sign in and the failure looks like an
+  // outage. Refuse to ship a custom domain without Access configured.
+  if (customDomains.length > 0 && (team === '' || aud === '')) {
+    problems.push(
+      'a custom domain is configured but ACCESS_TEAM_DOMAIN/ACCESS_AUD are empty. ' +
+        'Every staff route would fail closed on the new hostname.',
+    );
+  }
+
+  // Once a custom domain exists, workers.dev is an extra public hostname with no
+  // purpose. Both being live at once is correct only during a cutover, and that
+  // cutover is done. A hard failure, not a warning: this script exists because an
+  // extra hostname slipped through once already, and if workers.dev is ever
+  // genuinely needed again, editing this rule is the review moment we want.
+  if (customDomains.length > 0 && workersDev !== 'false') {
+    problems.push(
+      `workers_dev is ${workersDev} alongside the custom domain ${customDomains.join(', ')}. ` +
+        `Two public hostnames means two surfaces for an Access policy change to miss.`,
+    );
+  }
+
+  if (team !== '' && !/^[a-z0-9-]+\.cloudflareaccess\.com$/.test(team)) {
+    problems.push(`ACCESS_TEAM_DOMAIN "${team}" is not a <team>.cloudflareaccess.com hostname`);
+  }
+  if (aud !== '' && !/^[0-9a-f]{64}$/.test(aud)) {
+    problems.push(`ACCESS_AUD is not 64 lowercase hex characters (got ${aud.length})`);
+  }
+  if ((team === '') !== (aud === '')) {
+    problems.push('ACCESS_TEAM_DOMAIN and ACCESS_AUD must both be set or both be empty');
+  }
+
+  /*
+   * Every [env.*] must declare `routes` explicitly.
+   *
+   * wrangler INHERITS the top-level `routes` into a named environment, so
+   * `wrangler deploy --env staging` would reassign
+   * grants.houstontexansfoundation.org to the staging Worker -- taking the live
+   * staff application offline and pointing the hostname at a database that does
+   * not hold the real data. wrangler prints a warning about this. A warning in a
+   * deploy log is read once; a failing build is read every time.
+   *
+   * `routes = []` is the correct declaration for an environment with no public
+   * hostname. An environment that genuinely wants one declares its own.
+   */
+  for (let i = 0; i < lines.length; i++) {
+    const header = /^\s*\[env\.([a-z0-9_-]+)\]\s*$/.exec(lines[i]!);
+    if (!header) continue;
+    const name = header[1]!;
+    // A constructed RegExp, not a literal: an interpolation inside a regex
+    // literal is matched as the characters "${name}", which made this loop
+    // succeed by accident rather than by design.
+    const nextEnvHeader = new RegExp(`^\\s*\\[env\\.(?!${name}[.\\]])`);
+    const rest = lines.slice(i + 1);
+    const nextEnv = rest.findIndex((l) => nextEnvHeader.test(l));
+    const body = (nextEnv === -1 ? rest : rest.slice(0, nextEnv)).join('\n');
+    if (!/^\s*routes\s*=/m.test(body)) {
+      problems.push(
+        `[env.${name}] does not declare \`routes\`. It would INHERIT the top-level ` +
+          `custom domain, and deploying it would reassign that hostname away from the ` +
+          `main Worker. Add \`routes = []\` if it should have no public hostname.`,
+      );
+    }
+  }
+
+  // NON-NEGOTIABLE: the default bindings must never point at production.
+  const prodPlaceholders = (src.match(/FILL_IN_AT_DEPLOY_TIME_DO_NOT_COMMIT/g) ?? []).length;
+  if (prodPlaceholders < 3) {
+    problems.push(
+      `expected 3 production placeholders, found ${prodPlaceholders}. ` +
+        `Production ids must never be committed; a deliberate deploy fills them in.`,
+    );
+  }
+
+  // -----------------------------------------------------------------------------
+  // NON-NEGOTIABLE #2: the default bindings point at PREVIEW, always.
+  //
+  // This was the rule with no check behind it. The script asserted the database
+  // NAME was steward-preview and stopped there, so editing the default
+  // `database_id` to a production uuid passed `npm run verify` clean -- and the
+  // default binding is what every script, every `wrangler dev` and every
+  // unqualified deploy uses.
+  //
+  // The invariant that actually makes "a script run with the default config hits
+  // preview, never production" true is that the id and the preview id are the
+  // SAME VALUE. If they diverge, `--remote` and `--local` reach different
+  // databases and one of them is not preview.
+  // -----------------------------------------------------------------------------
+
+  /**
+   * The default-environment part of the file: everything before the first real
+   * `[env.*]` table header.
+   *
+   * Scanned line by line rather than with indexOf, because the file's own header
+   * COMMENT mentions `[env.production]` on line 9 -- a substring search truncated
+   * the section to nine lines and every assertion below silently passed on an
+   * almost-empty string. Config that fails silently is what this script exists to
+   * prevent, so getting caught by it here was fair.
+   */
+  function defaultEnvSection(): string {
+    const end = lines.findIndex((l) => /^\s*\[env\./.test(l));
+    return (end === -1 ? lines : lines.slice(0, end)).join('\n');
+  }
+
+  const defaults = defaultEnvSection();
+
+  function pairMustMatch(label: string, aKey: string, bKey: string): void {
+    const a = new RegExp(`^\\s*${aKey}\\s*=\\s*"([^"]*)"`, 'm').exec(defaults)?.[1];
+    const b = new RegExp(`^\\s*${bKey}\\s*=\\s*"([^"]*)"`, 'm').exec(defaults)?.[1];
+    if (a === undefined || b === undefined) {
+      problems.push(`${label}: expected both ${aKey} and ${bKey} in the default bindings`);
+      return;
+    }
+    if (a !== b) {
+      problems.push(
+        `${label}: ${aKey} (${a}) and ${bKey} (${b}) differ. ` +
+          `The default bindings must resolve to the SAME preview resource, or a script ` +
+          `run without --env reaches something that is not preview.`,
+      );
+    }
+  }
+
+  /*
+   * Staging must never collide with preview or production.
+   *
+   * A copy-pasted id here is how the friendly-organization test with REAL EINs
+   * ends up writing into the database that seed and admin scripts are pointed at
+   * with --remote. Decision #12 exists to keep those apart; this is the check
+   * that keeps the decision true.
+   */
+  const stagingSection = (() => {
+    const start = lines.findIndex((l) => /^\s*\[env\.staging\]/.test(l));
+    if (start === -1) return '';
+    const rest = lines.slice(start + 1);
+    const end = rest.findIndex((l) => /^\s*\[env\.(?!staging)/.test(l));
+    return (end === -1 ? rest : rest.slice(0, end)).join('\n');
+  })();
+
+  if (stagingSection !== '') {
+    const previewIds = [
+      /^\s*database_id\s*=\s*"([^"]*)"/m.exec(defaults)?.[1],
+      /^\s*id\s*=\s*"([^"]*)"/m.exec(defaults)?.[1],
+      /^\s*bucket_name\s*=\s*"([^"]*)"/m.exec(defaults)?.[1],
+    ].filter((v): v is string => typeof v === 'string' && v !== '');
+
+    for (const value of [...stagingSection.matchAll(/=\s*"([^"]+)"/g)].map((m) => m[1]!)) {
+      if (previewIds.includes(value)) {
+        problems.push(
+          `staging reuses the preview resource "${value}". Real applicant data would ` +
+            `land in the database that seed:preview and admin:apply are run against.`,
+        );
+      }
+    }
+  }
+
+  pairMustMatch('D1', 'database_id', 'preview_database_id');
+  pairMustMatch('R2', 'bucket_name', 'preview_bucket_name');
+  pairMustMatch('KV', 'id', 'preview_id');
+
+  if (!/database_name = "steward-preview"/.test(defaults)) {
+    problems.push('the default D1 binding is not steward-preview');
+  }
+  if (!/bucket_name = "steward-preview-files"/.test(defaults)) {
+    problems.push('the default R2 binding is not steward-preview-files');
+  }
+  if (!/ENVIRONMENT = "preview"/.test(defaults)) {
+    problems.push('the default ENVIRONMENT var is not "preview"');
+  }
+
+  // --- Email ------------------------------------------------------------------
+  // Non-negotiable #8: no secrets in the repo. An API key pasted into a var block
+  // is the single most likely way this rule gets broken, because it is the change
+  // that makes email start working.
+  for (const secretish of ['RESEND_API_KEY', 'TURNSTILE_SECRET', 'ELOQUA_PASSWORD', 'R2_SECRET_ACCESS_KEY']) {
+    if (new RegExp(`^\\s*${secretish}\\s*=`, 'm').test(src)) {
+      problems.push(
+        `${secretish} is assigned in wrangler.toml. Secrets live in Wrangler ` +
+          `secrets only: \`wrangler secret put ${secretish}\`.`,
+      );
+    }
+  }
+
+  // Staging holds the friendly-organization fixtures, whose addresses reach real
+  // people. An EMAIL_FROM there is one secret away from mailing them.
+  //
+  // Written as an ABSENCE check over uncommented lines, after two earlier
+  // versions of guards in this file silently matched nothing. A presence check
+  // (`!/EMAIL_FROM = ""/`) was satisfied by a COMMENT containing that string, and
+  // skipping the block when stagingSection was empty meant renaming [env.staging]
+  // disabled the guard rather than failing it.
+  if (!stagingSection) {
+    problems.push(
+      'no [env.staging] section found. Either it was renamed -- in which case the ' +
+        'guards that depend on it are now inert -- or staging is gone.',
+    );
+  } else {
+    const stagingCode = stagingSection
+      .split('\n')
+      .filter((l) => !/^\s*#/.test(l))
+      .join('\n');
+    const from = /^\s*EMAIL_FROM\s*=\s*"([^"]*)"/m.exec(stagingCode);
+    if (!from) {
+      problems.push('staging does not set EMAIL_FROM at all. It must be "" so a send throws.');
+    } else if (from[1] !== '') {
+      problems.push(
+        `staging sets EMAIL_FROM = "${from[1]}". Staging carries real contact ` +
+          'addresses; a send from it must throw rather than deliver.',
+      );
+    }
+  }
+
+  // The four-name list below cannot know a name nobody has thought of yet, so
+  // also refuse anything that LOOKS like a credential regardless of its key.
+  //
+  // Several legitimate values here are high-entropy PUBLIC identifiers -- a
+  // Cloudflare Access audience tag is 64 hex characters, a D1 database id is a
+  // UUID. Those are named rather than pattern-matched, so a NEW public
+  // identifier trips this check and gets added deliberately. That direction is
+  // correct: a loud failure on something harmless costs a minute, a silent pass
+  // on a real key costs a rotation.
+  const PUBLIC_HIGH_ENTROPY_KEYS = [
+    'ACCESS_AUD',
+    'database_id',
+    'preview_database_id',
+    'account_id',
+    'id',
+    'preview_id',
+  ];
+  for (const [i, line] of lines.entries()) {
+    if (/^\s*#/.test(line)) continue;
+    const m = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*"([^"]*)"/.exec(line);
+    if (!m) continue;
+    const [, key, assigned] = m as unknown as [string, string, string];
+    // A provider key prefix is unambiguous, so it is refused even on an
+    // allowlisted key -- an allowlist should never launder a real secret.
+    const prefixed = /^(re_|sk_|rk_|xkeysib-|SG\.)/.test(assigned);
+    const entropic =
+      !PUBLIC_HIGH_ENTROPY_KEYS.includes(key) && /^[A-Za-z0-9+/_-]{40,}={0,2}$/.test(assigned);
+    if (prefixed || entropic) {
+      problems.push(
+        `line ${i + 1} assigns ${key} a value shaped like a credential. Secrets belong ` +
+          'in Wrangler secrets, never in wrangler.toml.',
+      );
+    }
+  }
+
+  return problems;
+}
