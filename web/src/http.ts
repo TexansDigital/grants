@@ -58,18 +58,24 @@ export interface RequestOptions {
 
 export async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
   const method = opts.method ?? 'GET';
+  // Built as a plain object and cast at the call. The Worker tsconfig follows
+  // this module in through the browser tests and checks it against the Workers
+  // lib, whose RequestInit has no `credentials` -- a browser-only field that is
+  // load-bearing here, because it is what sends the session cookie.
+  const init = {
+    method,
+    headers: {
+      accept: 'application/json',
+      ...(opts.body === undefined ? {} : { 'content-type': 'application/json' }),
+    },
+    credentials: 'same-origin',
+    ...(opts.body === undefined ? {} : { body: JSON.stringify(opts.body) }),
+    ...(opts.signal ? { signal: opts.signal } : {}),
+  };
+
   let res: Response;
   try {
-    res = await fetch(path, {
-      method,
-      headers: {
-        accept: 'application/json',
-        ...(opts.body === undefined ? {} : { 'content-type': 'application/json' }),
-      },
-      credentials: 'same-origin',
-      ...(opts.body === undefined ? {} : { body: JSON.stringify(opts.body) }),
-      ...(opts.signal ? { signal: opts.signal } : {}),
-    });
+    res = await fetch(path, init as Parameters<typeof fetch>[1]);
   } catch (e) {
     if (e instanceof DOMException && e.name === 'AbortError') throw e;
     throw new ApiError(0, 'NETWORK', 'Could not reach Steward. Check your connection.', null);

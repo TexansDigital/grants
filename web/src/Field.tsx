@@ -20,6 +20,8 @@
 
 import { useId } from 'react';
 import type { ReactElement } from 'react';
+import { UploadField } from './UploadField';
+import { asRefs } from './uploadFile';
 import type { FieldDef } from '../../src/lib/fieldTypes';
 import { formatCents, parseCurrencyToCents } from '../../src/lib/money';
 
@@ -29,6 +31,11 @@ export interface FieldProps {
   error: string | null;
   onChange: (value: unknown) => void;
   onBlur: () => void;
+  /**
+   * The application uploads belong to. Absent in the staff preview, where
+   * there is no application to attach anything to and the control says so.
+   */
+  applicationId?: string;
 }
 
 /**
@@ -67,7 +74,14 @@ function isWide(field: FieldDef): boolean {
   );
 }
 
-export function Field({ field, value, error, onChange, onBlur }: FieldProps): ReactElement {
+export function Field({
+  field,
+  value,
+  error,
+  onChange,
+  onBlur,
+  applicationId,
+}: FieldProps): ReactElement {
   const uid = useId();
   const inputId = `f${uid}`;
   const helpId = field.help_text ? `h${uid}` : null;
@@ -134,7 +148,7 @@ export function Field({ field, value, error, onChange, onBlur }: FieldProps): Re
     </p>
   ) : null;
 
-  const body = renderControl(field, value, onChange, common, error);
+  const body = renderControl(field, value, onChange, common, error, applicationId);
 
   // An attestation reads as a sentence; the checkbox carries its own label and
   // a second one above it would be read out twice.
@@ -184,6 +198,7 @@ function renderControl(
   onChange: (v: unknown) => void,
   common: ControlProps,
   error: string | null,
+  applicationId: string | undefined,
 ): ReactElement {
   const v = field.validation ?? {};
 
@@ -407,17 +422,26 @@ function renderControl(
     }
 
     case 'file_upload':
+      if (applicationId) {
+        return (
+          <UploadField
+            field={field}
+            applicationId={applicationId}
+            value={asRefs(value)}
+            onChange={onChange}
+            onBlur={common.onBlur as () => void}
+            inputProps={common}
+          />
+        );
+      }
       /*
-       * A REAL, disabled input -- not a <div>.
+       * Preview. A REAL, disabled input -- not a <div>.
        *
        * This was a <div>, and the <label htmlFor> above it pointed at it. A
        * <div> is not a labelable element, so the accessibility tree contained
        * no control at all for this field: a screen reader user was told three
        * questions needed their attention and given nothing to answer. A real
        * input binds the label, appears in the tree, and announces as disabled.
-       *
-       * Uploads go direct to R2 through a presigned PUT, which is Phase 2c.
-       * Until then the control says so rather than pretending.
        */
       return (
         <div className="upload">
@@ -429,8 +453,8 @@ function renderControl(
             accept={(v.allowed_mime ?? []).join(',') || undefined}
           />
           <p className="help">
-            Uploads are not available in this preview. In the live form this is required,
-            and files upload straight to secure storage from your browser.
+            Uploads are not available in this preview — there is no application to attach
+            them to. An applicant uploads here, straight to secure storage.
           </p>
         </div>
       );

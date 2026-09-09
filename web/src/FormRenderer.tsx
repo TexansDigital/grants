@@ -454,6 +454,7 @@ export function FormRenderer({ def, onBack, draft }: Props): ReactElement {
                       error={errorFor(f, step)}
                       onChange={(v) => setValue(f.field_key, v)}
                       onBlur={() => markTouched(f.field_key)}
+                      {...(draft ? { applicationId: draft.applicationId } : {})}
                     />
                   ))}
                 </div>

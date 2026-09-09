@@ -482,9 +482,78 @@
   border: 1px dashed var(--line);
   border-radius: var(--radius);
   padding: var(--space-5);
-  text-align: center;
+  /* Left-aligned once it can hold a list of files: centred filenames of
+     different lengths have no common edge to scan down. The empty state keeps
+     its centred input by virtue of the input being the only child. */
+  text-align: left;
   background: var(--surface-2);
   color: var(--ink-2);
+  display: grid;
+  gap: var(--space-4);
+}
+
+.upload-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--space-2);
+}
+
+/* Flex-wrap rather than a two-column grid: a long filename wrapping in a grid
+   column left "Remove" stranded beside its first line, reading as though it
+   belonged to half the name. Wrapping puts the control on its own line once
+   there is no room for it beside the text. */
+.upload-list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+/* A long filename wraps inside its own column rather than pushing Remove off
+   the edge -- "2025-audited-financial-statements-final-v3.pdf" is normal. */
+.upload-name {
+  min-width: 0;
+  flex: 1 1 12rem;
+  overflow-wrap: anywhere;
+  color: var(--ink);
+  font-weight: 500;
+}
+
+.upload-progress,
+.upload-size {
+  font-size: var(--step--1);
+  color: var(--ink-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.upload-list progress {
+  grid-column: 1 / -1;
+  width: 100%;
+  height: 6px;
+}
+
+.upload-errors {
+  display: grid;
+  gap: var(--space-2);
+}
+
+/* `.error` is a flex row so its "Error:" prefix sits on the message's baseline.
+   That works for one short sentence; an upload error also names the file, and
+   three flex children squeezed the actual message into a column a few words
+   wide. Block layout lets the prefix, the filename and the message flow as one
+   paragraph. */
+.upload-errors .error {
+  display: block;
+}
+.upload-errors .error::before {
+  margin-right: var(--space-2);
 }
 
 /* ---- error summary ------------------------------------------------------- */
