@@ -397,3 +397,53 @@ state to build, and the prefill path must read the most recent submitted
 application for the organization regardless of its outcome. Reviewer scores,
 internal notes and decision rationale remain absent from everything a declined
 applicant can see -- non-negotiable #5 does not soften because the answer was no.
+
+## §20 — A stranded email re-drives itself after ten minutes
+
+**Decided 2026-09-09. Directed.**
+
+A send whose provider call never completes leaves an `email_messages` row at
+`queued`. Because that row owns its idempotency key, every later call
+de-duplicates against it and sends nothing, so a single crash suppresses that
+message permanently. For a one-per-entity message — a submission confirmation
+keyed `application_received:<application_id>` — the applicant simply never
+receives it, and no amount of retrying by a human helps.
+
+Two options were put up:
+
+1. **Time-boxed re-drive.** Treat a `queued` row older than a window as
+   stranded and take it over. Self-healing; a small double-send risk if the
+   provider actually accepted the first call.
+2. **Admin re-drive only.** No double-send risk, but somebody stays locked out
+   until a human notices — and nothing currently surfaces stuck rows.
+
+**Chosen: 1.** A duplicate email is a nuisance; a grantee who cannot receive a
+link and therefore cannot file a report is a real failure, and one nobody is
+watching for.
+
+**Why ten minutes, specifically.** The window is bounded on both sides rather
+than chosen for feel:
+
+- **Lower bound:** the provider call aborts after 10 seconds, so a row queued
+  for ten minutes cannot still be in flight. There is no race with a live
+  request.
+- **Upper bound:** the re-drive sends Resend the *same* idempotency key, and
+  Resend de-duplicates on that key for 24 hours. Re-driving well inside that
+  window means that if the provider did accept the first call before we
+  crashed, it drops the second rather than delivering twice.
+
+The provider is what makes this safe. The window is what keeps us inside it.
+If the transactional provider is ever changed, this window must be re-checked
+against the new provider's idempotency semantics — a provider without them
+turns option 1 into a genuine double-send.
+
+**Deliberately narrow.** Only `queued` re-drives. A `failed` row is a settled
+outcome with a diagnosis, and retrying it silently would re-attempt something
+no human has looked at. A `sent` row is delivered. The recipient/template
+identity check runs *before* the re-drive, so a stranded row cannot be hijacked
+into delivering to somebody else, and an unparseable timestamp is treated as
+not re-drivable — a corrupt row is not a licence to send.
+
+**Still not built:** nothing surfaces rows that fail to re-drive repeatedly.
+That belongs with the data-health view (roadmap item 20).
+

@@ -9,6 +9,8 @@ import {
   type OutboundEmail,
   type TransportResult,
   PROVIDER_TIMEOUT_MS,
+  REDRIVE_AFTER_MS,
+  isRedrivable,
 } from '../src/lib/email';
 import {
   SIGN_IN_LINK,
@@ -355,6 +357,196 @@ describe('idempotency', () => {
     await sendEmail(mailEnv(), ctx(), { ...opts, idempotencyKey: key() }, transport);
     await sendEmail(mailEnv(), ctx(), { ...opts, idempotencyKey: key() }, transport);
     expect(sent).toHaveLength(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+describe('self-healing: a crash must not suppress a message forever', () => {
+  /** Leave a real stranded row: claimed, then the transport dies. */
+  async function strand(k: string, to = 'a@example.org') {
+    await sendEmail(
+      mailEnv(), ctx(),
+      { template: SIGN_IN_LINK, vars: SIGN_IN_VARS, to, idempotencyKey: k },
+      { async send() { throw new Error('worker died mid-call'); } },
+    ).catch(() => undefined);
+    const r = await db
+      .prepare(`SELECT id, status FROM email_messages WHERE idempotency_key = ?`)
+      .bind(k).first<{ id: string; status: string }>();
+    expect(r!.status).toBe('queued');
+    return r!.id;
+  }
+
+  /** Backdate the row rather than fake a clock, so the real comparison runs. */
+  async function age(id: string, ms: number) {
+    await db
+      .prepare(`UPDATE email_messages SET created_at = ? WHERE id = ?`)
+      .bind(new Date(Date.now() - ms).toISOString(), id)
+      .run();
+  }
+
+  it('leaves a freshly queued row alone', async () => {
+    // Still inside the window: a live request could be in flight.
+    const { sent, transport } = recorder();
+    const k = key();
+    await strand(k);
+    const out = await sendEmail(
+      mailEnv(), ctx(),
+      { template: SIGN_IN_LINK, vars: SIGN_IN_VARS, to: 'a@example.org', idempotencyKey: k },
+      transport,
+    );
+    expect(sent).toHaveLength(0);
+    expect(out.deduplicated).toBe(true);
+    expect(out.status).toBe('queued');
+    expect(out.redriven).toBeUndefined();
+  });
+
+  it('re-drives a row stranded past the window, onto the same row', async () => {
+    const { sent, transport } = recorder();
+    const k = key();
+    const id = await strand(k);
+    await age(id, REDRIVE_AFTER_MS + 1000);
+
+    const out = await sendEmail(
+      mailEnv(), ctx(),
+      { template: SIGN_IN_LINK, vars: SIGN_IN_VARS, to: 'a@example.org', idempotencyKey: k },
+      transport,
+    );
+    expect(sent).toHaveLength(1);
+    expect(out.redriven).toBe(true);
+    expect(out.deduplicated).toBe(false);
+    expect(out.status).toBe('sent');
+    expect(out.messageId).toBe(id); // the stranded row settles, not a new one
+
+    const rows = await db
+      .prepare(`SELECT COUNT(*) AS n FROM email_messages WHERE idempotency_key = ?`)
+      .bind(k).first<{ n: number }>();
+    expect(rows!.n).toBe(1);
+    expect((await row(id))!.status).toBe('sent');
+  });
+
+  it('sends the provider the ORIGINAL key, so the provider suppresses a duplicate', async () => {
+    // This is what makes self-healing safe: if the provider accepted the first
+    // call before the crash, its own 24-hour idempotency window drops ours.
+    const { sent, transport } = recorder();
+    const k = key();
+    const id = await strand(k);
+    await age(id, REDRIVE_AFTER_MS + 1000);
+    await sendEmail(
+      mailEnv(), ctx(),
+      { template: SIGN_IN_LINK, vars: SIGN_IN_VARS, to: 'a@example.org', idempotencyKey: k },
+      transport,
+    );
+    expect(sent[0]!.idempotencyKey).toBe(k);
+  });
+
+  it('two simultaneous re-drives deliver once', async () => {
+    const { sent, transport } = recorder();
+    const k = key();
+    const id = await strand(k);
+    await age(id, REDRIVE_AFTER_MS + 1000);
+
+    const opts = { template: SIGN_IN_LINK, vars: SIGN_IN_VARS, to: 'a@example.org', idempotencyKey: k };
+    const results = await Promise.all([
+      sendEmail(mailEnv(), ctx(), opts, transport),
+      sendEmail(mailEnv(), ctx(), opts, transport),
+    ]);
+    expect(sent).toHaveLength(1);
+    expect(results.filter((r) => r.redriven)).toHaveLength(1);
+  });
+
+  it('never re-drives a settled row, however old', async () => {
+    // Only 'queued' is stranded. An old 'sent' row is a delivered message.
+    //
+    // Note the row is INSERTed already-old rather than backdated: the terminal
+    // trigger refuses every update to a settled row, not merely a status
+    // change, so a settled row cannot be aged even by a test. That is the
+    // property working, so the test works around it rather than weakening it.
+    const { sent, transport } = recorder();
+    const k = key();
+    const ancient = new Date(Date.now() - REDRIVE_AFTER_MS * 100).toISOString();
+    await db
+      .prepare(
+        `INSERT INTO email_messages (id, idempotency_key, template_key, to_email, subject,
+           status, provider, sent_at, created_at, updated_at)
+         VALUES (?,?,?,?,?,'sent','resend',?,?,?)`,
+      )
+      .bind(crypto.randomUUID(), k, 'sign_in_link', 'a@example.org', 'Your sign-in link',
+            ancient, ancient, ancient)
+      .run();
+
+    const out = await sendEmail(
+      mailEnv(), ctx(),
+      { template: SIGN_IN_LINK, vars: SIGN_IN_VARS, to: 'a@example.org', idempotencyKey: k },
+      transport,
+    );
+    expect(sent).toHaveLength(0);
+    expect(out.deduplicated).toBe(true);
+    expect(out.status).toBe('sent');
+    expect(out.redriven).toBeUndefined();
+  });
+
+  it('never re-drives an old failed row either', async () => {
+    // A failure is a settled outcome with a diagnosis. Re-driving it would
+    // silently retry something a human has not looked at yet.
+    const { sent, transport } = recorder();
+    const k = key();
+    const ancient = new Date(Date.now() - REDRIVE_AFTER_MS * 100).toISOString();
+    await db
+      .prepare(
+        `INSERT INTO email_messages (id, idempotency_key, template_key, to_email, subject,
+           status, provider, error_code, created_at, updated_at)
+         VALUES (?,?,?,?,?,'failed','resend','PROVIDER_422',?,?)`,
+      )
+      .bind(crypto.randomUUID(), k, 'sign_in_link', 'a@example.org', 'Your sign-in link',
+            ancient, ancient)
+      .run();
+
+    const out = await sendEmail(
+      mailEnv(), ctx(),
+      { template: SIGN_IN_LINK, vars: SIGN_IN_VARS, to: 'a@example.org', idempotencyKey: k },
+      transport,
+    );
+    expect(sent).toHaveLength(0);
+    expect(out.status).toBe('failed');
+    expect(out.redriven).toBeUndefined();
+  });
+
+  it('still refuses a re-drive aimed at a different recipient', async () => {
+    // The identity check runs before the re-drive, so a stranded row cannot be
+    // hijacked into delivering to someone else.
+    const { sent, transport } = recorder();
+    const k = key();
+    const id = await strand(k, 'first@example.org');
+    await age(id, REDRIVE_AFTER_MS + 1000);
+    await expect(
+      sendEmail(
+        mailEnv(), ctx(),
+        { template: SIGN_IN_LINK, vars: SIGN_IN_VARS, to: 'second@example.org', idempotencyKey: k },
+        transport,
+      ),
+    ).rejects.toThrow(/already belongs to a different message/);
+    expect(sent).toHaveLength(0);
+  });
+
+  it('treats an unreadable timestamp as not redrivable', () => {
+    // A corrupt row is not a licence to send. A message that never goes out is
+    // a visible stuck row; a duplicate is in somebody's inbox.
+    expect(isRedrivable('not-a-date')).toBe(false);
+    expect(isRedrivable('')).toBe(false);
+  });
+
+  it('uses a window inside the provider dedupe window and outside a live request', () => {
+    expect(REDRIVE_AFTER_MS).toBe(10 * 60 * 1000);
+    expect(REDRIVE_AFTER_MS).toBeGreaterThan(PROVIDER_TIMEOUT_MS * 10);
+    expect(REDRIVE_AFTER_MS).toBeLessThan(24 * 60 * 60 * 1000);
+  });
+
+  it('is inclusive at the boundary', () => {
+    const now = new Date('2026-03-01T12:00:00.000Z');
+    const exactly = new Date(now.getTime() - REDRIVE_AFTER_MS).toISOString();
+    const oneMsShort = new Date(now.getTime() - REDRIVE_AFTER_MS + 1).toISOString();
+    expect(isRedrivable(exactly, now)).toBe(true);
+    expect(isRedrivable(oneMsShort, now)).toBe(false);
   });
 });
 

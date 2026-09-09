@@ -16,7 +16,7 @@
  */
 
 import type { Env, RequestContext } from '../types';
-import type { EmailTemplate } from './emailTemplates';
+import type { EmailTemplate, RenderedEmail } from './emailTemplates';
 import { newId } from './ids';
 import { nowIso } from './time';
 import { logError, redact, scrubSecrets } from './errors';
@@ -26,8 +26,13 @@ export type EmailStatus = 'queued' | 'sent' | 'failed' | 'suppressed';
 export interface SendOutcome {
   messageId: string;
   status: EmailStatus;
-  /** True when an earlier message with this idempotency key already existed. */
+  /**
+   * An earlier message with this key already existed AND nothing was sent.
+   * False for a re-drive, which reuses the row but does perform a send.
+   */
   deduplicated: boolean;
+  /** This call rescued a stranded 'queued' row rather than creating one. */
+  redriven?: boolean;
   providerMessageId?: string | null;
   errorCode?: string | null;
 }
@@ -164,6 +169,29 @@ const MAX_SUBJECT = 300;
 /** Shared by the transport and the stored row, so neither silently truncates first. */
 export const PROVIDER_MESSAGE_LIMIT = 500;
 
+/**
+ * How long a message may sit 'queued' before another call may re-drive it.
+ *
+ * A row is only left 'queued' when the process died between claiming the key
+ * and settling the outcome. Without a re-drive that row owns its idempotency
+ * key forever, and every later call dedupes against it and sends nothing --
+ * so a single crash permanently suppresses that message. For a one-per-entity
+ * message like a submission confirmation, the applicant simply never receives
+ * it and no amount of retrying helps.
+ *
+ * Ten minutes is chosen against two bounds, not picked for feel:
+ *
+ *   LOWER  the provider call times out after PROVIDER_TIMEOUT_MS (10s), so a
+ *          row queued for ten minutes cannot still be in flight. There is no
+ *          race with a live request.
+ *   UPPER  the same idempotency key is sent to Resend, whose keys de-duplicate
+ *          for 24 hours. Re-driving well inside that window means that if the
+ *          provider DID accept the first call before we crashed, it suppresses
+ *          the second rather than delivering twice. The provider is what makes
+ *          self-healing safe here; the window is what keeps us inside it.
+ */
+export const REDRIVE_AFTER_MS = 10 * 60 * 1000;
+
 export interface SendEmailOptions<V> {
   template: EmailTemplate<V>;
   vars: V;
@@ -280,7 +308,8 @@ export async function sendEmail<V>(
     // Someone already owns this key.
     const existing = await db
       .prepare(
-        `SELECT id, status, provider_message_id, error_code, to_email, template_key
+        `SELECT id, status, provider_message_id, error_code, to_email, template_key,
+                created_at, updated_at
            FROM email_messages WHERE idempotency_key = ?`,
       )
       .bind(opts.idempotencyKey)
@@ -291,6 +320,8 @@ export async function sendEmail<V>(
         error_code: string | null;
         to_email: string;
         template_key: string;
+        created_at: string;
+        updated_at: string;
       }>();
 
     if (!existing) {
@@ -315,6 +346,34 @@ export async function sendEmail<V>(
       );
     }
 
+    // Self-healing. A row still 'queued' long after any request could be in
+    // flight is a message stranded by a crash, not one in progress.
+    if (existing.status === 'queued' && isRedrivable(existing.created_at)) {
+      // Claim the re-drive optimistically against updated_at, so two callers
+      // arriving together cannot both deliver. The loser reports the row
+      // untouched rather than sending a second copy.
+      const claimedRedrive = await db
+        .prepare(
+          `UPDATE email_messages SET updated_at = ?
+            WHERE id = ? AND status = 'queued' AND updated_at = ?`,
+        )
+        .bind(nowIso(), existing.id, existing.updated_at)
+        .run();
+
+      if (claimedRedrive.meta.changes >= 1) {
+        const outcome = await deliver(env, ctx, existing.id, {
+          to,
+          from,
+          subject,
+          rendered,
+          idempotencyKey: opts.idempotencyKey,
+          templateKey: opts.template.key,
+          transport,
+        });
+        return { ...outcome, redriven: true };
+      }
+    }
+
     return {
       messageId: existing.id,
       status: existing.status,
@@ -324,40 +383,89 @@ export async function sendEmail<V>(
     };
   }
 
+  return deliver(env, ctx, id, {
+    to,
+    from,
+    subject,
+    rendered,
+    idempotencyKey: opts.idempotencyKey,
+    templateKey: opts.template.key,
+    transport,
+  });
+}
+
+/**
+ * Age a row must reach before another call may take it over.
+ *
+ * An unparseable timestamp is treated as NOT redrivable: a corrupt row is not
+ * a licence to send. That is the safe direction -- a message that never goes
+ * out is visible in the table as a stuck 'queued' row, whereas a duplicate
+ * decision letter is visible in somebody's inbox.
+ */
+export function isRedrivable(createdAt: string, now: Date = new Date()): boolean {
+  const created = Date.parse(createdAt);
+  if (Number.isNaN(created)) return false;
+  return now.getTime() - created >= REDRIVE_AFTER_MS;
+}
+
+/**
+ * Call the provider for an already-claimed row and record what happened.
+ *
+ * Shared by the first attempt and by a re-drive, so a stranded row settles by
+ * exactly the same code path that a fresh one does. Two implementations of
+ * "what counts as sent" would drift.
+ */
+async function deliver(
+  env: Env,
+  ctx: RequestContext,
+  messageId: string,
+  msg: {
+    to: string;
+    from: string;
+    subject: string;
+    rendered: RenderedEmail;
+    idempotencyKey: string;
+    templateKey: string;
+    transport: EmailTransport | null;
+  },
+): Promise<SendOutcome> {
+  const db = env.DB;
+  const { transport } = msg;
+
   if (!transport) {
     // No provider configured. This is the expected state in preview and in
     // tests, and it is recorded rather than silently skipped so that "why did
     // nobody get an email" has an answer in the database.
-    await settle(db, id, { status: 'suppressed', errorCode: null, errorMessage: null });
-    return { messageId: id, status: 'suppressed', deduplicated: false };
+    await settle(db, messageId, { status: 'suppressed', errorCode: null, errorMessage: null });
+    return { messageId, status: 'suppressed', deduplicated: false };
   }
 
   const result = await transport.send({
-    to,
-    from,
+    to: msg.to,
+    from: msg.from,
     replyTo: (env.EMAIL_REPLY_TO ?? '').trim() || undefined,
-    subject,
-    text: rendered.text,
-    html: rendered.html,
-    idempotencyKey: opts.idempotencyKey,
+    subject: msg.subject,
+    text: msg.rendered.text,
+    html: msg.rendered.html,
+    idempotencyKey: msg.idempotencyKey,
   });
 
   if (result.ok) {
-    await settle(db, id, {
+    await settle(db, messageId, {
       status: 'sent',
       providerMessageId: result.providerMessageId,
       errorCode: null,
       errorMessage: null,
     });
     return {
-      messageId: id,
+      messageId,
       status: 'sent',
       deduplicated: false,
       providerMessageId: result.providerMessageId,
     };
   }
 
-  await settle(db, id, {
+  await settle(db, messageId, {
     status: 'failed',
     errorCode: result.code,
     // Scrubbed for the same reason logError scrubs: email_messages is
@@ -371,11 +479,11 @@ export async function sendEmail<V>(
   await logError(env, ctx, {
     severity: 'error',
     code: 'EMAIL_SEND_FAILED',
-    message: `${opts.template.key} to ${to}: ${result.code}`,
-    context: { email_message_id: id, template: opts.template.key, provider_code: result.code },
+    message: `${msg.templateKey} to ${msg.to}: ${result.code}`,
+    context: { email_message_id: messageId, template: msg.templateKey, provider_code: result.code },
   });
 
-  return { messageId: id, status: 'failed', deduplicated: false, errorCode: result.code };
+  return { messageId, status: 'failed', deduplicated: false, errorCode: result.code };
 }
 
 async function settle(
