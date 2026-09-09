@@ -31,7 +31,13 @@ import { nowIso } from './time';
 import { auditStatement } from './audit';
 import { allFields } from './forms';
 import { loadFormDefinition } from './loadForm';
-import { saveDraft } from './submit';
+import { saveDraft, submitApplication, loadStoredAnswers } from './submit';
+import { sendEmail, transportFor } from './email';
+import { APPLICATION_RECEIVED } from './emailTemplates';
+import { readBackLines } from './answerDisplay';
+import { formatCents } from './money';
+import { formatInZone } from './time';
+import { logError } from './errors';
 import { isAcceptingApplications } from './eligibility';
 
 function orgId(session: Session): string {
@@ -257,4 +263,182 @@ function json(body: unknown, status = 200): Response {
     status,
     headers: { 'content-type': 'application/json', 'cache-control': 'no-store' },
   });
+}
+
+// ---------------------------------------------------------------------------
+// Submit
+// ---------------------------------------------------------------------------
+
+/**
+ * A confirmation code an applicant can read aloud on the phone.
+ *
+ * The application id is a UUID, which is correct for a URL and useless for a
+ * human. This takes the first eight hex characters and groups them, so a
+ * program manager searching for "IC-3F9A-21C7" finds the row. It is a display
+ * rendering of the id, not a second identifier: nothing is stored, and it is
+ * never accepted as input, so there is no uniqueness claim to defend.
+ */
+export function confirmationCode(applicationId: string): string {
+  const hex = applicationId.replace(/-/g, '').toUpperCase();
+  return `IC-${hex.slice(0, 4)}-${hex.slice(4, 8)}`;
+}
+
+interface SubmitContextRow {
+  program_name: string;
+  organization_legal_name: string;
+  project_title: string | null;
+  requested_amount_cents: number | null;
+  primary_contact_email: string | null;
+  form_definition_id: string;
+  decision_due_at: string | null;
+}
+
+/**
+ * Build and send the confirmation, after the application is already submitted.
+ *
+ * NEVER THROWS. CLAUDE.md step 10 wants the applicant to hold a record without
+ * signing back in, but a mail provider having a bad afternoon must not turn a
+ * submitted application into a 500 that makes an applicant submit again.
+ * `sendEmail` already returns rather than throws for a provider failure; this
+ * wrapper covers the rest -- a missing contact row, a template that cannot
+ * render -- and logs instead.
+ *
+ * The read-back is built from what was PERSISTED, re-read after the write.
+ *
+ * Exported for its own test. The organization scoping on the read below is
+ * redundant with the scoping submitApplication already did, and redundant
+ * scoping is exactly the kind of line that gets removed as noise -- so it has
+ * a test that fails when it goes.
+ */
+export async function sendConfirmation(
+  env: Env,
+  ctx: RequestContext,
+  session: Session,
+  applicationId: string,
+  submittedAt: string,
+): Promise<void> {
+  try {
+    const row = await env.DB.prepare(
+      `SELECT p.name AS program_name,
+              o.legal_name AS organization_legal_name,
+              a.project_title, a.requested_amount_cents, a.primary_contact_email,
+              a.form_definition_id, c.decision_due_at
+         FROM applications a
+         JOIN cycles c ON c.id = a.cycle_id
+         JOIN programs p ON p.id = c.program_id
+         JOIN organizations o ON o.id = a.organization_id
+        WHERE a.id = ? AND a.organization_id = ?`,
+    )
+      .bind(applicationId, orgId(session))
+      .first<SubmitContextRow>();
+    if (!row) return;
+
+    // Where the receipt goes. The address the applicant put ON the form wins
+    // over the one they signed in with: a director who signs in as herself and
+    // names grants@ as the contact expects grants@ to hold the record.
+    const to = row.primary_contact_email ?? session.email;
+
+    const definition = await loadFormDefinition(env.DB, row.form_definition_id);
+    const answers = await loadStoredAnswers(env.DB, applicationId);
+
+    await sendEmail(
+      env,
+      ctx,
+      {
+        template: APPLICATION_RECEIVED,
+        to,
+        // One receipt per application, forever. A retry of the same submit
+        // cannot produce a second copy in the applicant's inbox.
+        idempotencyKey: `application_received:${applicationId}`,
+        vars: {
+          organizationName: row.organization_legal_name,
+          programName: row.program_name,
+          projectTitle: row.project_title ?? 'Your application',
+          // The display edge. Cents become dollars here and nowhere earlier.
+          requestedAmount:
+            row.requested_amount_cents === null
+              ? 'Not stated'
+              : formatCents(row.requested_amount_cents),
+          submittedAtDisplay: formatInZone(submittedAt, env.DISPLAY_TIMEZONE),
+          confirmationCode: confirmationCode(applicationId),
+          ...(row.decision_due_at
+            ? {
+                decisionByDisplay: formatInZone(row.decision_due_at, env.DISPLAY_TIMEZONE, {
+                  year: 'numeric',
+                  month: 'long',
+                  day: 'numeric',
+                  hour: undefined,
+                  minute: undefined,
+                  timeZoneName: undefined,
+                }),
+              }
+            : {}),
+          answers: readBackLines(definition, answers),
+        },
+        // Entity ids only. The read-back itself is never stored on the message
+        // row -- it is the applicant's financial detail, and email_messages is
+        // an operational log.
+        context: { application_id: applicationId, organization_id: orgId(session) },
+      },
+      transportFor(env),
+    );
+  } catch (err) {
+    await logError(env, ctx, {
+      code: 'CONFIRMATION_EMAIL_FAILED',
+      severity: 'error',
+      message:
+        err instanceof Error
+          ? `confirmation email failed after a successful submit: ${err.message}`
+          : 'confirmation email failed after a successful submit',
+      stack: err instanceof Error ? (err.stack ?? null) : null,
+      context: { application_id: applicationId },
+    });
+  }
+}
+
+/**
+ * POST /api/applications/:id/submit
+ *
+ * `submitApplication` does the scoping, the cycle window, the whole-definition
+ * validation, the attachment claim and the atomic write. This route is the
+ * plumbing around it plus the receipt.
+ *
+ * NOT DONE HERE, and it should be said rather than discovered: the marketing
+ * opt-in does not sync to Eloqua. CLAUDE.md step 10 puts that on this path,
+ * and there is no Eloqua client in the codebase yet. The answer is stored, so
+ * nothing is lost -- it is a backfill later, not a re-ask.
+ */
+export async function submitDraft(
+  request: Request,
+  env: Env,
+  ctx: RequestContext,
+  session: Session,
+  applicationId: string,
+): Promise<Response> {
+  orgId(session);
+  const body = (await request.json().catch(() => ({}))) as {
+    answers?: unknown;
+    guidelinesVersion?: unknown;
+  };
+  const answers =
+    typeof body.answers === 'object' && body.answers !== null && !Array.isArray(body.answers)
+      ? (body.answers as Record<string, unknown>)
+      : {};
+
+  const result = await submitApplication(env.DB, ctx, session, applicationId, answers, {
+    guidelinesVersion:
+      typeof body.guidelinesVersion === 'string' ? body.guidelinesVersion : undefined,
+  });
+
+  // After the write, never before, and never in a way that can fail the submit.
+  await sendConfirmation(env, ctx, session, result.applicationId, result.submittedAt);
+
+  return json(
+    {
+      applicationId: result.applicationId,
+      submittedAt: result.submittedAt,
+      confirmationCode: confirmationCode(result.applicationId),
+    },
+    200,
+  );
 }

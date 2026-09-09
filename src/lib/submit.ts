@@ -119,7 +119,15 @@ async function loadCycle(db: D1Database, cycleId: string): Promise<CycleRow> {
 }
 
 /** Load the answers already stored, so autosave can judge conditional visibility. */
-async function loadExistingAnswers(
+/**
+ * Every stored answer for an application, keyed by form_field_id.
+ *
+ * Exported because the confirmation email re-reads what was actually
+ * persisted rather than echoing what the submit call intended to persist. A
+ * receipt built from the request body would be a receipt for the request, not
+ * for the record, and the two are only the same when nothing went wrong.
+ */
+export async function loadStoredAnswers(
   db: D1Database,
   applicationId: string,
 ): Promise<Map<string, StoredValue>> {
@@ -401,7 +409,7 @@ export async function saveDraft(
   }
 
   const definition = await loadFormDefinition(db, app.form_definition_id);
-  const existingAnswers = await loadExistingAnswers(db, app.id);
+  const existingAnswers = await loadStoredAnswers(db, app.id);
   const outcome = validateSubmission(definition, raw, { partial: true, existingAnswers });
 
   const savedAt = nowIso();
@@ -553,7 +561,7 @@ export async function submitApplication(
     });
   }
 
-  const existingAnswers = await loadExistingAnswers(db, app.id);
+  const existingAnswers = await loadStoredAnswers(db, app.id);
   const outcome = validateSubmission(definition, raw, { existingAnswers });
 
   const attachments = await resolveAttachments(

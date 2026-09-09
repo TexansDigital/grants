@@ -25,7 +25,7 @@ import {
   requestSignInLink, renderVerifyInterstitial, completeSignIn, signOutRoute,
 } from './lib/authRoutes';
 import { submitEligibility } from './lib/eligibility';
-import { createApplication, readDraft, autosaveDraft } from './lib/applicantRoutes';
+import { createApplication, readDraft, autosaveDraft, submitDraft } from './lib/applicantRoutes';
 import { presignUpload } from './lib/uploads';
 import { requireStaffSession } from './lib/auth';
 import { loadFormDefinition } from './lib/loadForm';
@@ -221,6 +221,14 @@ const routes: readonly Route[] = [
     auth: 'applicant',
     handler: ({ request, env, ctx, session, params }) =>
       autosaveDraft(request, env, ctx, session, params.id!),
+  },
+  {
+    method: 'POST',
+    path: '/api/applications/:id/submit',
+    roles: EXTERNAL_USER,
+    auth: 'applicant',
+    handler: ({ request, env, ctx, session, params }) =>
+      submitDraft(request, env, ctx, session, params.id!),
   },
   {
     method: 'GET',
