@@ -138,14 +138,21 @@ describe('a second program requires zero schema changes', () => {
     const byKey = new Map(rows.results.map((r) => [r.k, r.req]));
     expect(JSON.parse(byKey.get('eligibility')!)).toEqual([
       'organization_name', 'ein', 'primary_contact_email',
+      // The two gates that decide eligibility, so the screen can say no before
+      // any narrative is written.
+      'requested_amount_cents', 'counties_served',
     ]);
     // NULL means "inherit the program's list", which is the full universal set.
     expect(byKey.get('application')).toBeNull();
 
     // And the narrow list is genuinely narrower: the eligibility form does not
     // collect an amount, and publishing it is still allowed.
+    // Narrower than the full universal set: the eligibility screen still does
+    // not ask for a project title or a mission statement.
     const elig = await loadFormDefinition(db, first.formDefinitionIds.eligibility!);
-    expect(allFields(elig).some((f) => f.maps_to === 'requested_amount_cents')).toBe(false);
+    const eligTargets = allFields(elig).map((f) => f.maps_to).filter(Boolean);
+    expect(eligTargets).not.toContain('organization_mission');
+    expect(eligTargets).not.toContain('project_title');
     expect(elig.status).toBe('published');
   });
 

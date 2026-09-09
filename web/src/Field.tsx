@@ -151,7 +151,12 @@ export function Field({ field, value, error, onChange, onBlur }: FieldProps): Re
   if (grouped) {
     return (
       <div className="field" id={`field-${field.field_key}`} data-wide={isWide(field) ? 'true' : undefined}>
-        <fieldset className={field.field_type === 'address_block' ? 'address' : 'choices columns'}>
+        <fieldset
+          className={field.field_type === 'address_block' ? 'address' : 'choices columns'}
+          // Carries the description for the whole group, so it is announced
+          // once on entering the group rather than once per control.
+          aria-describedby={describedBy}
+        >
           {labelNode}
           {help}
           {body}
@@ -216,7 +221,11 @@ function renderControl(
           {...common}
           type="text"
           value={str(value)}
-          maxLength={v.max_length !== undefined ? v.max_length + 100 : undefined}
+          // NO maxLength. The browser silently stops accepting characters,
+          // with no message, before the validator ever gets to explain -- so a
+          // long organization name just stops typing. Length is enforced by
+          // validation, which says what is wrong.
+          maxLength={undefined}
           onChange={(e) => onChange(e.target.value)}
         />
       );
@@ -284,7 +293,11 @@ function renderControl(
                 name={field.field_key}
                 value={o.value}
                 checked={selected.has(o.value)}
-                aria-describedby={common['aria-describedby'] as string | undefined}
+                // NOT aria-describedby here. Eighteen county checkboxes each
+                // carrying the same description made a screen reader repeat
+                // "Programs serving counties outside this list are not
+                // eligible" eighteen times. The description belongs to the
+                // group, and the group is the <fieldset> this renders inside.
                 onBlur={common.onBlur as () => void}
                 onChange={(e) => {
                   const next = new Set(selected);

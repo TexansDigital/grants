@@ -407,8 +407,17 @@ export function FormRenderer({ def, onBack }: Props): ReactElement {
             )}
             <span className="spacer" />
             <SaveState savedAt={savedAt} failed={saveFailed} />
-            <button type="button" className="btn secondary" onClick={clearDraft}>
-              Clear answers
+          </div>
+
+          {/*
+            Out of the action row entirely. `.actions` wraps at narrow widths,
+            which put a control that discards an hour of writing directly under
+            the primary button somebody presses on every one of these steps.
+            A confirm dialog is not a reason to leave it there.
+          */}
+          <div className="danger-row">
+            <button type="button" className="linklike danger" onClick={clearDraft}>
+              Clear all answers and start over
             </button>
           </div>
         </main>
@@ -490,8 +499,17 @@ function ErrorSummary({
  * without having it interrupt what they are typing.
  */
 function SaveState({ savedAt, failed }: { savedAt: Date | null; failed: boolean }): ReactElement {
+  // The timestamp changes on every autosave, so a live region re-announced
+  // "Saved at 9:51 PM" behind somebody in the middle of a 500-word narrative.
+  // Only a CHANGE OF STATE is worth interrupting for: saved -> failed, or
+  // nothing-yet -> saved. The text stays visible either way.
+  const state = failed ? 'failed' : savedAt ? 'saved' : 'none';
+  const announced = useRef(state);
+  const changed = announced.current !== state;
+  announced.current = state;
+
   return (
-    <span className="counter" aria-live="polite">
+    <span className="counter" aria-live={changed ? 'polite' : 'off'}>
       {failed
         ? 'Could not save in this browser'
         : savedAt

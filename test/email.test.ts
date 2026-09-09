@@ -65,6 +65,8 @@ const SIGN_IN_VARS = {
   url: `https://grants.example.org/signin?t=${TOKEN}`,
   expiresInMinutes: 15,
   destination: 'Inspire Change application',
+  requestedAtDisplay: 'March 1, 2026 at 9:12 PM CST',
+  requestAnotherUrl: 'https://applications.example.org/sign-in',
 };
 
 async function row(id: string) {
@@ -100,14 +102,14 @@ describe('sending', () => {
     expect(sent[0]!.text).toContain(SIGN_IN_VARS.url);
     expect(sent[0]!.html).toContain(SIGN_IN_VARS.url);
 
-    expect(sent[0]!.subject).toBe('Your sign-in link');
+    expect(sent[0]!.subject).toBe('Sign in to your Inspire Change application');
 
     const r = await row(out.messageId);
     expect(r!.status).toBe('sent');
     expect(r!.template_key).toBe('sign_in_link');
     // The subject is the one part of the body the table keeps, precisely so a
     // human can answer "what did we send them".
-    expect(r!.subject).toBe('Your sign-in link');
+    expect(r!.subject).toBe('Sign in to your Inspire Change application');
     expect(r!.to_email).toBe('Person@Example.org');
     expect(r!.provider).toBe('resend');
     expect(r!.provider_message_id).toBe('prov-1');
@@ -774,6 +776,45 @@ describe('templates', () => {
         `${k}: contains an emoji`,
       ).toBe(false);
     }
+  });
+
+  it('names the destination in the subject, for a shared inbox', () => {
+    // "Your sign-in link" alone, in an info@ inbox three people watch, reads
+    // as something to archive.
+    const r = SIGN_IN_LINK.render(SIGN_IN_VARS);
+    expect(r.subject).toBe('Sign in to your Inspire Change application');
+  });
+
+  it('does not claim the link is unusable by anyone else, because it is not', () => {
+    // Forwarding the email hands over the ability to sign in -- and forwarding
+    // to whoever is the authorized signer is an ordinary thing to do. The old
+    // footer said "Nobody can use the link without this email".
+    const r = SIGN_IN_LINK.render(SIGN_IN_VARS);
+    for (const body of [r.text, r.html]) {
+      expect(body).not.toContain('Nobody can use the link');
+      expect(body).toContain('like a password');
+    }
+  });
+
+  it('lets an applicant tell two sign-in emails apart, and recover from a stale one', () => {
+    const r = SIGN_IN_LINK.render(SIGN_IN_VARS);
+    for (const body of [r.text, r.html]) {
+      expect(body).toContain('March 1, 2026 at 9:12 PM CST');
+      expect(body).toContain('https://applications.example.org/sign-in');
+    }
+  });
+
+  it('tells the applicant when to expect a decision, when the cycle knows', () => {
+    const withDate = APPLICATION_RECEIVED.render({
+      ...RECEIVED_VARS,
+      decisionByDisplay: 'mid-April 2026',
+    });
+    expect(withDate.text).toContain('by mid-April 2026');
+    expect(withDate.html).toContain('by mid-April 2026');
+
+    // And degrades cleanly when it does not.
+    const without = APPLICATION_RECEIVED.render(RECEIVED_VARS);
+    expect(without.text).toContain('We will be in touch about a decision.');
   });
 
   it('escapes applicant-supplied text in the HTML body', () => {

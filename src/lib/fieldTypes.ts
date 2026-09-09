@@ -82,6 +82,14 @@ export interface FieldValidation {
   min_words?: number;
   max_words?: number;
   pattern?: string;
+  /**
+   * What to say when `pattern` fails.
+   *
+   * "is not in the expected format" tells an applicant nothing -- least of all
+   * on the field they are most likely to have pasted from a PDF. A program
+   * that sets a pattern should say what shape it wants.
+   */
+  pattern_message?: string;
   min?: number;
   max?: number;
   /** currency, in cents, after parsing. */
@@ -178,7 +186,7 @@ function textLimits(value: string, v: FieldValidation, label: string): string | 
       // A bad pattern in configuration must not reject a valid answer.
       return null;
     }
-    if (!re.test(value)) return `${label} is not in the expected format.`;
+    if (!re.test(value)) return v.pattern_message ?? `${label} is not in the expected format.`;
   }
   return null;
 }

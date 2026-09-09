@@ -78,7 +78,16 @@ const AREA_OF_FOCUS_HELP = [
 const ELIGIBILITY_STAGE: StageSpec = {
   key: 'eligibility',
   name: 'Eligibility',
-  requiredMapsTo: ['organization_name', 'ein', 'primary_contact_email'],
+  requiredMapsTo: [
+    'organization_name',
+    'ein',
+    'primary_contact_email',
+    // The two gates that actually disqualify an applicant. Collected here so
+    // the screen can say no BEFORE thirty fields of narrative, which is the
+    // whole reason the screen exists.
+    'requested_amount_cents',
+    'counties_served',
+  ],
   form: {
     name: 'Inspire Change Eligibility Screen',
     sections: [
@@ -132,7 +141,53 @@ const ELIGIBILITY_STAGE: StageSpec = {
             required: true,
             mapsTo: 'ein',
             help: 'Nine digits, with or without the dash. For example 76-1234567.',
-            validation: { pattern: '^\\d{2}-?\\d{7}$' },
+            validation: {
+              // Deliberately permissive: anything containing exactly nine
+              // digits. An EIN pasted from a determination-letter PDF often
+              // carries an en-dash or a non-breaking space, and the value is
+              // normalized to bare digits on the way in (lib/ein.ts) anyway.
+              // Rejecting a paste that WOULD have normalized fine put the
+              // strictest validation on the form on the field people paste most.
+              pattern: '^\\D*(?:\\d\\D*){9}$',
+              pattern_message:
+                'EIN should be nine digits, for example 76-1234567. Please check the number and try again.',
+            },
+          },
+        ],
+      },
+      {
+        key: 'scope',
+        title: 'Your request',
+        description:
+          'Two questions that decide eligibility. We ask them now so we can tell you straight away if this is not a fit.',
+        fields: [
+          {
+            // The range is a HARD boundary enforced by validation, so asking
+            // for it at eligibility is the difference between being told now
+            // and being told after an hour of writing. The applicant confirms
+            // or adjusts the figure on the application itself.
+            key: 'requested_amount',
+            label: 'Approximately how much are you requesting?',
+            type: 'currency',
+            required: true,
+            mapsTo: 'requested_amount_cents',
+            validation: {
+              min_cents: 1_000_000,
+              max_cents: 5_000_000,
+            },
+            help:
+              'Requests must be between $10,000 and $50,000. You can refine the exact figure later.',
+          },
+          {
+            key: 'counties_served',
+            label: 'Which counties does this program serve?',
+            type: 'multi_select',
+            required: true,
+            mapsTo: 'counties_served',
+            options: GREATER_HOUSTON_COUNTIES,
+            validation: { min: 1 },
+            help:
+              'Select every county your program serves. Programs serving only counties outside this list are not eligible for funding.',
           },
         ],
       },
@@ -275,7 +330,17 @@ export const INSPIRE_CHANGE: ProgramSpec = {
                 required: true,
                 mapsTo: 'ein',
                 help: 'Nine digits, with or without the dash. For example 76-1234567.',
-                validation: { pattern: '^\\d{2}-?\\d{7}$' },
+                validation: {
+              // Deliberately permissive: anything containing exactly nine
+              // digits. An EIN pasted from a determination-letter PDF often
+              // carries an en-dash or a non-breaking space, and the value is
+              // normalized to bare digits on the way in (lib/ein.ts) anyway.
+              // Rejecting a paste that WOULD have normalized fine put the
+              // strictest validation on the form on the field people paste most.
+              pattern: '^\\D*(?:\\d\\D*){9}$',
+              pattern_message:
+                'EIN should be nine digits, for example 76-1234567. Please check the number and try again.',
+            },
               },
               {
                 key: 'organization_website',

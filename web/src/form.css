@@ -617,3 +617,28 @@
 .banner strong {
   color: var(--ink);
 }
+
+/* A destructive control, kept away from the primary action it used to wrap
+   underneath at narrow widths. Quiet by default; it is not a step in the
+   flow, it is the way out of one. */
+.danger-row {
+  margin-top: var(--space-5);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--rule);
+  display: flex;
+  justify-content: flex-end;
+}
+
+.danger-row .linklike.danger {
+  color: var(--ink-2);
+  font-size: var(--step--1);
+  min-height: 44px;
+  padding: 0 var(--space-2);
+}
+
+.danger-row .linklike.danger:hover,
+.danger-row .linklike.danger:focus-visible {
+  color: var(--danger-ink, #c4001f);
+  text-decoration: underline;
+}
+

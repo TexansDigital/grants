@@ -117,13 +117,29 @@ describe('seed artifact', () => {
     const elig = await loadFormDefinition(db, seededId(`${INSPIRE_CHANGE.slug}/stage/eligibility/form`));
     expect(allFields(elig).map((f) => f.field_key)).toEqual([
       'entity_type_confirmation', 'guidelines_attestation', 'authorization_attestation',
-      'organization_name', 'ein', 'contact_first_name', 'contact_last_name', 'contact_email',
+      'organization_name', 'ein',
+      // The two real disqualifiers, asked before any narrative.
+      'requested_amount', 'counties_served',
+      'contact_first_name', 'contact_last_name', 'contact_email',
     ]);
 
     // Validation that gates a real applicant is pinned per field, not counted.
     const eligEin = allFields(elig).find((f) => f.field_key === 'ein')!;
-    expect(eligEin.validation.pattern).toBe('^\\d{2}-?\\d{7}$');
+    expect(eligEin.validation.pattern).toBe('^\\D*(?:\\d\\D*){9}$');
     expect(eligEin.is_required).toBe(true);
+
+    // The eligibility gates carry the SAME bounds as the application, or the
+    // screen would pass someone the form then rejects.
+    const eligAmount = allFields(elig).find((f) => f.field_key === 'requested_amount')!;
+    const appAmount = allFields(app).find((f) => f.field_key === 'requested_amount')!;
+    expect(eligAmount.validation.min_cents).toBe(appAmount.validation.min_cents);
+    expect(eligAmount.validation.max_cents).toBe(appAmount.validation.max_cents);
+
+    const eligCounties = allFields(elig).find((f) => f.field_key === 'counties_served')!;
+    const appCounties = allFields(app).find((f) => f.field_key === 'counties_served')!;
+    expect(eligCounties.options.map((o) => o.value)).toEqual(
+      appCounties.options.map((o) => o.value),
+    );
   });
 
   it('refuses a malformed promotion override, at insert and at update', async () => {

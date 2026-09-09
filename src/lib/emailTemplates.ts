@@ -167,6 +167,17 @@ export interface SignInLinkVars {
   expiresInMinutes: number;
   /** Where the recipient is signing in, e.g. 'Inspire Change application'. */
   destination: string;
+  /**
+   * When this link was requested, already formatted in the applicant's
+   * timezone.
+   *
+   * Somebody who clicks "send me another" ends up with two identical emails,
+   * and only the newest link works. Without a visible time there is no way to
+   * tell them apart -- and in a threaded view the older one is often on top.
+   */
+  requestedAtDisplay: string;
+  /** Where to go to request a fresh link. Shown for when this one is stale. */
+  requestAnotherUrl: string;
 }
 
 /**
@@ -181,27 +192,43 @@ export const SIGN_IN_LINK: EmailTemplate<SignInLinkVars> = {
   render(v) {
     const mins = `${v.expiresInMinutes} minute${v.expiresInMinutes === 1 ? '' : 's'}`;
     return {
-      subject: 'Your sign-in link',
+      // Named, not just "Your sign-in link". This often arrives in a shared
+      // inbox that several people watch, where an unattributed sign-in email
+      // reads as something to archive.
+      subject: `Sign in to your ${v.destination}`,
       text: textBlock([
         `Use this link to sign in to your ${v.destination}:`,
         '',
         v.url,
         '',
-        `The link works once and expires in ${mins}.`,
+        `Requested at ${v.requestedAtDisplay}.`,
+        `The link works once and expires ${mins} after it was requested.`,
         '',
-        'If you did not ask to sign in, you can ignore this message. Nobody can',
-        'use the link without this email.',
+        'If it has expired, or if you asked for more than one link and are not',
+        'sure which is current, request a fresh one here:',
+        v.requestAnotherUrl,
+        '',
+        // The old wording here said "Nobody can use the link without this
+        // email", which is false: forwarding the message hands over the
+        // ability to sign in, and forwarding to whoever is the authorized
+        // signer is an ordinary thing to do.
+        'Treat this link like a password: anyone who can read this email can',
+        'use it. If you did not ask to sign in, you can ignore this message.',
       ]),
       html: layout({
-        preview: `Your sign-in link, valid for ${mins}.`,
-        heading: 'Your sign-in link',
+        preview: `Requested at ${v.requestedAtDisplay}. Valid for ${mins}.`,
+        heading: `Sign in to your ${v.destination}`,
         blocks: [
           `Use the button below to sign in to your ${escapeHtml(v.destination)}.`,
-          `<span style="color:${INK_SOFT};">The link works once and expires in ${escapeHtml(mins)}.</span>`,
+          `<span style="color:${INK_SOFT};">Requested at ${escapeHtml(v.requestedAtDisplay)}. ` +
+            `The link works once and expires ${escapeHtml(mins)} after it was requested.</span>`,
         ],
         action: { label: 'Sign in', url: v.url },
         footer:
-          'If you did not ask to sign in, you can ignore this message. Nobody can use the link without this email.',
+          `If this link has expired, or you asked for more than one and are not sure which is ` +
+          `current, request a fresh one at ${v.requestAnotherUrl} . Anyone who can read this ` +
+          `email can use the link, so treat it like a password. If you did not ask to sign in, ` +
+          `you can ignore this message.`,
       }),
     };
   },
@@ -228,6 +255,14 @@ export interface ApplicationReceivedVars {
   requestedAmount: string;
   submittedAtDisplay: string;
   confirmationCode: string;
+  /**
+   * When a decision is expected, already formatted. Optional because a cycle
+   * may not have set one.
+   *
+   * "We will be in touch" is the sentence that generates the status-check
+   * emails. The cycle already knows its decision date.
+   */
+  decisionByDisplay?: string;
   /**
    * The full read-back. CLAUDE.md step 10: the applicant gets a record of
    * everything they submitted without logging back in.
@@ -268,8 +303,10 @@ export const APPLICATION_RECEIVED: EmailTemplate<ApplicationReceivedVars> = {
         `--- ${s.title} ---`,
         ...s.lines.flatMap((l) => [`${l.label}:`, l.value === '' ? '(not answered)' : l.value, '']),
       ]),
-      'You do not need to do anything else. We will be in touch about a',
-      'decision. Replying to this message reaches a real person.',
+      v.decisionByDisplay
+        ? `You do not need to do anything else. We will be in touch by ${v.decisionByDisplay}.`
+        : 'You do not need to do anything else. We will be in touch about a decision.',
+      'Replying to this message reaches a real person.',
     ]);
 
     const answersHtml = sections
@@ -314,8 +351,9 @@ export const APPLICATION_RECEIVED: EmailTemplate<ApplicationReceivedVars> = {
           `<span style="color:${INK_SOFT};">A copy of everything you submitted is below, so you have a record without signing back in.</span>`,
           answersHtml,
         ],
-        footer:
-          'You do not need to do anything else. We will be in touch about a decision. Replying to this message reaches a real person.',
+        footer: v.decisionByDisplay
+          ? `You do not need to do anything else — we will be in touch by ${v.decisionByDisplay}. Replying to this message reaches a real person.`
+          : 'You do not need to do anything else. We will be in touch about a decision. Replying to this message reaches a real person.',
       }),
     };
   },
