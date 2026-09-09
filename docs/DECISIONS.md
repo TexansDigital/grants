@@ -528,3 +528,46 @@ roles, and that check cannot be observed failing: every staff role has a null
 the call fails no test and cannot be made to. It is kept as defence in depth
 for the day that CHECK is relaxed, and the predicate is tested directly.
 
+## §23 — Drafts live on the server from the moment they exist
+
+**Decided 2026-09-09. Delegated to Claude by the owner.**
+
+The renderer kept answers in `localStorage`, keyed by form id. The indicator
+was honest — "Saved **in this browser**" — but nobody reads it that way. They
+read the word *Saved*.
+
+An executive director starting on a phone at 9pm and continuing on a laptop the
+next morning lost everything. So did anyone who opened the link a second time
+inside Gmail's embedded browser rather than in Safari, and anyone whose iOS
+Safari evicted site storage after a week away. For a form asking for roughly
+three thousand words, that is the difference between an application and an
+abandoned one — and it was the top finding of the nonprofit-perspective review.
+
+**A draft is a row from creation.** `POST /api/applications` creates it,
+`GET /api/applications/:id/draft` returns the definition and the answers so
+far, `PATCH` autosaves.
+
+**Concurrent edits are last-write-wins PER FIELD, not per form.** Answers are
+upserted one field at a time, so two devices editing different sections merge
+cleanly; two editing the same field, the later write wins. CLAUDE.md is
+explicit that there is no real-time collaboration here, and optimistic locking
+on a draft would mean showing a nonprofit a merge-conflict dialog — worse than
+the problem it solves.
+
+**What satisfies a stage gate.** `program_stages.gate_on_prior_decision` does
+not define what counts as a decision. An eligibility screen has no reviewer, so
+**passing it is the decision**: a prior-stage application in `submitted`,
+`under_review` or `awarded` opens the stage behind it. `declined` and
+`withdrawn` are deliberately absent, and a still-`draft` prior stage does not
+count either.
+
+A program needing genuine invite-only semantics — an LOI a human reads, then
+invites — needs more than this and will get it when review exists. Recorded
+because the alternative is discovering later that "gated" quietly meant
+"anyone who submitted".
+
+**Not built here:** prefill. Decision 19 says a declined applicant reapplies
+with organization fields already filled in, and CLAUDE.md's submission-flow
+step 4 wants the same for any returning organization. The data is in the
+`organizations` row; wiring it into a new draft is the next piece.
+

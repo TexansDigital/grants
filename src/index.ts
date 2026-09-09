@@ -25,6 +25,7 @@ import {
   requestSignInLink, renderVerifyInterstitial, completeSignIn, signOutRoute,
 } from './lib/authRoutes';
 import { submitEligibility } from './lib/eligibility';
+import { createApplication, readDraft, autosaveDraft } from './lib/applicantRoutes';
 import { requireStaffSession } from './lib/auth';
 import { loadFormDefinition } from './lib/loadForm';
 import {
@@ -177,6 +178,29 @@ const routes: readonly Route[] = [
     roles: EXTERNAL_USER,
     auth: 'applicant',
     handler: ({ request, env, ctx, session }) => signOutRoute(request, env, ctx, session),
+  },
+  // --- The applicant's own application ---------------------------------------
+  {
+    method: 'POST',
+    path: '/api/applications',
+    roles: EXTERNAL_USER,
+    auth: 'applicant',
+    handler: ({ request, env, ctx, session }) => createApplication(request, env, ctx, session),
+  },
+  {
+    method: 'GET',
+    path: '/api/applications/:id/draft',
+    roles: EXTERNAL_USER,
+    auth: 'applicant',
+    handler: ({ env, session, params }) => readDraft(env, session, params.id!),
+  },
+  {
+    method: 'PATCH',
+    path: '/api/applications/:id/draft',
+    roles: EXTERNAL_USER,
+    auth: 'applicant',
+    handler: ({ request, env, ctx, session, params }) =>
+      autosaveDraft(request, env, ctx, session, params.id!),
   },
   {
     method: 'GET',
