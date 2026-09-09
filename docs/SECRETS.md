@@ -45,7 +45,7 @@ human in it, not a convenience.
 **Before setting it in production**, SPF, DKIM and DMARC must be published on
 `houstontexansfoundation.org` and the domain verified in Resend. Deliverability
 is not solved by code: a grantee who cannot receive a login link cannot file a
-report.
+report. Step-by-step walkthrough: `docs/EMAIL-DNS-SETUP.md`.
 
 ## Local development
 
