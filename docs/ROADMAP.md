@@ -6,35 +6,45 @@ stated. Nothing here has been built.
 
 ## Where we actually are
 
-**Reachable over HTTP:** an Access-verified staff session, and six GET routes —
-`/health`, `/api/session`, `/api/programs`, `/api/cycles`, `/api/forms`,
-`/api/forms/:id`. Plus the applicant form renderer.
+**Last updated 9 September 2026.** This section is rewritten whenever it stops
+being true; the rest of the file is the original plan and its reasoning.
 
-**There is not one mutating route in the system.** Every route is a GET.
+**An applicant can now complete an application end to end.** Eligibility
+screen, magic-link sign-in, draft creation, server-backed autosave, direct-to-R2
+uploads, review, submit, and a confirmation email carrying a full read-back.
+Driven in a browser against a real local Worker and D1, at phone width.
 
-**Built, tested, and reachable by nothing.** `saveDraft`, `submitApplication`,
-`searchApplications`, `getApplicationForExternal`, `listApplicationsForExternal`,
-`promote`, `validateUploadIntent` all have tests and zero routes.
+**Staff can** sign in through Access, create and edit programs, stages and
+cycles, open and close a cycle, browse the pipeline with filters, search
+narratives full-text, read one application in full, and see an organization's
+history.
 
-**Not built:**
-- Any way to *create* an application. `saveDraft` starts from an application
-  that already exists (`src/lib/submit.ts:78`); no `INSERT INTO applications`
-  exists outside the test suite. The audit verb `application.created`
-  (`src/lib/audit.ts:35`) has no writer.
-- Applicant and grantee identity. The KV namespace is bound and unused.
-- R2 upload. `aws4fetch` is not a dependency.
-- **Email of any kind.** Resend is not a dependency. This blocks the magic link,
-  the submission confirmation, and every decision notice.
-- Schema past applications. Migrations stop at 0005. No rubrics, reviews,
-  awards, payments, reports or metrics — about half the model in CLAUDE.md.
-- A domain. `workers_dev = true`, and Access fronts that hostname.
-- The cron D1→R2 export. The `scheduled` handler is a stub that returns
-  immediately (`src/index.ts:223`).
+**Built and reachable:** 677 tests, migrations 0001-0011.
 
-**Phase 1 is less done than its name suggests.** CLAUDE.md's Phase 1 includes
-program/cycle/stage CRUD, organization and application read views, form
-definition management, and rubric upload and parse. None of those exist. What
-exists is Access, read-only lists, and the renderer.
+**Built, no way in yet:**
+- Review and scoring. Tables exist (rubrics, criteria, assignments with
+  conflict declaration, per-criterion scores) and there is a queue endpoint. No
+  screens, and no rubric to load — see `docs/BLOCKED-ON-YOU.md` §2.1.
+- The Formstack importer. Parses and reports; writes nothing.
+
+**Not built:** awards, payments, decision communication, grantee reporting,
+dashboard and exports, the public cycle page, organization merge tooling,
+Eloqua opt-in sync, and the cron D1→R2 export (`src/index.ts` `scheduled` is
+still a stub).
+
+**Never yet exercised for real,** and this is the honest gap between "works"
+and "works in production":
+- **No email has ever been delivered.** With no `RESEND_API_KEY` every message
+  is recorded and deliberately suppressed. Correct for preview; it means the
+  send path has been tested and never used.
+- **No file has ever reached a real R2 bucket.** The local runs sign with
+  invented credentials against a hostname that does not exist, and the browser
+  drive intercepts the PUT. The signature, the request shape and the absence of
+  a Content-Type header are all verified; storage accepting it is not.
+- **No real applicant has touched any of it.** CLAUDE.md's Phase 2 verification
+  is three friendly organizations submitting on their own devices with no help.
+  That has not happened and nothing substitutes for it.
+- **No human security review.** See `docs/BLOCKED-ON-YOU.md` §1.4.
 
 ## The schema already commits to things that do not exist
 
@@ -100,9 +110,9 @@ numbers are ordering, not reservations.)
 | **4** | **Domain**: ~~purchase~~ → ~~Worker on custom domain~~ → ~~Access on the staff hostname~~ → `workers_dev = false` → Resend DNS | — | Mostly DONE. Remaining: flip workers_dev once verified, and the Resend records |
 | **5** | 2a — applicant identity **including organization resolution**: magic link (single-use, hashed, 15-min, rate-limited), email→organization matching, EIN capture, returning-organization prefill | 3 | `users` requires a non-null `organization_id` for applicants, so signup *must* resolve an org. Prefill and EIN matching move here from 2d |
 | **6** | Staff read surface: pipeline list, filters, application detail, FTS search route, applicant-history panel | 1, 2 | The undone half of Phase 1. Parallel with 5 |
-| **7** | Draft create: application row, per-cycle limit, stage gate, **public published-only** form endpoint | 2, 5 | Not plumbing. The current form endpoint is staff-only and serves draft and retired definitions unfiltered |
-| **8** | 2c — uploads: presigned PUT via aws4fetch, bucket CORS, R2 lifecycle | 7 | **Before submit.** The seeded form has two *required* upload fields, so submit can never pass on it until uploads exist |
-| **9** | Autosave + whole-form validate + submit + confirmation read-back email; compliance-policy hook as a no-op | 7, 8, 3 | Rewrites the renderer's autosave from localStorage to the server |
+| ~~**7**~~ | ~~Draft create: application row, per-cycle limit, stage gate, **public published-only** form endpoint | 2, 5 | **DONE.** `POST /api/applications`, per-cycle limit and stage gate enforced by triggers |
+| ~~**8**~~ | ~~2c — uploads: presigned PUT via aws4fetch, bucket CORS, R2 lifecycle | 7 | **DONE** except a real bucket. Presigned PUT via aws4fetch, no Content-Type, verified against a real Chromium. Bucket CORS and R2 lifecycle still outstanding |
+| ~~**9**~~ | ~~Autosave + whole-form validate + submit + confirmation read-back email~~ | 7, 8, 3 | **DONE.** Server drafts, submit route, confirmation email with read-back. Compliance hook still a no-op; Eloqua opt-in sync still not built |
 | **10** | Rubric upload and parse, assignment, conflict-of-interest declaration at assignment | 1, 6 | |
 | **11** | Scoring, weighted totals, normalization view, offline export/import, decision recording | 10 | |
 | **12** | Cron D1→R2 export; SPF, DKIM, DMARC | 4 | Fills the stub at `src/index.ts:223` |
