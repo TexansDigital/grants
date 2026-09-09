@@ -490,3 +490,41 @@ they were reaching for rather than deleted: two programs express the same shape
 — an open first stage gating a second — under completely different stage
 vocabularies, with no code that knows either.
 
+## §22 — Magic-link tokens go in D1, sessions stay in KV
+
+**Decided 2026-09-09. Approved by the owner, against CLAUDE.md's "sessions and
+tokens: Cloudflare KV".**
+
+**Tokens moved.** A magic link must be single-use. KV is eventually
+consistent, so a read-then-delete has a window in which two clicks both find
+the token present and both succeed — and both users get a working session with
+nothing looking wrong. D1 is strongly consistent, so consuming a token is one
+conditional `UPDATE` whose row count settles it. Migration 0010.
+
+**Sessions stayed.** Sessions have no single-use requirement. KV's real
+weakness for them is that deletes are eventually consistent, so "sign out"
+would not reliably end a session at the moment it is pressed — which is exactly
+when it matters, on a shared computer in a nonprofit office.
+
+That is solved without moving them: every session record carries its issue
+time, and every lookup compares it against a new `users.sessions_valid_from`.
+Signing out sets that column to now, which invalidates every session issued
+before now, immediately, with no dependence on KV propagation. "Sign out
+everywhere" and an admin revoking access become the same operation.
+
+**Sessions cache nothing.** The KV record holds a user id and two timestamps —
+no role, no organization. Every lookup re-reads the user row, so a deactivated
+or re-scoped account loses access on its next request rather than when its
+session happens to expire.
+
+**Superseding is not consuming.** `consumed_at` is evidence a person signed in.
+Requesting a fresh link marks the old one `superseded_at` instead, so an unused
+link that was replaced never reads as a session somebody opened. A link is used
+or replaced, never both, enforced by CHECK.
+
+**Known redundancy, stated rather than hidden.** `resolveSession` refuses staff
+roles, and that check cannot be observed failing: every staff role has a null
+`organization_id` by CHECK, and the next guard rejects those anyway. Deleting
+the call fails no test and cannot be made to. It is kept as defence in depth
+for the day that CHECK is relaxed, and the predicate is tested directly.
+
