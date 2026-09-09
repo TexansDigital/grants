@@ -22,7 +22,8 @@
     "build:web": "vite build web",
     "dev:web": "vite web",
     "migrate:staging": "wrangler d1 migrations apply steward-staging --remote --env staging",
-    "dev:staging": "wrangler dev --env staging"
+    "dev:staging": "wrangler dev --env staging",
+    "e2e:applicant": "node scripts/e2e-applicant.mjs"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.12.21",
@@ -32,6 +33,7 @@
     "@types/react-dom": "^19.2.7",
     "@vitejs/plugin-react": "^5.2.0",
     "fflate": "^0.8.3",
+    "playwright": "^1.63.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "typescript": "^5.7.3",
