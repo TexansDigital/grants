@@ -162,7 +162,13 @@ function draftGuard(applicationId: string): { sql: string; binds: unknown[] } {
 }
 
 /** Build the guarded upsert statements for a set of coerced answers. */
-function answerStatements(
+/**
+ * Exported for the eligibility screen, which creates and submits an
+ * application in one batch rather than editing a draft over time. It writes
+ * answers through THIS function so the two paths cannot drift on what an empty
+ * answer means, or on the currency assertion at the binding site.
+ */
+export function answerStatements(
   db: D1Database,
   applicationId: string,
   definition: FormDefinition,

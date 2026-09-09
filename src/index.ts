@@ -24,6 +24,7 @@ import { readSessionCookie, resolveSession } from './lib/sessions';
 import {
   requestSignInLink, renderVerifyInterstitial, completeSignIn, signOutRoute,
 } from './lib/authRoutes';
+import { submitEligibility } from './lib/eligibility';
 import { requireStaffSession } from './lib/auth';
 import { loadFormDefinition } from './lib/loadForm';
 import {
@@ -139,6 +140,14 @@ const routes: readonly Route[] = [
   { method: 'GET', path: '/sign-in', roles: [], public: true, handler: serveAppShell },
 
   // --- Applicant sign-in -----------------------------------------------------
+  {
+    // The only route that creates an applicant.
+    method: 'POST',
+    path: '/api/public/eligibility',
+    roles: [],
+    public: true,
+    handler: ({ request, env, ctx }) => submitEligibility(request, env, ctx),
+  },
   {
     method: 'POST',
     path: '/api/auth/request-link',
