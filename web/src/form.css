@@ -225,10 +225,67 @@
   margin-left: var(--space-2);
 }
 
+/* Long, multi-paragraph help collapses so the control stays next to its label. */
+.help-more {
+  font-size: var(--step--1);
+}
+
+.help-more > summary {
+  color: var(--blue-ink);
+  cursor: pointer;
+  padding: var(--space-1) 0;
+  /* A summary is the disclosure's control, so it needs a real target size. */
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  /* display:flex suppresses the browser's own marker, so draw one. Without it
+     the summary reads as a stray line of blue text rather than a control. */
+  list-style: none;
+}
+
+.help-more > summary::-webkit-details-marker {
+  display: none;
+}
+
+.help-more > summary::before {
+  content: '';
+  width: 0;
+  height: 0;
+  border-left: 5px solid currentColor;
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  transition: transform 120ms ease;
+}
+
+.help-more[open] > summary::before {
+  transform: rotate(90deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .help-more > summary::before {
+    transition: none;
+  }
+}
+
+.help-more > summary:focus-visible {
+  outline: 2px solid var(--blue-ink);
+  outline-offset: 2px;
+}
+
+.help-more > .help {
+  padding-bottom: var(--space-2);
+}
+
 .field .help {
   color: var(--ink-2);
   font-size: var(--step--1);
   margin: 0;
+  /* Help text is authored data. A program may write a multi-line explanation
+     (Inspire Change lists what each area of focus covers), and collapsing those
+     newlines turns it into an unreadable run-on. pre-line keeps the breaks and
+     still collapses accidental double spaces. */
+  white-space: pre-line;
 }
 
 /* Inputs. 16px minimum so iOS does not zoom on focus. */

@@ -40,8 +40,8 @@ function fullPayload(
     annual_operating_budget: '$825,000',
     project_title: 'Literacy Lab',
     requested_amount: '$25,000.07',
-    funding_type: 'program',
-    area_of_focus: 'youth_development',
+    funding_type: 'programs',
+    area_of_focus: 'education',
     counties_served: ['harris', 'fort_bend'],
     advancing_opportunity: 'We serve students in neighborhoods with limited access to tutoring.',
     project_summary: 'Youth mental health support paired with reading intervention for 400 students.',
@@ -52,7 +52,7 @@ function fullPayload(
     leadership_lived_experience: 'Our board includes parents and alumni of the program.',
     partial_funding_plan: 'We would reduce the number of sites from four to two.',
     volunteer_engagement: 'Reading buddy sessions and a back-to-school supply drive.',
-    itemized_budget: [{ attachment_id: atts.budget, filename: 'budget.pdf' }],
+    itemized_budget: 'Tutors $12,000. Materials $5,000. Evaluation $8,007.',
     financial_statements: [{ attachment_id: atts.fin, filename: 'audit-2025.pdf' }],
     operating_budget_doc: [{ attachment_id: atts.op, filename: 'operating.xlsx' }],
     marketing_opt_in: true,
@@ -281,22 +281,22 @@ describe('autosave', () => {
   it('clears an answer that is no longer visible', async () => {
     const s = await setup();
     await saveDraft(db, s.ctx, s.session, s.applicationId, {
-      area_of_focus: 'other',
-      area_of_focus_other: 'Arts education',
+      funding_type: 'other',
+      funding_type_other: 'Arts education',
     });
     let rows = await db
-      .prepare(`SELECT field_key FROM application_answers WHERE application_id = ? AND field_key='area_of_focus_other'`)
+      .prepare(`SELECT field_key FROM application_answers WHERE application_id = ? AND field_key='funding_type_other'`)
       .bind(s.applicationId)
       .all();
     expect(rows.results).toHaveLength(1);
 
     // Applicant changes their mind. The stale "other" detail must not survive.
     await saveDraft(db, s.ctx, s.session, s.applicationId, {
-      area_of_focus: 'education',
-      area_of_focus_other: 'Arts education',
+      funding_type: 'programs',
+      funding_type_other: 'Arts education',
     });
     rows = await db
-      .prepare(`SELECT field_key FROM application_answers WHERE application_id = ? AND field_key='area_of_focus_other'`)
+      .prepare(`SELECT field_key FROM application_answers WHERE application_id = ? AND field_key='funding_type_other'`)
       .bind(s.applicationId)
       .all();
     expect(rows.results).toHaveLength(0);

@@ -78,10 +78,10 @@ describe('seed artifact', () => {
     expect(amount.is_required).toBe(true);
     expect(amount.maps_to).toBe('requested_amount_cents');
     // validation_json survived the round trip through SQL literals.
-    expect(amount.validation.min_cents).toBe(500_000);
+    expect(amount.validation.min_cents).toBe(1_000_000);
 
     const counties = fields.find((f) => f.field_key === 'counties_served')!;
-    expect(counties.options.length).toBeGreaterThan(5);
+    expect(counties.options.length).toBe(18);
   });
 
   it('preserves the conditional wiring, not just the rows', async () => {
@@ -89,8 +89,8 @@ describe('seed artifact', () => {
     const def = await loadFormDefinition(db, seededId(`${INSPIRE_CHANGE.slug}/stage/application/form`));
     const fields = allFields(def);
 
-    const parent = fields.find((f) => f.field_key === 'area_of_focus')!;
-    const child = fields.find((f) => f.field_key === 'area_of_focus_other')!;
+    const parent = fields.find((f) => f.field_key === 'funding_type')!;
+    const child = fields.find((f) => f.field_key === 'funding_type_other')!;
 
     // A dangling conditional would still insert fine but silently break the
     // form, so the pointer is asserted rather than assumed.

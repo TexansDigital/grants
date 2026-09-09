@@ -146,11 +146,14 @@ describe('form loading and validation', () => {
     ]);
 
     const counties = allFields(def).find((f) => f.field_key === 'counties_served')!;
-    expect(counties.options.length).toBeGreaterThan(5);
+    // Exact: this list is the program's eligibility boundary, so a county
+    // quietly dropped from it silently makes real applicants ineligible.
+    expect(counties.options.length).toBe(18);
     expect(counties.options[0]).toHaveProperty('label');
 
     const amount = allFields(def).find((f) => f.field_key === 'requested_amount')!;
-    expect(amount.validation.min_cents).toBe(500_000);
+    expect(amount.validation.min_cents).toBe(1_000_000);
+    expect(amount.validation.max_cents).toBe(5_000_000);
   });
 
   it('lists every missing required field at once, not one at a time', async () => {
@@ -176,24 +179,24 @@ describe('form loading and validation', () => {
     const p = await seedProgram(db, ctx(), INSPIRE_CHANGE);
     const def = await loadFormDefinition(db, p.formDefinitionIds.application!);
 
-    // area_of_focus_other is required, but ONLY when area_of_focus is 'other'.
-    const notOther = validateSubmission(def, { area_of_focus: 'education' });
-    expect(notOther.errors.some((e) => e.field === 'area_of_focus_other')).toBe(false);
+    // funding_type_other is required, but ONLY when funding_type is 'other'.
+    const notOther = validateSubmission(def, { funding_type: 'programs' });
+    expect(notOther.errors.some((e) => e.field === 'funding_type_other')).toBe(false);
 
-    const isOther = validateSubmission(def, { area_of_focus: 'other' });
-    expect(isOther.errors.some((e) => e.field === 'area_of_focus_other')).toBe(true);
+    const isOther = validateSubmission(def, { funding_type: 'other' });
+    expect(isOther.errors.some((e) => e.field === 'funding_type_other')).toBe(true);
   });
 
   it('discards an answer to a field that is no longer visible', async () => {
     const p = await seedProgram(db, ctx(), INSPIRE_CHANGE);
     const def = await loadFormDefinition(db, p.formDefinitionIds.application!);
-    const otherField = allFields(def).find((f) => f.field_key === 'area_of_focus_other')!;
+    const otherField = allFields(def).find((f) => f.field_key === 'funding_type_other')!;
 
     // Applicant picked "other", typed a detail, then changed their mind. The
     // stale detail must not ship.
     const outcome = validateSubmission(def, {
-      area_of_focus: 'education',
-      area_of_focus_other: 'Stale answer from before',
+      funding_type: 'programs',
+      funding_type_other: 'Stale answer from before',
     });
     expect(outcome.hiddenFieldIds).toContain(otherField.id);
     expect(outcome.answers.has(otherField.id)).toBe(false);

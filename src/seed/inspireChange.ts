@@ -5,29 +5,61 @@
  * many, seeded through the same generic seeder as any other program. If any
  * behaviour in the system depends on this program specifically, that is a bug.
  *
- * SCOPE NOTE (flagged at build time): this is a STRUCTURALLY complete form
- * covering every field in the reference list, with every field type exercised.
- * It is NOT copy-faithful to the current Formstack form - exact labels, help
- * text, and option wording still need to come from the Formstack export. That
- * is content entry against these rows, not a schema change.
+ * Option lists, word limits, amount bounds, and upload limits below are taken
+ * from the live Formstack form. Where this file and Formstack disagree, this
+ * file is wrong: it is content entry against these rows, never a schema change.
+ *
+ * Labels and help text are still an approximation of Formstack's exact prose in
+ * places. Correcting those is more content entry, not a migration.
  */
 
 import type { ProgramSpec } from './types';
 
-/** The Houston-The Woodlands-Sugar Land MSA, plus two counties commonly served. */
+/**
+ * The eighteen counties Inspire Change funds. This is the program's eligibility
+ * boundary, not a geography lookup: an organization serving only counties
+ * outside this list is not eligible, so the list is deliberately exhaustive and
+ * deliberately owned by the program rather than by the platform.
+ */
 const GREATER_HOUSTON_COUNTIES = [
   'Austin',
   'Brazoria',
+  'Brazos',
+  'Burleson',
   'Chambers',
   'Fort Bend',
   'Galveston',
+  'Grimes',
   'Harris',
   'Liberty',
+  'Madison',
   'Montgomery',
+  'Robertson',
   'San Jacinto',
-  'Waller',
+  'Trinity',
   'Walker',
+  'Waller',
+  'Washington',
 ].map((c) => ({ value: c.toLowerCase().replace(/\s+/g, '_'), label: `${c} County` }));
+
+/**
+ * Descriptive text under the single "area of focus" select. These are examples
+ * of what each area covers, NOT sub-categories: there is one answer, and it is
+ * one of the five values below.
+ */
+const AREA_OF_FOCUS_HELP = [
+  'Examples of what each area covers. Choose the single closest fit.',
+  '',
+  'Education: tutoring and educational enrichment in underserved schools and communities; scholarships and college access support; support for first-generation college students; literacy services and resources; educational programs for youth.',
+  '',
+  'Criminal justice reform: relational policing; diversion and prevention programs; support for children with incarcerated parents; anti-recidivism support and re-entry services.',
+  '',
+  'Workforce and economic development: support for minority-owned and women-owned businesses; job training, workforce development, and pathways to employment.',
+  '',
+  'Community resources: poverty alleviation and financial stability programs; access to mental health support in underserved communities and schools; homelessness prevention, housing stability, and supportive services.',
+  '',
+  'Basic needs: food banks, soup kitchens, and meal distribution programs; homeless shelters, transitional housing, and affordable housing initiatives; utility assistance programs, including support with electricity, water, heating, and cooling costs.',
+].join('\n');
 
 export const INSPIRE_CHANGE: ProgramSpec = {
   slug: 'inspire-change',
@@ -212,8 +244,9 @@ export const INSPIRE_CHANGE: ProgramSpec = {
                 type: 'currency',
                 required: true,
                 mapsTo: 'requested_amount_cents',
-                validation: { min_cents: 500_000, max_cents: 10_000_000 },
-                help: 'Requests are typically between $5,000 and $100,000.',
+                validation: { min_cents: 1_000_000, max_cents: 5_000_000 },
+                help:
+                  'Requests should range from $10,000 to $50,000. Proposals outside of this range will not be considered.',
               },
               {
                 key: 'funding_type',
@@ -221,34 +254,37 @@ export const INSPIRE_CHANGE: ProgramSpec = {
                 type: 'select',
                 required: true,
                 options: [
-                  { value: 'program', label: 'Program or project support' },
-                  { value: 'general_operating', label: 'General operating support' },
-                  { value: 'capital', label: 'Capital' },
+                  { value: 'programs', label: 'Programs' },
                   { value: 'capacity_building', label: 'Capacity building' },
+                  { value: 'general_operating', label: 'General operating support' },
+                  { value: 'capital_campaign', label: 'Capital campaign' },
+                  { value: 'other', label: 'Other', triggers_other: true },
                 ],
+              },
+              {
+                key: 'funding_type_other',
+                label: 'Please describe the type of funding requested',
+                type: 'other_specify',
+                required: true,
+                conditionalOn: { fieldKey: 'funding_type', value: 'other' },
+                validation: { max_length: 120 },
               },
               {
                 key: 'area_of_focus',
                 label: 'Primary area of focus',
                 type: 'select',
                 required: true,
+                help: AREA_OF_FOCUS_HELP,
                 options: [
                   { value: 'education', label: 'Education' },
-                  { value: 'economic_opportunity', label: 'Economic opportunity' },
-                  { value: 'health_wellness', label: 'Health and wellness' },
-                  { value: 'youth_development', label: 'Youth development' },
-                  { value: 'criminal_justice', label: 'Criminal justice reform' },
-                  { value: 'police_community', label: 'Police and community relations' },
-                  { value: 'other', label: 'Other', triggers_other: true },
+                  { value: 'criminal_justice_reform', label: 'Criminal justice reform' },
+                  {
+                    value: 'workforce_economic_development',
+                    label: 'Workforce and economic development',
+                  },
+                  { value: 'community_resources', label: 'Community resources' },
+                  { value: 'basic_needs', label: 'Basic needs' },
                 ],
-              },
-              {
-                key: 'area_of_focus_other',
-                label: 'Please specify your area of focus',
-                type: 'other_specify',
-                required: true,
-                conditionalOn: { fieldKey: 'area_of_focus', value: 'other' },
-                validation: { max_length: 120 },
               },
               {
                 key: 'counties_served',
@@ -256,8 +292,21 @@ export const INSPIRE_CHANGE: ProgramSpec = {
                 type: 'multi_select',
                 required: true,
                 mapsTo: 'counties_served',
+                help:
+                  'Programs serving counties outside of the ones listed here are not eligible for funding.',
                 options: GREATER_HOUSTON_COUNTIES,
                 validation: { min: 1 },
+              },
+              {
+                // Formstack collects this as prose with a word limit, not as an
+                // attachment. Kept next to the amount it itemizes rather than in
+                // the narrative block, so a reviewer reads the two together.
+                key: 'itemized_budget',
+                label: 'Itemized spending budget for this request',
+                type: 'long_text',
+                required: true,
+                validation: { max_words: 500 },
+                help: 'How the requested funds would be spent, line by line.',
               },
             ],
           },
@@ -347,28 +396,21 @@ export const INSPIRE_CHANGE: ProgramSpec = {
             key: 'uploads',
             title: 'Documents',
             description:
-              'PDF, Word, Excel, or CSV, up to 15 MB each. You can replace a file any time before you submit.',
+              'PDF, Word, Excel, or CSV, up to 8 MB each. You can replace a file any time before you submit.',
             fields: [
               {
-                key: 'itemized_budget',
-                label: 'Itemized spending budget for this request',
-                type: 'file_upload',
-                required: true,
-                validation: { max_files: 1 },
-              },
-              {
                 key: 'financial_statements',
-                label: 'Most recent financial statements, audited if available',
+                label: 'Most recent financial statements, audited if possible',
                 type: 'file_upload',
                 required: true,
-                validation: { max_files: 2 },
+                validation: { max_files: 2, max_size_bytes: 8 * 1024 * 1024 },
               },
               {
                 key: 'operating_budget_doc',
                 label: 'Current year organizational operating budget',
                 type: 'file_upload',
                 required: true,
-                validation: { max_files: 1 },
+                validation: { max_files: 1, max_size_bytes: 8 * 1024 * 1024 },
               },
             ],
           },

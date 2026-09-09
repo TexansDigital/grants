@@ -102,10 +102,30 @@ export function Field({ field, value, error, onChange, onBlur }: FieldProps): Re
     </label>
   );
 
+  // Help text is authored per program and can run long: Inspire Change lists
+  // what each area of focus covers, which is six paragraphs. Rendering all of
+  // it inline pushes the control most of a screen below its own label, so
+  // anything past the first paragraph collapses into a disclosure. The split is
+  // on a blank line, which makes it the form author's decision rather than a
+  // character count guessing where the summary ends.
+  //
+  // Only the first paragraph is wired to aria-describedby. Content inside a
+  // closed <details> is hidden from assistive technology, so describing the
+  // control with it would promise a description that is not there.
+  const [helpLead, ...helpRest] = (field.help_text ?? '').split(/\n\s*\n/);
+  const helpDetail = helpRest.join('\n\n').trim();
   const help = field.help_text ? (
-    <p className="help" id={helpId ?? undefined}>
-      {field.help_text}
-    </p>
+    <>
+      <p className="help" id={helpId ?? undefined}>
+        {helpLead}
+      </p>
+      {helpDetail ? (
+        <details className="help-more">
+          <summary>More detail</summary>
+          <p className="help">{helpDetail}</p>
+        </details>
+      ) : null}
+    </>
   ) : null;
 
   const errorNode = error ? (

@@ -111,8 +111,8 @@ function payload(
     // NOT $25,000.07: that value survives float math exactly, which is how the
     // original end-to-end money test passed against a deliberately broken parser.
     requested_amount: '$19,999.99',
-    funding_type: 'program',
-    area_of_focus: 'youth_development',
+    funding_type: 'programs',
+    area_of_focus: 'education',
     counties_served: ['harris'],
     advancing_opportunity: 'Serving students.',
     project_summary: 'Reading support.',
@@ -122,7 +122,7 @@ function payload(
     estimated_individuals_count: '400',
     leadership_lived_experience: 'Board includes parents.',
     partial_funding_plan: 'Fewer sites.',
-    itemized_budget: [{ attachment_id: atts.budget, filename: 'budget.pdf' }],
+    itemized_budget: 'Tutors $12,000. Materials $5,000. Evaluation $2,999.99.',
     financial_statements: [{ attachment_id: atts.fin, filename: 'audit.pdf' }],
     operating_budget_doc: [{ attachment_id: atts.op, filename: 'op.xlsx' }],
     marketing_opt_in: true,
@@ -172,16 +172,16 @@ describe('HIGH: partial autosave must not destroy answers it never saw', () => {
   it('keeps a conditional answer when a different section is saved', async () => {
     const s = await scenario();
     await saveDraft(db, s.ctx, s.session, s.applicationId, {
-      area_of_focus: 'other',
-      area_of_focus_other: 'Disaster relief logistics',
+      funding_type: 'other',
+      funding_type_other: 'Disaster relief logistics',
     });
 
-    // Autosave of an unrelated section. The parent of area_of_focus_other is
+    // Autosave of an unrelated section. The parent of funding_type_other is
     // simply absent from this payload; that is not the applicant clearing it.
     await saveDraft(db, s.ctx, s.session, s.applicationId, { project_title: 'Literacy Lab' });
 
     const row = await db
-      .prepare(`SELECT value_text AS v FROM application_answers WHERE application_id=? AND field_key='area_of_focus_other'`)
+      .prepare(`SELECT value_text AS v FROM application_answers WHERE application_id=? AND field_key='funding_type_other'`)
       .bind(s.applicationId)
       .first<{ v: string }>();
     expect(row?.v).toBe('Disaster relief logistics');
@@ -190,13 +190,13 @@ describe('HIGH: partial autosave must not destroy answers it never saw', () => {
   it('still clears it when the applicant actually changes the parent', async () => {
     const s = await scenario();
     await saveDraft(db, s.ctx, s.session, s.applicationId, {
-      area_of_focus: 'other',
-      area_of_focus_other: 'Arts education',
+      funding_type: 'other',
+      funding_type_other: 'Arts education',
     });
-    await saveDraft(db, s.ctx, s.session, s.applicationId, { area_of_focus: 'education' });
+    await saveDraft(db, s.ctx, s.session, s.applicationId, { funding_type: 'programs' });
 
     const rows = await db
-      .prepare(`SELECT 1 FROM application_answers WHERE application_id=? AND field_key='area_of_focus_other'`)
+      .prepare(`SELECT 1 FROM application_answers WHERE application_id=? AND field_key='funding_type_other'`)
       .bind(s.applicationId)
       .all();
     expect(rows.results).toHaveLength(0);
@@ -208,8 +208,8 @@ describe('HIGH: partial autosave must not destroy answers it never saw', () => {
   it('mechanism 1: stored answers seed the visibility computation', async () => {
     const s = await scenario();
     const def = await loadFormDefinition(db, s.program.formDefinitionIds.application!);
-    const parent = allFields(def).find((f) => f.field_key === 'area_of_focus')!;
-    const child = allFields(def).find((f) => f.field_key === 'area_of_focus_other')!;
+    const parent = allFields(def).find((f) => f.field_key === 'funding_type')!;
+    const child = allFields(def).find((f) => f.field_key === 'funding_type_other')!;
 
     // Parent answered previously, absent from this payload. Checked in
     // NON-partial mode, where the parent-was-posted guard does not apply, so
@@ -222,7 +222,7 @@ describe('HIGH: partial autosave must not destroy answers it never saw', () => {
   it('mechanism 2: a parent absent from the request never clears its child', async () => {
     const s = await scenario();
     const def = await loadFormDefinition(db, s.program.formDefinitionIds.application!);
-    const child = allFields(def).find((f) => f.field_key === 'area_of_focus_other')!;
+    const child = allFields(def).find((f) => f.field_key === 'funding_type_other')!;
 
     // No stored answers supplied at all: the parent is unknown, not "cleared".
     const outcome = validateSubmission(def, { project_title: 'x' }, { partial: true });
@@ -232,10 +232,10 @@ describe('HIGH: partial autosave must not destroy answers it never saw', () => {
   it('records what it cleared, so the text is recoverable from the audit trail', async () => {
     const s = await scenario();
     await saveDraft(db, s.ctx, s.session, s.applicationId, {
-      area_of_focus: 'other',
-      area_of_focus_other: 'Recoverable text',
+      funding_type: 'other',
+      funding_type_other: 'Recoverable text',
     });
-    await saveDraft(db, s.ctx, s.session, s.applicationId, { area_of_focus: 'education' });
+    await saveDraft(db, s.ctx, s.session, s.applicationId, { funding_type: 'programs' });
 
     const audit = await db
       .prepare(
@@ -306,7 +306,7 @@ describe('HIGH: attachment references are validated against the owning organizat
     const s = await scenario();
     await expect(
       submitApplication(db, s.ctx, s.session, s.applicationId,
-        payload(s.atts, { itemized_budget: [{ attachment_id: 'made-up-id', filename: 'x.pdf' }] })),
+        payload(s.atts, { operating_budget_doc: [{ attachment_id: 'made-up-id', filename: 'x.pdf' }] })),
     ).rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
   });
 
@@ -315,9 +315,18 @@ describe('HIGH: attachment references are validated against the owning organizat
     await submitApplication(db, s.ctx, s.session, s.applicationId, payload(s.atts));
     const row = await db
       .prepare(`SELECT parent_id FROM attachments WHERE id=?`)
-      .bind(s.atts.budget)
+      .bind(s.atts.fin)
       .first<{ parent_id: string }>();
     expect(row?.parent_id).toBe(s.applicationId);
+
+    // atts.budget belongs to the same organization but is referenced by no
+    // answer, so claiming must leave it alone. Without this, "claim everything
+    // this org owns" would pass the assertion above.
+    const unclaimed = await db
+      .prepare(`SELECT parent_id FROM attachments WHERE id=?`)
+      .bind(s.atts.budget)
+      .first<{ parent_id: string | null }>();
+    expect(unclaimed?.parent_id).toBeNull();
   });
 });
 

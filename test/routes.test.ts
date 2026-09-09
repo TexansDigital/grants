@@ -309,7 +309,7 @@ describe('authenticated staff endpoints', () => {
     const amount = fields.find((f) => f.field_key === 'requested_amount')!;
     expect(amount.field_type).toBe('currency');
     expect(amount.is_required).toBe(true);
-    expect((amount.validation as Record<string, unknown>).min_cents).toBe(500_000);
+    expect((amount.validation as Record<string, unknown>).min_cents).toBe(1_000_000);
 
     // No applicant data of any kind is present.
     const json = JSON.stringify(body);
