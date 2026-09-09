@@ -53,7 +53,22 @@ export interface Route {
   handler: RouteHandler;
   /** Public routes run with no session and no Access check. */
   public?: true;
+  /**
+   * WHICH sign-in this route accepts. Default 'staff' (Cloudflare Access).
+   *
+   * 'applicant' means the magic-link session cookie instead. The two are
+   * genuinely separate front doors on separate hostnames, and a route must
+   * name the one it expects -- a handler written for an applicant session that
+   * silently accepted an Access assertion, or the reverse, is the kind of
+   * confusion that ends with the wrong person reading a financial statement.
+   *
+   * Ignored when `public` is set.
+   */
+  auth?: 'staff' | 'applicant';
 }
+
+/** External roles that hold a magic-link session. */
+export const EXTERNAL_USER: readonly Role[] = ['applicant', 'grantee'];
 
 /** Every staff role that may change configuration. Admin only, deliberately. */
 export const ADMIN_ONLY: readonly Role[] = ['admin'];

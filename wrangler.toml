@@ -85,6 +85,11 @@ ACCESS_AUD = "25afd7973df7c8d398d252df5aa7b5886bdff3b54b34168b3a752b24dda7b15d"
 # preview, so a preview run records sends as 'suppressed' and mails nobody.
 EMAIL_FROM = "Houston Texans Foundation <grants@houstontexansfoundation.org>"
 EMAIL_REPLY_TO = "grants@houstontexansfoundation.org"
+# Where applicants sign in. Sign-in links are built from THIS value, never from
+# the request's Host header -- a Host is attacker-controlled, and a magic link
+# built from one would send an applicant to an address of the attacker's
+# choosing carrying a live token.
+APPLICANT_BASE_URL = "https://applications.houstontexansfoundation.org"
 # Turnstile / Resend / Eloqua / R2 signing credentials are Wrangler SECRETS.
 # They are never listed here. See docs/SECRETS.md.
 
@@ -156,6 +161,7 @@ ACCESS_AUD = ""
 # EMAIL_FROM makes a send throw rather than silently pick a default.
 EMAIL_FROM = ""
 EMAIL_REPLY_TO = ""
+APPLICANT_BASE_URL = ""
 
 [[env.staging.d1_databases]]
 binding = "DB"
@@ -196,6 +202,7 @@ ENVIRONMENT = "production"
 DISPLAY_TIMEZONE = "America/Chicago"
 EMAIL_FROM = "Houston Texans Foundation <grants@houstontexansfoundation.org>"
 EMAIL_REPLY_TO = "grants@houstontexansfoundation.org"
+APPLICANT_BASE_URL = "https://applications.houstontexansfoundation.org"
 
 [[env.production.d1_databases]]
 binding = "DB"

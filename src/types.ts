@@ -30,6 +30,23 @@ export interface Env {
    * published, or mail will be filed as spam no matter what this code does.
    */
   RESEND_API_KEY?: string;
+  /**
+   * Turnstile. A secret, so absent unless deliberately set.
+   *
+   * lib/turnstile.ts fails CLOSED on production when this is missing and skips
+   * elsewhere, so forgetting it cannot silently ship a public form with no bot
+   * protection, and a preview run still works without a Cloudflare account.
+   */
+  TURNSTILE_SECRET_KEY?: string;
+  /**
+   * Origin applicants reach, e.g. https://applications.houstontexansfoundation.org.
+   *
+   * Used to build sign-in links. NOT derived from the incoming request: a
+   * Host header is attacker-controlled, and a magic link built from one would
+   * send the applicant somewhere of the attacker's choosing carrying a live
+   * token. Configured, not inferred.
+   */
+  APPLICANT_BASE_URL?: string;
   EMAIL_FROM?: string;
   EMAIL_REPLY_TO?: string;
   /**

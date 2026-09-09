@@ -20,6 +20,10 @@ import { newRequestId } from './lib/ids';
 import { AppError, logError, notFound, toErrorResponse, validationFailed } from './lib/errors';
 import { nowIso, formatInZone } from './lib/time';
 import { securityHeaders, htmlHeaders } from './lib/httpHeaders';
+import { readSessionCookie, resolveSession } from './lib/sessions';
+import {
+  requestSignInLink, renderVerifyInterstitial, completeSignIn, signOutRoute,
+} from './lib/authRoutes';
 import { requireStaffSession } from './lib/auth';
 import { loadFormDefinition } from './lib/loadForm';
 import {
@@ -32,6 +36,7 @@ import { searchApplications } from './lib/search';
 import {
   ADMIN_ONLY,
   STAFF_READ,
+  EXTERNAL_USER,
   authorizeRoute,
   methodNotAllowed,
   resolve,
@@ -131,6 +136,55 @@ const routes: readonly Route[] = [
   // catch-all, so a mistyped URL still 404s and a real 404 stays visible in the
   // logs.
   { method: 'GET', path: '/', roles: [], public: true, handler: serveAppShell },
+  { method: 'GET', path: '/sign-in', roles: [], public: true, handler: serveAppShell },
+
+  // --- Applicant sign-in -----------------------------------------------------
+  {
+    method: 'POST',
+    path: '/api/auth/request-link',
+    roles: [],
+    public: true,
+    handler: ({ request, env, ctx }) => requestSignInLink(request, env, ctx),
+  },
+  {
+    // Consumes NOTHING. A mail scanner's GET must not spend the link; only
+    // the POST from the button on this page redeems it.
+    method: 'GET',
+    path: '/auth/verify',
+    roles: [],
+    public: true,
+    handler: async ({ url }) => renderVerifyInterstitial(url),
+  },
+  {
+    method: 'POST',
+    path: '/api/auth/verify',
+    roles: [],
+    public: true,
+    handler: ({ request, env, ctx }) => completeSignIn(request, env, ctx),
+  },
+  {
+    method: 'POST',
+    path: '/api/auth/sign-out',
+    roles: EXTERNAL_USER,
+    auth: 'applicant',
+    handler: ({ request, env, ctx, session }) => signOutRoute(request, env, ctx, session),
+  },
+  {
+    method: 'GET',
+    path: '/api/me',
+    roles: EXTERNAL_USER,
+    auth: 'applicant',
+    handler: async ({ session }) =>
+      new Response(
+        JSON.stringify({
+          // Deliberately minimal. An applicant endpoint returns the applicant's
+          // own identity and nothing about the organization's applications --
+          // those have their own scoped routes.
+          user: { email: session.email, role: session.role },
+        }),
+        { headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } },
+      ),
+  },
   { method: 'GET', path: '/forms/:id', roles: [], public: true, handler: serveAppShell },
 
   // ---- session -------------------------------------------------------------
@@ -425,10 +479,26 @@ async function dispatch(request: Request, env: Env, ctx: RequestContext): Promis
     return route.handler({ request, env, ctx, url, params, session: NO_SESSION });
   }
 
-  // Authenticate BEFORE authorizing: a caller with no valid Access assertion
-  // gets 401, never a 403 that would confirm the route exists to someone who
-  // has not signed in.
-  const session: Session = await requireStaffSession(request, env, ctx);
+  // Authenticate BEFORE authorizing: a caller with no valid session gets 401,
+  // never a 403 that would confirm the route exists to someone who has not
+  // signed in.
+  let session: Session;
+  if (route.auth === 'applicant') {
+    // The magic-link door. Deliberately NOT a fallback from the staff check:
+    // a route names one front door, and trying the other on failure is how a
+    // handler ends up serving the wrong kind of caller.
+    const cookie = readSessionCookie(request);
+    const resolved = cookie ? await resolveSession(env, cookie) : null;
+    if (!resolved) {
+      throw new AppError('UNAUTHENTICATED', 'Please sign in to continue.', {
+        internalMessage: cookie ? 'session cookie did not resolve' : 'no session cookie',
+        severity: 'warn',
+      });
+    }
+    session = resolved;
+  } else {
+    session = await requireStaffSession(request, env, ctx);
+  }
   ctx.session = session;
   authorizeRoute(route, session);
 

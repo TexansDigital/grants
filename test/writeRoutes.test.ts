@@ -5,7 +5,7 @@ import { db } from './helpers';
 import { __resetJwksCache, ACCESS_JWT_HEADER } from '../src/lib/access';
 import { newId } from '../src/lib/ids';
 import { nowIso } from '../src/lib/time';
-import { resolve, ADMIN_ONLY } from '../src/lib/router';
+import { resolve, ADMIN_ONLY, EXTERNAL_USER } from '../src/lib/router';
 import type { Env } from '../src/types';
 
 /**
@@ -169,11 +169,35 @@ describe('the route table', () => {
     expect(resolve(routes, 'GET', '/api/forms/abc/def').kind).toBe('not_found');
   });
 
-  it('writes are admin-only in the table itself, not only at runtime', () => {
-    const writes = routes.filter((r) => r.method !== 'GET' && !r.public);
+  it('STAFF writes are admin-only in the table itself, not only at runtime', () => {
+    const writes = routes.filter(
+      (r) => r.method !== 'GET' && !r.public && (r.auth ?? 'staff') === 'staff',
+    );
     expect(writes.length).toBeGreaterThan(0);
     for (const w of writes) {
       expect(w.roles, `${w.method} ${w.path} is not admin-only`).toEqual(ADMIN_ONLY);
+    }
+  });
+
+  it('applicant routes admit external roles ONLY, and never a staff role', () => {
+    // The counterpart to the rule above, added when the magic-link door
+    // appeared. Without it, a route marked auth:'applicant' could list an
+    // admin role and the table would look fine.
+    const applicantRoutes = routes.filter((r) => r.auth === 'applicant');
+    expect(applicantRoutes.length).toBeGreaterThan(0);
+    for (const r of applicantRoutes) {
+      expect(r.roles, `${r.method} ${r.path}`).toEqual(EXTERNAL_USER);
+      expect(r.public, `${r.method} ${r.path} is both public and applicant-authed`).toBeUndefined();
+    }
+  });
+
+  it('every route names a door: public, applicant, or staff', () => {
+    for (const r of routes) {
+      const doors = [r.public === true, r.auth === 'applicant'].filter(Boolean).length;
+      expect(doors, `${r.method} ${r.path} claims more than one kind of access`).toBeLessThan(2);
+      // A non-public route with no roles could never be reached by anyone,
+      // which is more likely a mistake than an intention.
+      if (!r.public) expect(r.roles.length, `${r.method} ${r.path} has no roles`).toBeGreaterThan(0);
     }
   });
 });
