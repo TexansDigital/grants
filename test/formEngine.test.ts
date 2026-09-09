@@ -142,7 +142,7 @@ describe('form loading and validation', () => {
 
     expect(def.status).toBe('published');
     expect(def.sections.map((s) => s.section_key)).toEqual([
-      'eligibility', 'contact', 'organization', 'request', 'narrative', 'uploads', 'optin',
+      'contact', 'organization', 'request', 'narrative', 'uploads', 'confirmation', 'optin',
     ]);
 
     const counties = allFields(def).find((f) => f.field_key === 'counties_served')!;
@@ -170,9 +170,18 @@ describe('form loading and validation', () => {
   it('treats an unchecked required attestation as an explicit failure', async () => {
     const p = await seedProgram(db, ctx(), INSPIRE_CHANGE);
     const def = await loadFormDefinition(db, p.formDefinitionIds.application!);
-    const outcome = validateSubmission(def, { entity_type_confirmation: false });
-    const err = outcome.errors.find((e) => e.field === 'entity_type_confirmation');
+    // The application form re-attests to the guidelines; entity type and
+    // authorization are settled at the eligibility stage now, so that one is
+    // asserted on the eligibility form below.
+    const outcome = validateSubmission(def, { guidelines_attestation: false });
+    const err = outcome.errors.find((e) => e.field === 'guidelines_attestation');
     expect(err?.message).toContain('You must confirm');
+
+    const elig = await loadFormDefinition(db, p.formDefinitionIds.eligibility!);
+    const eligOutcome = validateSubmission(elig, { entity_type_confirmation: false });
+    expect(
+      eligOutcome.errors.find((e) => e.field === 'entity_type_confirmation')?.message,
+    ).toContain('You must confirm');
   });
 
   it('does not require a hidden conditional field', async () => {

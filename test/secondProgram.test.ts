@@ -59,9 +59,15 @@ describe('a second program requires zero schema changes', () => {
     const loiDef = await loadFormDefinition(db, second.formDefinitionIds.loi!);
     const fullDef = await loadFormDefinition(db, second.formDefinitionIds.full!);
 
-    // Different stage counts.
-    expect(Object.keys(first.stageIds)).toHaveLength(1);
-    expect(Object.keys(second.stageIds)).toHaveLength(2);
+    // Different stage KEYS. Both programs are two-stage now that Inspire
+    // Change gained an eligibility screen, so a count no longer distinguishes
+    // them -- and a count never proved much anyway. What matters is that the
+    // stage vocabulary is per-program data with nothing in common.
+    expect(Object.keys(first.stageIds).sort()).toEqual(['application', 'eligibility']);
+    expect(Object.keys(second.stageIds).sort()).toEqual(['full', 'loi']);
+    expect(
+      Object.keys(first.stageIds).some((k) => Object.keys(second.stageIds).includes(k)),
+    ).toBe(false);
 
     // Different section keys.
     const firstSections = firstDef.sections.map((s) => s.section_key);
@@ -83,19 +89,64 @@ describe('a second program requires zero schema changes', () => {
     expect(lintFormDefinition(fullDef)).toEqual([]);
   });
 
-  it('records the stage gate that Inspire Change does not have', async () => {
+  it('records the stage gate as per-program data, under different stage names', async () => {
+    // This test used to read "the gate Inspire Change does not have". Inspire
+    // Change has one now, so that contrast is gone -- but the property it was
+    // reaching for survives and is what gets asserted instead: the gate is a
+    // column, not a branch. Two programs express the same shape (an open first
+    // stage gating a second) using completely different stage keys, with no
+    // code that knows either vocabulary.
+    const first = await seedProgram(db, ctx(), INSPIRE_CHANGE);
     const second = await seedProgram(db, ctx(), SECOND_PROGRAM);
-    const rows = await db
-      .prepare(
-        `SELECT stage_key, gate_on_prior_decision AS gate
-           FROM program_stages WHERE id IN (?,?) ORDER BY sort_order`,
-      )
-      .bind(second.stageIds.loi!, second.stageIds.full!)
-      .all<{ stage_key: string; gate: number }>();
-    expect(rows.results).toEqual([
+
+    const gates = async (...ids: string[]) =>
+      (
+        await db
+          .prepare(
+            `SELECT stage_key, gate_on_prior_decision AS gate
+               FROM program_stages WHERE id IN (${ids.map(() => '?').join(',')})
+              ORDER BY sort_order`,
+          )
+          .bind(...ids)
+          .all<{ stage_key: string; gate: number }>()
+      ).results;
+
+    expect(await gates(first.stageIds.eligibility!, first.stageIds.application!)).toEqual([
+      { stage_key: 'eligibility', gate: 0 },
+      { stage_key: 'application', gate: 1 },
+    ]);
+    expect(await gates(second.stageIds.loi!, second.stageIds.full!)).toEqual([
       { stage_key: 'loi', gate: 0 },
       { stage_key: 'full', gate: 1 },
     ]);
+  });
+
+  it('lets each stage set its own promotion requirements', async () => {
+    // The axis that made the eligibility screen possible. A short first stage
+    // must not be forced to collect a requested amount and counties served
+    // just because the full application does -- that would rebuild the wall
+    // the screen exists to remove.
+    const first = await seedProgram(db, ctx(), INSPIRE_CHANGE);
+    const rows = await db
+      .prepare(
+        `SELECT fd.form_key AS k, fd.required_maps_to_json AS req
+           FROM form_definitions fd WHERE fd.program_id = ? ORDER BY fd.form_key`,
+      )
+      .bind(first.programId)
+      .all<{ k: string; req: string | null }>();
+
+    const byKey = new Map(rows.results.map((r) => [r.k, r.req]));
+    expect(JSON.parse(byKey.get('eligibility')!)).toEqual([
+      'organization_name', 'ein', 'primary_contact_email',
+    ]);
+    // NULL means "inherit the program's list", which is the full universal set.
+    expect(byKey.get('application')).toBeNull();
+
+    // And the narrow list is genuinely narrower: the eligibility form does not
+    // collect an amount, and publishing it is still allowed.
+    const elig = await loadFormDefinition(db, first.formDefinitionIds.eligibility!);
+    expect(allFields(elig).some((f) => f.maps_to === 'requested_amount_cents')).toBe(false);
+    expect(elig.status).toBe('published');
   });
 
   it('validates a second-program submission through the same engine', async () => {

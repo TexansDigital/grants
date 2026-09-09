@@ -56,7 +56,7 @@ describe('seed artifact', () => {
 
     expect(def.status).toBe('published');
     expect(def.sections.map((s) => s.section_key)).toEqual([
-      'eligibility', 'contact', 'organization', 'request', 'narrative', 'uploads', 'optin',
+      'contact', 'organization', 'request', 'narrative', 'uploads', 'confirmation', 'optin',
     ]);
 
     // The artifact must satisfy the same gates a live publish does.
@@ -69,8 +69,10 @@ describe('seed artifact', () => {
     const def = await loadFormDefinition(db, seededId(`${INSPIRE_CHANGE.slug}/stage/application/form`));
     const fields = allFields(def);
 
-    const specFieldCount = INSPIRE_CHANGE.stages[0]!.form.sections.reduce(
-      (n, s) => n + s.fields.length, 0);
+    // By key, not by index: this program now has two stages, and an index
+    // silently counted the wrong form's fields when the second was added.
+    const appStage = INSPIRE_CHANGE.stages.find((st) => st.key === 'application')!;
+    const specFieldCount = appStage.form.sections.reduce((n, s) => n + s.fields.length, 0);
     expect(fields).toHaveLength(specFieldCount);
 
     const amount = fields.find((f) => f.field_key === 'requested_amount')!;
@@ -167,7 +169,7 @@ describe('seed artifact', () => {
 
     const row = await db
       .prepare(`SELECT title FROM form_sections WHERE id = ?`)
-      .bind(seededId('quote-program/stage/application/section/eligibility'))
+      .bind(seededId('quote-program/stage/eligibility/section/eligibility'))
       .first<{ title: string }>();
     expect(row?.title).toBe("Bob's \"eligibility\" section; DROP TABLE programs;--");
 

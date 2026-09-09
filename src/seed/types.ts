@@ -35,6 +35,15 @@ export interface StageSpec {
   name: string;
   /** Applicant may not begin this stage until the prior stage has a decision. */
   gateOnPriorDecision?: boolean;
+  /**
+   * Promotion targets THIS stage's form must collect before it can be
+   * published. Omit to inherit the program's list.
+   *
+   * A multi-stage program needs this: an eligibility screen or an LOI collects
+   * far less than the full application it gates, and requiring the whole
+   * universal set on the short form is the opposite of failing fast.
+   */
+  requiredMapsTo?: MapsToTarget[];
   form: {
     name: string;
     sections: SectionSpec[];

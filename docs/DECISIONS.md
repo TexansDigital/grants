@@ -447,3 +447,46 @@ not re-drivable — a corrupt row is not a licence to send.
 **Still not built:** nothing surfaces rows that fail to re-drive repeatedly.
 That belongs with the data-health view (roadmap item 20).
 
+## §21 — Promotion requirements belong to the form, not the program
+
+**Decided 2026-09-09. Forced by §13.**
+
+`programs.required_maps_to_json` lists the `maps_to` targets a form must
+collect before it may be published. That was correct while every program had
+one stage. It stops being correct the moment a program has two, because the
+gate is enforced **per form definition** — at seed pre-flight
+(`seedProgram.ts`) and again at publish.
+
+Implementing §13 without changing this would have required the Inspire Change
+eligibility screen to collect a requested amount and a list of counties served
+before it was allowed to exist. That is the thirty-four-field wall §13 exists
+to remove, rebuilt on the screen designed to remove it.
+
+Migration 0009 adds a nullable `form_definitions.required_maps_to_json`, and
+`StageSpec` gains an optional `requiredMapsTo`. **NULL inherits the program's
+list**, so nothing changes for a single-stage program and no existing row moves.
+
+Inspire Change now sets `['organization_name', 'ein', 'primary_contact_email']`
+on the eligibility form and leaves the application form inheriting the full
+universal set.
+
+**Why the application form still collects the identity fields**, having already
+asked for them at eligibility: promotion writes to the `applications` row at
+submit, and each stage has its own row. If the full application did not collect
+EIN and legal name, its row would carry neither, and cross-program reporting
+would be reading the eligibility row for identity and the application row for
+everything else. The applicant confirms prefilled values rather than retyping
+them, which is CLAUDE.md's submission-flow step 4 anyway.
+
+**This is not Inspire Change bending the platform.** CLAUDE.md names "LOI then
+invited full application" as a supported shape, and an LOI genuinely cannot
+collect a reliable requested amount. The single program-wide list was a latent
+bug that the first two-stage program was always going to hit.
+
+**Cost paid in the test suite.** `secondProgram.test.ts` asserted that Inspire
+Change had one stage and no gate, as the contrast proving stage structure is
+data. Both halves are now false. The assertions were rewritten to the property
+they were reaching for rather than deleted: two programs express the same shape
+— an open first stage gating a second — under completely different stage
+vocabularies, with no code that knows either.
+

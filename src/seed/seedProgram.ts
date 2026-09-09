@@ -161,12 +161,26 @@ export async function seedProgram(
         .prepare(
           `INSERT INTO form_definitions (
              id, program_id, form_key, stage_id, kind, name, version, status,
-             created_at, updated_at
-           ) VALUES (?,?,?,?,?,?,?,?,?,?)`,
+             required_maps_to_json, created_at, updated_at
+           ) VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
         )
         // form_key identifies the form within the program independently of
         // stage, so a program can later carry interim AND final report forms.
-        .bind(formDefinitionId, programId, stage.key, stageId, 'application', stage.form.name, 1, 'draft', now, now),
+        .bind(
+          formDefinitionId,
+          programId,
+          stage.key,
+          stageId,
+          'application',
+          stage.form.name,
+          1,
+          'draft',
+          // NULL inherits the program's list, which is what a single-stage
+          // program should keep doing.
+          stage.requiredMapsTo ? JSON.stringify(stage.requiredMapsTo) : null,
+          now,
+          now,
+        ),
       auditStatement(db, ctx, {
         action: 'form_definition.created',
         entityType: 'form_definition',
@@ -278,7 +292,10 @@ export async function seedProgram(
     // Pre-flight the configuration BEFORE writing. A program that cannot be
     // published is a program an admin has to debug at 11pm on launch day.
     assertNoDuplicateTargets(preflightFields);
-    assertUniversalCoverage(preflightFields, spec.requiredMapsTo ?? DEFAULT_REQUIRED_MAPS_TO);
+    assertUniversalCoverage(
+      preflightFields,
+      stage.requiredMapsTo ?? spec.requiredMapsTo ?? DEFAULT_REQUIRED_MAPS_TO,
+    );
   }
 
   // ---- cycles ---------------------------------------------------------------
@@ -352,8 +369,13 @@ export async function publishFormDefinition(
   if (definition.kind === 'application') {
     // The required set is the PROGRAM's, not a global constant.
     const program = await db
-      .prepare(`SELECT required_maps_to_json AS req FROM programs WHERE id = ?`)
-      .bind(definition.program_id)
+      .prepare(
+        `SELECT COALESCE(
+                  (SELECT required_maps_to_json FROM form_definitions WHERE id = ?),
+                  (SELECT required_maps_to_json FROM programs WHERE id = ?)
+                ) AS req`,
+      )
+      .bind(definition.id, definition.program_id)
       .first<{ req: string }>();
     let required: string[] = [...DEFAULT_REQUIRED_MAPS_TO];
     if (program?.req) {

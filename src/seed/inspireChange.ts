@@ -13,7 +13,7 @@
  * places. Correcting those is more content entry, not a migration.
  */
 
-import type { ProgramSpec } from './types';
+import type { ProgramSpec, StageSpec } from './types';
 
 /**
  * The eighteen counties Inspire Change funds. This is the program's eligibility
@@ -61,6 +61,115 @@ const AREA_OF_FOCUS_HELP = [
   'Basic needs: food banks, soup kitchens, and meal distribution programs; homeless shelters, transitional housing, and affordable housing initiatives; utility assistance programs, including support with electricity, water, heating, and cooling costs.',
 ].join('\n');
 
+/**
+ * Stage 1: the eligibility screen (decision 13).
+ *
+ * Short on purpose. Its job is to fail fast, and to collect exactly the three
+ * facts needed to identify who is applying -- legal name, EIN, and an email --
+ * so that passing it can resolve an organization, create a contact and a user,
+ * and send a sign-in link. An organization that is not eligible never sees the
+ * thirty-odd fields behind it.
+ *
+ * `requiredMapsTo` narrows the promotion gate for THIS form only. The default
+ * universal set includes a requested amount and counties served, which an
+ * eligibility screen has no business asking for -- requiring them here would
+ * rebuild the very wall this stage exists to remove.
+ */
+const ELIGIBILITY_STAGE: StageSpec = {
+  key: 'eligibility',
+  name: 'Eligibility',
+  requiredMapsTo: ['organization_name', 'ein', 'primary_contact_email'],
+  form: {
+    name: 'Inspire Change Eligibility Screen',
+    sections: [
+      {
+        key: 'eligibility',
+        title: 'Eligibility',
+        description:
+          'Three questions. If your organization is not eligible we will tell you now, rather than after an hour of typing.',
+        fields: [
+          {
+            key: 'entity_type_confirmation',
+            label:
+              'My organization is a 501(c)(3) nonprofit, a school, a university, or a government entity.',
+            type: 'checkbox_attestation',
+            required: true,
+          },
+          {
+            key: 'guidelines_attestation',
+            label:
+              'I have read the program guidelines and funding criteria, and my request meets them.',
+            type: 'checkbox_attestation',
+            required: true,
+          },
+          {
+            key: 'authorization_attestation',
+            label:
+              'I am authorized to submit this application on behalf of my organization.',
+            type: 'checkbox_attestation',
+            required: true,
+          },
+        ],
+      },
+      {
+        key: 'organization_identity',
+        title: 'Your organization',
+        description: 'We use these to find your organization if you have applied before.',
+        fields: [
+          {
+            key: 'organization_name',
+            label: 'Organization legal name',
+            type: 'short_text',
+            required: true,
+            mapsTo: 'organization_name',
+            help: 'Use the name exactly as it appears on your IRS determination letter.',
+            validation: { max_length: 200 },
+          },
+          {
+            key: 'ein',
+            label: 'EIN',
+            type: 'short_text',
+            required: true,
+            mapsTo: 'ein',
+            help: 'Nine digits, with or without the dash. For example 76-1234567.',
+            validation: { pattern: '^\\d{2}-?\\d{7}$' },
+          },
+        ],
+      },
+      {
+        key: 'contact_identity',
+        title: 'You',
+        fields: [
+          {
+            key: 'contact_first_name',
+            label: 'First name',
+            type: 'short_text',
+            required: true,
+            mapsTo: 'contact_first_name',
+            validation: { max_length: 100 },
+          },
+          {
+            key: 'contact_last_name',
+            label: 'Last name',
+            type: 'short_text',
+            required: true,
+            mapsTo: 'contact_last_name',
+            validation: { max_length: 100 },
+          },
+          {
+            key: 'contact_email',
+            label: 'Email address',
+            type: 'email',
+            required: true,
+            mapsTo: 'primary_contact_email',
+            help: 'We send your sign-in link here. No password to remember.',
+          },
+        ],
+      },
+    ],
+  },
+};
+
 export const INSPIRE_CHANGE: ProgramSpec = {
   slug: 'inspire-change',
   name: 'Inspire Change',
@@ -73,43 +182,18 @@ export const INSPIRE_CHANGE: ProgramSpec = {
   guidelinesVersion: '2026.1',
 
   stages: [
+    ELIGIBILITY_STAGE,
     {
       key: 'application',
       name: 'Application',
+      // Gated: the full application opens only once eligibility is decided.
+      // This is the property decision 13 bought, and the multi-stage path the
+      // form engine was built for.
+      gateOnPriorDecision: true,
       form: {
         name: 'Inspire Change Application',
         sections: [
           // -------------------------------------------------------------------
-          {
-            key: 'eligibility',
-            title: 'Eligibility and attestations',
-            description:
-              'Confirm your organization is eligible before you begin. These take about a minute.',
-            fields: [
-              {
-                key: 'entity_type_confirmation',
-                label:
-                  'My organization is a 501(c)(3) nonprofit, a school, a university, or a government entity.',
-                type: 'checkbox_attestation',
-                required: true,
-              },
-              {
-                key: 'guidelines_attestation',
-                label:
-                  'I have read the program guidelines and funding criteria, and my request meets them.',
-                type: 'checkbox_attestation',
-                required: true,
-              },
-              {
-                key: 'authorization_attestation',
-                label:
-                  'I am authorized to submit this application on behalf of my organization.',
-                type: 'checkbox_attestation',
-                required: true,
-              },
-            ],
-          },
-
           // -------------------------------------------------------------------
           {
             key: 'contact',
@@ -411,6 +495,25 @@ export const INSPIRE_CHANGE: ProgramSpec = {
                 type: 'file_upload',
                 required: true,
                 validation: { max_files: 1, max_size_bytes: 8 * 1024 * 1024 },
+              },
+            ],
+          },
+
+          // -------------------------------------------------------------------
+          {
+            key: 'confirmation',
+            title: 'Before you submit',
+            fields: [
+              {
+                // Re-attested here, not only at eligibility, because
+                // applications.guidelines_version records the version THIS
+                // application was filled against. The screen was passed weeks
+                // earlier and possibly against an older document.
+                key: 'guidelines_attestation',
+                label:
+                  'I have read the program guidelines and funding criteria, and this request meets them.',
+                type: 'checkbox_attestation',
+                required: true,
               },
             ],
           },

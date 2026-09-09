@@ -299,11 +299,17 @@ describe('authenticated staff endpoints', () => {
     };
     expect(body.form.status).toBe('published');
     expect(body.form.sections.map((s) => s.section_key)).toEqual([
-      'eligibility', 'contact', 'organization', 'request', 'narrative', 'uploads', 'optin',
+      'contact', 'organization', 'request', 'narrative', 'uploads', 'confirmation', 'optin',
     ]);
 
+    // Derived from the spec rather than hardcoded. The point of this assertion
+    // is that the HTTP payload carries EVERY field the form defines -- a
+    // literal count only re-asserts whatever the form happens to contain today
+    // and has to be edited every time the copy changes.
+    const appStage = INSPIRE_CHANGE.stages.find((st) => st.key === 'application')!;
+    const expectedFields = appStage.form.sections.reduce((n, sec) => n + sec.fields.length, 0);
     const fields = body.form.sections.flatMap((s) => s.fields);
-    expect(fields).toHaveLength(34);
+    expect(fields).toHaveLength(expectedFields);
 
     // The contract carries everything a renderer needs and nothing it does not.
     const amount = fields.find((f) => f.field_key === 'requested_amount')!;
