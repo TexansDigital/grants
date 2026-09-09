@@ -433,11 +433,38 @@ export async function submitDraft(
   // After the write, never before, and never in a way that can fail the submit.
   await sendConfirmation(env, ctx, session, result.applicationId, result.submittedAt);
 
+  /*
+   * Formatting is inside a try/catch for the same reason the email is.
+   *
+   * The application is ALREADY COMMITTED by this point. An invalid
+   * DISPLAY_TIMEZONE would throw here and turn a successful submit into a 500,
+   * which is how an applicant ends up submitting twice -- the exact failure
+   * sendConfirmation is wrapped against, reintroduced one line lower. Caught by
+   * a test that already existed for the email, which is the only reason this
+   * comment is not an apology.
+   */
+  let submittedAtDisplay = result.submittedAt;
+  try {
+    submittedAtDisplay = formatInZone(result.submittedAt, env.DISPLAY_TIMEZONE);
+  } catch (err) {
+    await logError(env, ctx, {
+      code: 'DISPLAY_TIMEZONE_INVALID',
+      severity: 'error',
+      message: `could not format a submission time: ${err instanceof Error ? err.message : String(err)}`,
+      context: { application_id: result.applicationId },
+    });
+  }
+
   return json(
     {
       applicationId: result.applicationId,
       submittedAt: result.submittedAt,
       confirmationCode: confirmationCode(result.applicationId),
+      // Formatted by the same function the confirmation email uses, so the
+      // screen and the email cannot disagree about when this happened. The
+      // browser was formatting the ISO string in its own zone with no zone
+      // name on it, which for an applicant two zones away is a different time.
+      submittedAtDisplay,
     },
     200,
   );

@@ -136,8 +136,18 @@ describe('POST /api/applications/:id/submit', () => {
     const s = await setup();
     const res = await post(s.applicationId, { answers: payload(s.atts), guidelinesVersion: '2026.1' }, s.cookie);
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { applicationId: string; submittedAt: string; confirmationCode: string };
+    const body = (await res.json()) as {
+      applicationId: string;
+      submittedAt: string;
+      confirmationCode: string;
+      submittedAtDisplay: string;
+    };
     expect(body.applicationId).toBe(s.applicationId);
+    // The screen and the confirmation email must agree about when this
+    // happened, so both are formatted server-side in the program's zone. A
+    // time with no zone name on it is the bug this is guarding.
+    expect(body.submittedAtDisplay).toMatch(/\b(CST|CDT)\b/);
+    expect(body.submittedAtDisplay).not.toBe(body.submittedAt);
     expect(body.confirmationCode).toBe(confirmationCode(s.applicationId));
     expect(body.confirmationCode).toMatch(/^IC-[0-9A-F]{4}-[0-9A-F]{4}$/);
 

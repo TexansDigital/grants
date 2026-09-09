@@ -29,6 +29,8 @@ import { isFieldVisible, validateSubmission } from '../../src/lib/forms';
 import { formatCents } from '../../src/lib/money';
 import { Field } from './Field';
 import { saveStateLabel, type DraftSyncState } from './draftSync';
+import { applicantApi } from './applicantApi';
+import type { ApiError } from './http';
 import { useDraftSync } from './useDraftSync';
 
 type Values = Record<string, unknown>;
@@ -75,6 +77,16 @@ export function FormRenderer({ def, onBack, draft }: Props): ReactElement {
   const [saveFailed, setSaveFailed] = useState(false);
   // Destructured, never held as one object: `change` and `flush` are stable
   // per sync instance and go into dependency arrays; `state` is not.
+  const [submitState, setSubmitState] = useState<SubmitState>({ kind: 'idle' });
+  /**
+   * Problems the SERVER found that the browser did not.
+   *
+   * Keyed by field_key and merged into the displayed errors. They exist
+   * because client validation is a courtesy and the server is the authority:
+   * an attachment that cannot be verified, or a rule the browser's copy of the
+   * definition does not know about, only surfaces here.
+   */
+  const [serverErrors, setServerErrors] = useState<ReadonlyMap<string, string>>(new Map());
   const { state: draftState, change: pushDraft, flush: flushDraft } = useDraftSync(
     draft?.applicationId ?? null,
   );
@@ -143,8 +155,11 @@ export function FormRenderer({ def, onBack, draft }: Props): ReactElement {
         if (field.field_type === 'file_upload') map.delete(field.field_key);
       }
     }
+    // The server's findings win. It saw the whole definition and the actual
+    // attachment rows; the browser saw a copy and a list of ids.
+    for (const [key, message] of serverErrors) map.set(key, message);
     return map;
-  }, [def, fields, isPreview, values]);
+  }, [def, fields, isPreview, serverErrors, values]);
 
   /** Sections carrying an upload field, so the preview can explain itself. */
   const uploadFieldCount = useMemo(
@@ -226,6 +241,15 @@ export function FormRenderer({ def, onBack, draft }: Props): ReactElement {
 
   const setValue = useCallback((key: string, value: unknown) => {
     setValues((prev) => ({ ...prev, [key]: value }));
+    // Editing the answer retires the server's complaint about it. Leaving it
+    // would show somebody a problem they have just fixed, with no way to clear
+    // it short of submitting again and being told the same thing.
+    setServerErrors((prev) => {
+      if (!prev.has(key)) return prev;
+      const next = new Map(prev);
+      next.delete(key);
+      return next;
+    });
   }, []);
 
   const markTouched = useCallback(
@@ -276,6 +300,67 @@ export function FormRenderer({ def, onBack, draft }: Props): ReactElement {
     goTo(Math.min(step + 1, reviewStep));
   }, [currentErrors.length, goTo, reviewStep, step]);
 
+  /**
+   * Submit.
+   *
+   * THE FLUSH COMES FIRST, and it is not a nicety. Submitting validates the
+   * answers the SERVER holds, not the ones on this screen, so a pending
+   * autosave means submitting a version of the application the applicant is
+   * not looking at. If the flush cannot confirm, this stops and says so rather
+   * than submitting a stale draft and reporting success.
+   */
+  const submit = useCallback(async () => {
+    if (!draft) return;
+    setAttempted(new Set(def.sections.map((_, i) => i)));
+    if (totalErrors > 0) {
+      // Problems the browser already knows about. Show them now rather than
+      // spending a round trip to be told the same thing more slowly.
+      setSubmitState({ kind: 'idle' });
+      requestAnimationFrame(() => summaryRef.current?.focus());
+      return;
+    }
+    setSubmitState({ kind: 'submitting' });
+    setServerErrors(new Map());
+
+    const saved = await flushDraft();
+    if (!saved) {
+      setSubmitState({
+        kind: 'error',
+        message:
+          'We could not save your latest answers, so we have not submitted anything. ' +
+          'Check your connection and try again — nothing has been lost.',
+      });
+      return;
+    }
+
+    try {
+      const out = await applicantApi.submit(draft.applicationId, values);
+      setSubmitState({
+        kind: 'done',
+        confirmationCode: out.confirmationCode,
+        submittedAtDisplay: out.submittedAtDisplay,
+      });
+      window.scrollTo({ top: 0, behavior: 'auto' });
+    } catch (err) {
+      const e = err as ApiError;
+      if (e?.fields?.length) {
+        setServerErrors(new Map(e.fields.map((f) => [f.field, f.message])));
+        setSubmitState({ kind: 'idle' });
+        requestAnimationFrame(() => summaryRef.current?.focus());
+        return;
+      }
+      setSubmitState({
+        kind: 'error',
+        message:
+          e?.isSignedOut === true
+            ? 'Your sign-in has expired. Open the link in your email again, then submit. ' +
+              'Your answers are saved.'
+            : (e?.message ??
+              'Something went wrong submitting. Your answers are saved — please try again.'),
+      });
+    }
+  }, [def.sections, draft, flushDraft, summaryRef, totalErrors, values]);
+
   const clearDraft = useCallback(() => {
     if (!window.confirm('Clear every answer on this form? This cannot be undone.')) return;
     try {
@@ -307,6 +392,18 @@ export function FormRenderer({ def, onBack, draft }: Props): ReactElement {
   // ---- render ---------------------------------------------------------------
 
   const section = onReview ? null : def.sections[step];
+
+  if (submitState.kind === 'done') {
+    return (
+      <Submitted
+        def={def}
+        code={submitState.confirmationCode}
+        submittedAtDisplay={submitState.submittedAtDisplay}
+        values={values}
+        isVisible={isVisible}
+      />
+    );
+  }
 
   return (
     <div className="page">
@@ -422,7 +519,10 @@ export function FormRenderer({ def, onBack, draft }: Props): ReactElement {
               totalErrors={totalErrors}
               onEditSection={(i) => goTo(i)}
               onJumpToField={jumpToField}
-              uploadNotice={uploadFieldCount}
+              uploadNotice={isPreview ? uploadFieldCount : 0}
+              onSubmit={isPreview ? null : submit}
+              submitting={submitState.kind === 'submitting'}
+              submitError={submitState.kind === 'error' ? submitState.message : null}
             />
           ) : (
             section && (
@@ -631,6 +731,99 @@ function SaveState({ savedAt, failed }: { savedAt: Date | null; failed: boolean 
   );
 }
 
+/**
+ * What an applicant sees the moment it is in.
+ *
+ * A full read-back, not just "thank you". Two reasons: the confirmation email
+ * can take a minute to arrive and can land in spam, and somebody who has just
+ * spent an hour on this wants to see that what they wrote is what was received.
+ * The confirmation code is here in large type because the next thing that
+ * happens is often a phone call to the Foundation.
+ */
+function Submitted({
+  def,
+  code,
+  submittedAtDisplay,
+  values,
+  isVisible,
+}: {
+  def: FormDefinition;
+  code: string;
+  submittedAtDisplay: string;
+  values: Values;
+  isVisible: (f: FieldDef) => boolean;
+}): ReactElement {
+  const heading = useRef<HTMLHeadingElement>(null);
+  useEffect(() => {
+    heading.current?.focus();
+  }, []);
+
+  return (
+    <div className="page">
+      <header className="masthead">
+        <div className="masthead-inner">
+          <h1>{def.name}</h1>
+          <span className="program">Houston Texans Foundation</span>
+          <span className="spacer" />
+        </div>
+      </header>
+
+      <div className="shell single">
+        <main id="main" tabIndex={-1} className="card">
+          <div className="section-head">
+            <span className="eyebrow">Submitted</span>
+            <h2 tabIndex={-1} ref={heading}>
+              Your application is in
+            </h2>
+            <p>
+              Submitted {submittedAtDisplay}. A copy of everything below is on its way to
+              the email address on your
+              application. If it has not arrived in a few minutes, check your spam folder.
+            </p>
+          </div>
+
+          <div className="confirmation">
+            <span className="eyebrow">Confirmation</span>
+            <p className="code">{code}</p>
+            <p className="help">Quote this if you contact us about your application.</p>
+          </div>
+
+          {def.sections.map((section) => {
+            const shown = section.fields.filter(isVisible);
+            if (shown.length === 0) return null;
+            return (
+              <section key={section.id} className="review-section">
+                <div className="review-head">
+                  <h3>{section.title}</h3>
+                </div>
+                <dl className="review-list">
+                  {shown.map((f) => {
+                    const shownValue = displayValue(f, values[f.field_key]);
+                    return (
+                      <div className="review-row" key={f.id}>
+                        <dt>{f.label}</dt>
+                        <dd data-empty={shownValue === null ? 'true' : undefined}>
+                          {shownValue ?? 'Not answered'}
+                        </dd>
+                      </div>
+                    );
+                  })}
+                </dl>
+              </section>
+            );
+          })}
+        </main>
+      </div>
+    </div>
+  );
+}
+
+type SubmitState =
+  | { kind: 'idle' }
+  | { kind: 'submitting' }
+  | { kind: 'done'; confirmationCode: string; submittedAtDisplay: string }
+  | { kind: 'error'; message: string };
+
 interface ReviewProps {
   def: FormDefinition;
   values: Values;
@@ -643,6 +836,10 @@ interface ReviewProps {
   onJumpToField: (sectionIndex: number, fieldKey: string) => void;
   /** Required uploads the preview cannot accept, so the review screen can say so. */
   uploadNotice: number;
+  /** Null in preview, where there is no application to submit. */
+  onSubmit: (() => void) | null;
+  submitting: boolean;
+  submitError: string | null;
 }
 
 /**
@@ -664,6 +861,9 @@ function ReviewStep({
   onEditSection,
   onJumpToField,
   uploadNotice,
+  onSubmit,
+  submitting,
+  submitError,
 }: ReviewProps): ReactElement {
   useEffect(() => {
     if (totalErrors > 0) summaryRef.current?.focus();
@@ -727,17 +927,58 @@ function ReviewStep({
         );
       })}
 
-      <p className="help">
-        Submission is not available in this preview. In the live form this is where the
-        application is validated in full on the server, written in one transaction, and
-        confirmed by email with a read-only copy of everything above.
-      </p>
-      {uploadNotice > 0 && (
-        <p className="help">
-          <strong>{uploadNotice} required document{uploadNotice === 1 ? '' : 's'}</strong> cannot be
-          attached in this preview, so they are not counted against the checks above. The live
-          form requires them before it will accept a submission.
-        </p>
+      {onSubmit === null ? (
+        <>
+          <p className="help">
+            Submission is not available in this preview. In the live form this is where the
+            application is validated in full on the server, written in one transaction, and
+            confirmed by email with a read-only copy of everything above.
+          </p>
+          {uploadNotice > 0 && (
+            <p className="help">
+              <strong>
+                {uploadNotice} required document{uploadNotice === 1 ? '' : 's'}
+              </strong>{' '}
+              cannot be attached in this preview, so they are not counted against the checks
+              above. The live form requires them before it will accept a submission.
+            </p>
+          )}
+        </>
+      ) : (
+        <div className="submit-block">
+          <h3>Ready to submit?</h3>
+          <p>
+            You will get an email straight away with a copy of everything above, so you have a
+            record without signing back in. <strong>You cannot change your answers after
+            submitting.</strong>
+          </p>
+          {submitError && (
+            <p className="error" role="alert">
+              {submitError}
+            </p>
+          )}
+          <button
+            type="button"
+            className="btn"
+            onClick={onSubmit}
+            /*
+              Disabled ONLY while the request is in flight. Not while there are
+              errors: a disabled primary button with no explanation is how a
+              form tells somebody "no" without telling them why. Pressing it
+              with problems outstanding turns them all on and moves focus to
+              the list, which is an answer.
+            */
+            disabled={submitting}
+          >
+            {submitting ? 'Submitting…' : 'Submit application'}
+          </button>
+          {totalErrors > 0 && (
+            <p className="help">
+              {totalErrors} question{totalErrors === 1 ? '' : 's'} still need
+              {totalErrors === 1 ? 's' : ''} an answer first.
+            </p>
+          )}
+        </div>
       )}
     </>
   );

@@ -27,6 +27,12 @@ export interface SubmitResponse {
   applicationId: string;
   submittedAt: string;
   confirmationCode: string;
+  /**
+   * Already formatted, in the program's display timezone, carrying the zone
+   * name. The browser does not know which zone the Foundation announces in,
+   * and formatting it here would disagree with the confirmation email.
+   */
+  submittedAtDisplay: string;
 }
 
 export interface PresignResponse {

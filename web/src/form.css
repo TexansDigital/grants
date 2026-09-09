@@ -711,3 +711,53 @@
   text-decoration: underline;
 }
 
+
+/* ---- submit and confirmation --------------------------------------------- */
+
+.submit-block {
+  border-top: 1px solid var(--line);
+  margin-top: var(--space-6);
+  padding-top: var(--space-5);
+  display: grid;
+  gap: var(--space-3);
+  justify-items: start;
+}
+.submit-block h3 {
+  font-size: var(--step-1);
+  color: var(--ink);
+}
+.submit-block p {
+  margin: 0;
+  max-width: 60ch;
+}
+
+/* The shell is a two-column layout with the section nav on the left. The
+   confirmation screen has no sections left to navigate, so it drops the column
+   rather than leaving an empty rail beside the receipt. */
+.shell.single {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.confirmation {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  padding: var(--space-5);
+  margin-bottom: var(--space-6);
+  display: grid;
+  gap: var(--space-1);
+  justify-items: start;
+}
+.confirmation .code {
+  font-size: var(--step-3);
+  font-weight: 700;
+  color: var(--ink);
+  margin: 0;
+  /* Read aloud on the phone, so the digits need to line up and the whole thing
+     needs to be selectable as one run. */
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+}
+.confirmation .help {
+  margin: 0;
+}
