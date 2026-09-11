@@ -1,0 +1,6 @@
+metric_key,label,help_text,metric_type,unit,is_required,sort_order
+individuals_served,How many individuals did this grant directly serve?,"Unique individuals, not visits or meals. If you count something else, use the question below instead.",integer,people,yes,10
+individuals_served_basis,What does that number count?,"For example: unique students enrolled, or meals served, or households reached.",text,,yes,20
+funds_spent,How much of the grant has been spent?,Dollars spent to date against this award.,currency,,yes,30
+volunteer_hours,Volunteer hours contributed,Leave blank if you do not track this.,decimal,hours,no,40
+counties_reached,Which counties did this work reach?,,text,,no,50
