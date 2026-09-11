@@ -229,10 +229,21 @@ describe('completing sign-in', () => {
     return { userId, orgId, email, token: issued.token };
   }
 
-  const submit = (token: string) =>
+  /**
+   * Sec-Fetch-Site is what a real browser sends when the form on our own
+   * interstitial is submitted, and the route refuses a POST without it. Tests
+   * that omitted it were not simulating a browser; they were simulating the
+   * attack the guard exists to stop. The guard itself is tested in
+   * test/crossSiteSignIn.test.ts.
+   */
+  const submit = (token: string, over: Record<string, string> = {}) =>
     call('/api/auth/verify', {
       method: 'POST',
-      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      headers: {
+        'content-type': 'application/x-www-form-urlencoded',
+        'sec-fetch-site': 'same-origin',
+        ...over,
+      },
       body: new URLSearchParams({ token }).toString(),
     });
 
