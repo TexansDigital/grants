@@ -24,10 +24,13 @@
  */
 
 import type { Env, RequestContext } from '../types';
+
+/** Where an applicant is told to write when the software cannot help them. */
+const SUPPORT_EMAIL = 'grants@houstontexansfoundation.org';
 import { AppError, validationFailed } from './errors';
 import { newId } from './ids';
 import { nowIso, formatInZone } from './time';
-import { auditStatement } from './audit';
+import { auditStatement, writeAudit } from './audit';
 import { allFields, validateSubmission } from './forms';
 import { loadFormDefinition } from './loadForm';
 import { promote } from './mapsTo';
@@ -35,7 +38,7 @@ import { answerStatements } from './submit';
 import { resolveApplicantIdentity } from './identity';
 import { issueLoginToken, TOKEN_TTL_MS } from './tokens';
 import { sendEmail, transportFor } from './email';
-import { SIGN_IN_LINK } from './emailTemplates';
+import { SIGN_IN_LINK, SIGN_IN_PROBLEM } from './emailTemplates';
 import { checkRateLimit, SIGN_IN_EMAIL_LIMIT, SIGN_IN_IP_LIMIT } from './rateLimit';
 import { verifyTurnstile } from './turnstile';
 
@@ -160,7 +163,60 @@ export async function submitEligibility(
     lastName: String(promoted.contact.last_name ?? ''),
   });
 
-  if (identity.kind !== 'ready') return identityProblem(identity.kind);
+  if (identity.kind !== 'ready') {
+    /*
+     * ONE ANSWER FOR EVERY OUTCOME, and the reason goes to the mailbox.
+     *
+     * This endpoint is public and unauthenticated. Answering differently per
+     * outcome made it an oracle: type a Foundation address and the 409 told
+     * you it was staff; type a nonprofit's EIN and the response told you
+     * whether that nonprofit had applied this cycle. src/lib/auth.ts already
+     * goes out of its way to return an identical 404 for three different
+     * account states for exactly this reason, and this endpoint was quietly
+     * undoing that.
+     *
+     * `invalid_ein` is the one exception and is not a leak: it is about the
+     * digits the caller just typed, it blocks them from proceeding at all, and
+     * saying nothing would leave a legitimate applicant staring at a screen
+     * that appears to have worked.
+     */
+    if (identity.kind === 'invalid_ein') return identityProblem('invalid_ein');
+
+    const reason =
+      identity.kind === 'email_belongs_to_staff'
+        ? 'staff_account'
+        : identity.kind === 'email_belongs_to_other_organization'
+          ? 'other_organization'
+          : 'ambiguous_organization';
+
+    await sendEmail(
+      env,
+      ctx,
+      {
+        template: SIGN_IN_PROBLEM,
+        to: email,
+        // Keyed on the address and the reason, so somebody retrying the same
+        // mistake three times gets one explanation rather than three.
+        idempotencyKey: `sign_in_problem:${reason}:${email}`,
+        vars: {
+          reason,
+          supportEmail: SUPPORT_EMAIL,
+          destination: 'Inspire Change application',
+        },
+        context: { reason },
+      },
+      transportFor(env),
+    );
+
+    await writeAudit(env.DB, ctx, {
+      action: 'auth.magic_link_requested',
+      entityType: 'user',
+      entityId: email,
+      after: { outcome: identity.kind, sent: 'sign_in_problem' },
+    });
+
+    return accepted(email, 'new');
+  }
 
   // --- has this organization already passed eligibility for this cycle? -----
   //
@@ -188,7 +244,11 @@ export async function submitEligibility(
       applicationId: already.id,
       stamp: nowIso(),
     });
-    return accepted(email, 'again');
+    // 'new', not 'again'. Saying "you have already completed this step" to an
+    // unauthenticated caller answers "has this nonprofit applied?" for anyone
+    // holding a public EIN. The applicant gets a working link either way, and
+    // the email itself can tell them which application it opens.
+    return accepted(email, 'new');
   }
 
   // --- the application row, its answers, and the audit, in one batch --------

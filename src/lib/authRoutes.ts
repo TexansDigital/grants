@@ -21,7 +21,7 @@
  */
 
 import type { Env, RequestContext, Session } from '../types';
-import { AppError } from './errors';
+import { logError, AppError } from './errors';
 import { nowIso, formatInZone } from './time';
 import { writeAudit } from './audit';
 import { consumeLoginToken, issueLoginToken, TOKEN_TTL_MS } from './tokens';
@@ -33,6 +33,7 @@ import { sendEmail, transportFor } from './email';
 import { SIGN_IN_LINK } from './emailTemplates';
 import { checkRateLimit, SIGN_IN_EMAIL_LIMIT, SIGN_IN_IP_LIMIT } from './rateLimit';
 import { verifyTurnstile } from './turnstile';
+import { isSameOriginRequest } from './httpHeaders';
 
 /** What every request-a-link call is told, whatever actually happened. */
 const NEUTRAL_ACK =
@@ -181,6 +182,33 @@ export async function completeSignIn(
   env: Env,
   ctx: RequestContext,
 ): Promise<Response> {
+  /*
+   * CROSS-SITE POSTS DO NOT GET TO START A SESSION.
+   *
+   * This route mints a session and sets a cookie, and it is the only public
+   * route that does both. SameSite=Lax stops the browser SENDING our cookie
+   * cross-site; it does not stop the browser ACCEPTING one that a cross-site
+   * top-level form POST sets. Without this check, an attacker who holds a
+   * valid link for their own account can auto-submit a form from a page the
+   * victim visits and leave the victim signed in as them -- after which every
+   * answer the victim writes lands in the attacker's organization.
+   *
+   * Checked before the token is read, so a cross-site attempt does not even
+   * spend a single-use link.
+   */
+  if (!isSameOriginRequest(request, env.APPLICANT_BASE_URL ?? '')) {
+    await logError(env, ctx, {
+      code: 'CROSS_SITE_SIGN_IN_BLOCKED',
+      severity: 'warn',
+      message: 'a cross-site POST to /api/auth/verify was refused',
+      context: {
+        sec_fetch_site: request.headers.get('sec-fetch-site'),
+        origin: request.headers.get('origin'),
+      },
+    });
+    return signInFailure('cross_site');
+  }
+
   const form = await request.formData().catch(() => null);
   const token = form ? String(form.get('token') ?? '') : '';
 
@@ -246,7 +274,12 @@ function signInFailure(reason: string): Response {
       ? 'That sign-in link has already been used. Links work once, so please request a new one.'
       : reason === 'superseded'
         ? 'A newer sign-in link was sent to you. Please use the most recent email, or request another.'
-        : 'That sign-in link has expired. Links last 15 minutes, so please request a new one.';
+        : reason === 'cross_site'
+          ? // Says what to do, not what was detected. Somebody hitting this for
+            // real was sent here by a page that is not ours, and naming the
+            // mechanism helps whoever built that page more than it helps them.
+            'Please open the sign-in link directly from the email we sent you.'
+          : 'That sign-in link has expired. Links last 15 minutes, so please request a new one.';
   return new Response(failurePage(message), {
     status: 200,
     headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' },

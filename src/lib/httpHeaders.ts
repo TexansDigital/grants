@@ -54,3 +54,48 @@ export function htmlHeaders(requestId: string): Record<string, string> {
     'content-type': 'text/html; charset=utf-8',
   };
 }
+
+/**
+ * Is this state-changing request coming from our own pages?
+ *
+ * WHAT THIS DEFENDS, which is easy to get backwards. `SameSite=Lax` governs
+ * whether a cookie is SENT with a cross-site request. It says nothing about
+ * whether a cookie may be SET by the response to one. So a cross-site,
+ * top-level form POST that mints a session gets its `Set-Cookie` honoured, and
+ * the victim's browser is then authenticated as whoever supplied the token --
+ * login CSRF. The attacker does not steal a session; they install one, and
+ * everything the victim does next is written into the attacker's organization
+ * and readable by them.
+ *
+ * Two signals, because neither is universal:
+ *   - `Sec-Fetch-Site`, which the browser sets and script cannot forge. Present
+ *     in every current browser.
+ *   - `Origin`, the fallback, which browsers attach to POST even when they omit
+ *     it from GET.
+ *
+ * FAILS CLOSED, deliberately. A request that offers neither signal is refused
+ * rather than trusted: this guards routes that are reached by a form in a
+ * browser, and a browser always sends at least one. A non-browser caller that
+ * legitimately needs these routes can send an Origin header.
+ *
+ * `allowedOrigin` comes from configuration, never from the request.
+ */
+export function isSameOriginRequest(request: Request, allowedOrigin: string): boolean {
+  const site = request.headers.get('sec-fetch-site');
+  if (site !== null) {
+    // 'none' is a direct navigation -- typed, or a bookmark. A form POST is
+    // never 'none', so accepting it would readmit exactly what this refuses.
+    return site === 'same-origin';
+  }
+
+  const origin = request.headers.get('origin');
+  if (origin === null) return false;
+
+  const expected = allowedOrigin.trim().replace(/\/+$/, '');
+  if (!expected) return false;
+  try {
+    return new URL(origin).origin === new URL(expected).origin;
+  } catch {
+    return false;
+  }
+}

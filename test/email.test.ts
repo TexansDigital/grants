@@ -752,6 +752,11 @@ describe('templates', () => {
   const FIXTURES: Record<string, unknown> = {
     sign_in_link: SIGN_IN_VARS,
     application_received: RECEIVED_VARS,
+    sign_in_problem: {
+      reason: 'ambiguous_organization',
+      supportEmail: 'grants@example.org',
+      destination: 'Inspire Change application',
+    },
   };
 
   it('every registered template renders a subject, a text body and HTML', () => {

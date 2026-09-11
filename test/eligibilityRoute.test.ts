@@ -254,19 +254,73 @@ describe('identity conflicts are explained, not guessed', () => {
       ).bind(newId(), name, e, now, now).run();
     }
     const res = await post('/api/public/eligibility', { cycleId, answers: goodAnswers({ ein: e }) });
-    expect(res.status).toBe(409);
-    expect(JSON.stringify(await res.json())).toContain('more than one record');
+    // Indistinguishable from success. This endpoint is public: answering
+    // differently would tell anyone holding a public EIN that the Foundation
+    // has duplicate records for that nonprofit.
+    expect(res.status).toBe(201);
+    expect(JSON.stringify(await res.json())).not.toContain('more than one record');
+
+    // The explanation went to the mailbox, which is where it belongs.
+    const msg = await db.prepare(
+      `SELECT template_key FROM email_messages WHERE idempotency_key LIKE 'sign_in_problem:%'
+        ORDER BY created_at DESC LIMIT 1`,
+    ).first<{ template_key: string }>();
+    expect(msg!.template_key).toBe('sign_in_problem');
   });
 
-  it('refuses an email already registered to another organization', async () => {
+  it('says nothing to the caller about an email registered elsewhere', async () => {
     const { cycleId } = await openCycle();
     const first = goodAnswers();
     expect((await post('/api/public/eligibility', { cycleId, answers: first })).status).toBe(201);
 
     const second = goodAnswers({ contact_email: first.contact_email, ein: ein() });
     const res = await post('/api/public/eligibility', { cycleId, answers: second });
-    expect(res.status).toBe(409);
-    expect(JSON.stringify(await res.json())).toContain('different organization');
+    expect(res.status).toBe(201);
+    expect(JSON.stringify(await res.json())).not.toContain('different organization');
+
+    const msg = await db.prepare(
+      `SELECT idempotency_key FROM email_messages
+        WHERE idempotency_key LIKE 'sign_in_problem:other_organization:%' LIMIT 1`,
+    ).first<{ idempotency_key: string }>();
+    expect(msg, 'the mailbox owner is told; the caller is not').not.toBeNull();
+  });
+
+  it('says nothing to the caller about a staff address', async () => {
+    // src/lib/auth.ts returns an identical 404 for three account states so an
+    // attacker cannot learn which addresses are staff. This endpoint was
+    // quietly undoing that with a distinguishable 409.
+    const { cycleId } = await openCycle();
+    const staff = `admin-${newId().slice(0, 6)}@example-foundation.org`;
+    const now = nowIso();
+    await db.prepare(
+      `INSERT INTO users (id, email, role, is_active, created_at, updated_at)
+       VALUES (?,?,'admin',1,?,?)`,
+    ).bind(newId(), staff, now, now).run();
+
+    const res = await post('/api/public/eligibility', {
+      cycleId, answers: goodAnswers({ contact_email: staff }),
+    });
+    const body = JSON.stringify(await res.json());
+    expect(res.status).toBe(201);
+    expect(body).not.toMatch(/staff|cannot be used/i);
+
+    const msg = await db.prepare(
+      `SELECT idempotency_key FROM email_messages
+        WHERE idempotency_key LIKE 'sign_in_problem:staff_account:%' LIMIT 1`,
+    ).first<{ idempotency_key: string }>();
+    expect(msg).not.toBeNull();
+  });
+
+  it('answers identically whether or not the organization already applied', async () => {
+    // "You have already completed this step" answered "has this nonprofit
+    // applied?" for anyone holding a public EIN.
+    const { cycleId } = await openCycle();
+    const a = goodAnswers();
+    const first = await post('/api/public/eligibility', { cycleId, answers: a });
+    const second = await post('/api/public/eligibility', { cycleId, answers: { ...a } });
+
+    expect(first.status).toBe(second.status);
+    expect(await first.json()).toEqual(await second.json());
   });
 
   it('lets the same person from the same organization submit again', async () => {

@@ -235,6 +235,101 @@ export const SIGN_IN_LINK: EmailTemplate<SignInLinkVars> = {
 };
 
 // ---------------------------------------------------------------------------
+// sign_in_problem
+// ---------------------------------------------------------------------------
+
+export type SignInProblemReason =
+  /** The address already has staff access, so it cannot hold an applicant login. */
+  | 'staff_account'
+  /** The address signs in for a different organization than the EIN given. */
+  | 'other_organization'
+  /** Two or more live organizations share that EIN. A human has to pick. */
+  | 'ambiguous_organization';
+
+export interface SignInProblemVars {
+  reason: SignInProblemReason;
+  /** Where to write for help. One address, never a form nobody monitors. */
+  supportEmail: string;
+  /** Where the applicant was trying to get to, e.g. 'Inspire Change application'. */
+  destination: string;
+}
+
+/**
+ * "We could not send you a link, and here is why."
+ *
+ * WHY THIS TEMPLATE EXISTS AT ALL, which is a security decision rather than a
+ * copy one.
+ *
+ * The eligibility endpoint is public and unauthenticated. It used to answer
+ * differently depending on whether an address belonged to staff, belonged to
+ * another organization, or had already applied -- which made it an oracle:
+ * anyone could type an address and learn from the HTTP status whether it was a
+ * Foundation staff account, and type a nonprofit's EIN and learn whether that
+ * nonprofit had applied this cycle.
+ *
+ * Every outcome now returns the same acknowledgement. The explanation travels
+ * BY EMAIL, to the address the person typed -- so it reaches the mailbox owner,
+ * who is entitled to it, and not the caller, who may be anybody. The cost is
+ * that somebody who mistypes their own address gets silence; the alternative
+ * was answering questions about other people's accounts to anyone who asked.
+ */
+export const SIGN_IN_PROBLEM: EmailTemplate<SignInProblemVars> = {
+  key: 'sign_in_problem',
+  render(v) {
+    const explanation: Record<SignInProblemReason, string> = {
+      staff_account:
+        'This address already has Houston Texans Foundation staff access, and staff sign in ' +
+        'a different way. To apply on behalf of a nonprofit, use an address belonging to that ' +
+        'organization.',
+      other_organization:
+        'This address is already registered to a different organization. Each address belongs ' +
+        'to one organization, so please use an address for the organization you are applying ' +
+        'for.',
+      ambiguous_organization:
+        'We hold more than one record under that EIN and cannot tell which one is yours. ' +
+        'This is our records needing tidying rather than anything wrong with your application.',
+    };
+    const next: Record<SignInProblemReason, string> = {
+      staff_account: 'Try again with an address belonging to the organization.',
+      other_organization: 'Try again with an address for this organization.',
+      ambiguous_organization: 'Reply to this email and we will sort it out and get you a link.',
+    };
+
+    return {
+      // Not "Problem with your application" -- nothing is wrong with their
+      // application, and that subject line lands badly on a deadline.
+      subject: `We could not send your sign-in link`,
+      text: textBlock([
+        `You asked to start a ${v.destination}, and we could not send you a sign-in link.`,
+        '',
+        explanation[v.reason],
+        '',
+        next[v.reason],
+        '',
+        `If you need help, write to ${v.supportEmail}.`,
+        '',
+        'If you did not ask to apply, you can ignore this message. Nothing has',
+        'been created and nobody has been given access to anything.',
+      ]),
+      html: layout({
+        preview: explanation[v.reason],
+        heading: 'We could not send your sign-in link',
+        blocks: [
+          `You asked to start a ${escapeHtml(v.destination)}, and we could not send you a ` +
+            `sign-in link.`,
+          escapeHtml(explanation[v.reason]),
+          `<strong>${escapeHtml(next[v.reason])}</strong>`,
+        ],
+        footer:
+          `If you need help, write to ${escapeHtml(v.supportEmail)}. If you did not ask to ` +
+          `apply, you can ignore this message — nothing has been created and nobody has been ` +
+          `given access to anything.`,
+      }),
+    };
+  },
+};
+
+// ---------------------------------------------------------------------------
 // application_received
 // ---------------------------------------------------------------------------
 
@@ -367,6 +462,7 @@ export const APPLICATION_RECEIVED: EmailTemplate<ApplicationReceivedVars> = {
  * rather than reaching a recipient.
  */
 export const TEMPLATES = {
+  [SIGN_IN_PROBLEM.key]: SIGN_IN_PROBLEM,
   [SIGN_IN_LINK.key]: SIGN_IN_LINK,
   [APPLICATION_RECEIVED.key]: APPLICATION_RECEIVED,
 } as const;
