@@ -45,6 +45,15 @@ export interface Env {
    */
   TURNSTILE_SECRET_KEY?: string;
   /**
+   * The Turnstile SITE key, which is public by design.
+   *
+   * A plain var rather than a secret, and handed to the browser in the public
+   * cycles response: the widget cannot render without it, and it is printed in
+   * the HTML of every site that uses Turnstile. Treating it as a secret would
+   * be theatre that breaks the form.
+   */
+  TURNSTILE_SITE_KEY?: string;
+  /**
    * R2 signing, for presigned uploads. The key and secret are Wrangler
    * secrets; the bucket and account id are not credentials and live in
    * wrangler.toml. Absent them, uploads refuse rather than half-work.

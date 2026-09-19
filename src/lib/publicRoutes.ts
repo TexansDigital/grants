@@ -149,7 +149,19 @@ export async function listOpenCycles(env: Env, now: string): Promise<Response> {
     });
   }
 
-  return json({ cycles });
+  return json({
+    cycles,
+    /*
+     * The site key, for the widget on the eligibility screen.
+     *
+     * Public by design -- it is in the HTML of every site that uses Turnstile.
+     * Null when unset, and the page then renders no widget, which mirrors the
+     * server: verifyTurnstile skips outside production when the SECRET is
+     * unset, and fails closed in production. The two must agree, or preview
+     * shows a challenge nobody can pass.
+     */
+    turnstileSiteKey: (env.TURNSTILE_SITE_KEY ?? '').trim() || null,
+  });
 }
 
 /**

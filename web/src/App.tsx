@@ -17,6 +17,9 @@ import { ApiError, api } from './api';
 import { applicantApi, type DraftResponse } from './applicantApi';
 import type { CycleRow, FormSummary, ProgramRow, SessionUser } from './api';
 import type { FormDefinition } from '../../src/lib/forms';
+import { publicApi, type OpenCycle } from './publicApi';
+import { OpenCycles } from './OpenCycles';
+import { EligibilityForm } from './EligibilityForm';
 import { granteeApi, type GranteeHomeResponse, type ReportResponse } from './granteeApi';
 import { GranteeHome } from './GranteeHome';
 import { ReportForm } from './ReportForm';
@@ -42,6 +45,8 @@ type Route =
   | { name: 'form'; id: string }
   | { name: 'apply'; id: string }
   | { name: 'reporting' }
+  | { name: 'openCycles' }
+  | { name: 'eligibility'; cycleId: string }
   | { name: 'portal' }
   | { name: 'report'; id: string };
 
@@ -57,6 +62,12 @@ function parseRoute(pathname: string): Route | null {
     return { name: 'application', id: parts[1] };
   }
   if (parts.length === 2 && parts[0] === 'forms' && parts[1]) return { name: 'form', id: parts[1] };
+  // The public front door. Checked BEFORE /apply/:id, because "start" is not
+  // an application id and the three-segment path is the more specific match.
+  if (parts.length === 1 && parts[0] === 'apply') return { name: 'openCycles' };
+  if (parts.length === 3 && parts[0] === 'apply' && parts[1] === 'start' && parts[2]) {
+    return { name: 'eligibility', cycleId: parts[2] };
+  }
   // The applicant's own application. Not behind Cloudflare Access -- an
   // applicant holds an app-native session from a magic link.
   if (parts.length === 2 && parts[0] === 'apply' && parts[1]) return { name: 'apply', id: parts[1] };
@@ -82,6 +93,15 @@ export function App(): ReactElement {
   const [form, setForm] = useState<FormDefinition | null>(null);
   const [draft, setDraft] = useState<DraftResponse | null>(null);
   const [portal, setPortal] = useState<GranteeHomeResponse | null>(null);
+  const [open, setOpen] = useState<{
+    cycles: OpenCycle[];
+    turnstileSiteKey: string | null;
+  } | null>(null);
+  const [eligibility, setEligibility] = useState<{
+    cycle: OpenCycle;
+    form: FormDefinition;
+    turnstileSiteKey: string | null;
+  } | null>(null);
   const [report, setReport] = useState<ReportResponse | null>(null);
   const [error, setError] = useState<ApiError | null>(null);
   const [loading, setLoading] = useState(true);
@@ -154,6 +174,8 @@ export function App(): ReactElement {
     const external =
       route?.name === 'form' ||
       route?.name === 'apply' ||
+      route?.name === 'openCycles' ||
+      route?.name === 'eligibility' ||
       route?.name === 'portal' ||
       route?.name === 'report';
     const internal = !external;
@@ -176,6 +198,8 @@ export function App(): ReactElement {
       application: 'Application · Steward',
       home: 'Configuration · Steward',
       reporting: 'Grant reports · Steward',
+      openCycles: 'Apply for a grant · Houston Texans Foundation',
+      eligibility: 'Before you start · Houston Texans Foundation',
       form: 'Form preview · Steward',
       apply: 'Your application · Steward',
       portal: 'Your grants · Steward',
@@ -225,6 +249,24 @@ export function App(): ReactElement {
         } else if (route?.name === 'apply') {
           const d = await applicantApi.draft(route.id, signal);
           setDraft(d);
+        } else if (route?.name === 'openCycles') {
+          setOpen(await publicApi.cycles(signal));
+        } else if (route?.name === 'eligibility') {
+          const list = await publicApi.cycles(signal);
+          const cycle = list.cycles.find((c) => c.id === route.cycleId) ?? null;
+          if (!cycle) {
+            // Not an error page: a cycle that closed between one page and the
+            // next is an ordinary thing, and the list says what is open now.
+            setEligibility(null);
+            setOpen(list);
+          } else {
+            const { form: def } = await publicApi.form(cycle.formDefinitionId, signal);
+            setEligibility({
+              cycle,
+              form: def,
+              turnstileSiteKey: list.turnstileSiteKey,
+            });
+          }
         } else if (route?.name === 'portal') {
           setPortal(await granteeApi.home(signal));
         } else if (route?.name === 'report') {
@@ -291,6 +333,52 @@ export function App(): ReactElement {
       <Message title="Loading">
         <p aria-live="polite">Loading…</p>
       </Message>
+    );
+  }
+
+  if (route.name === 'openCycles') {
+    if (!open) return <Message title="Loading"><p>Loading…</p></Message>;
+    return (
+      <PortalShell organization={null} heading="Grants">
+        <OpenCycles
+          cycles={open.cycles}
+          onStart={(c) => navigate(`/apply/start/${encodeURIComponent(c.id)}`)}
+        />
+      </PortalShell>
+    );
+  }
+
+  if (route.name === 'eligibility') {
+    if (!eligibility) {
+      // The cycle closed, or the link is stale. Say so and show what is open.
+      return (
+        <PortalShell organization={null} heading="Grants">
+          <div className="card portal-empty">
+            <h2 tabIndex={-1} data-route-heading>
+              That program is not open
+            </h2>
+            <p>
+              It may have closed since this link was made. Anything currently accepting
+              applications is listed on the grants page.
+            </p>
+            <div className="actions">
+              <button type="button" className="btn" onClick={() => navigate('/apply')}>
+                See what is open
+              </button>
+            </div>
+          </div>
+        </PortalShell>
+      );
+    }
+    return (
+      <PortalShell organization={null} heading="Grants">
+        <EligibilityForm
+          cycle={eligibility.cycle}
+          form={eligibility.form}
+          turnstileSiteKey={eligibility.turnstileSiteKey}
+          onBack={() => navigate('/apply')}
+        />
+      </PortalShell>
     );
   }
 
@@ -417,16 +505,19 @@ export function App(): ReactElement {
 function PortalShell({
   organization,
   children,
+  heading,
 }: {
   organization: string | null;
   children: ReactNode;
+  /** What this surface is, when it is not a signed-in grantee's own page. */
+  heading?: string;
 }): ReactElement {
   return (
     <div className="page">
       <header className="masthead">
         <div className="masthead-inner">
           <h1>Houston Texans Foundation</h1>
-          <span className="program">{organization ?? 'Grant reporting'}</span>
+          <span className="program">{organization ?? heading ?? 'Grant reporting'}</span>
         </div>
       </header>
       <div className="shell single">

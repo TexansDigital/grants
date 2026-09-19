@@ -920,3 +920,10 @@
   max-width: var(--measure);
   margin-bottom: var(--space-3);
 }
+
+/* The Turnstile widget sits in the flow above the submit row, not beside it:
+   at narrow widths a floated challenge overlapped the button it guards. */
+.turnstile {
+  margin: var(--space-5) 0 var(--space-4);
+  min-height: 65px;
+}
