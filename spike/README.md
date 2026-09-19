@@ -40,17 +40,26 @@ It has no routes and `workers_dev = false`.
 
 Two things, both one-off.
 
-**1. The key, base64'd into `.dev.vars`.** Not pasted raw: the JSON is multi-line
-and its private key contains escaped newlines, which dotenv parsing mangles into
-a bad signature that looks like an auth bug. One line, no escaping, and the same
-format works later for the real Wrangler secret.
+**1. The key, into `.dev.vars`.**
 
 ```
-printf 'GOOGLE_SERVICE_ACCOUNT_B64=%s\n' \
-  "$(base64 < ~/Downloads/steward-grants-XXXXXX.json | tr -d '\n')" >> .dev.vars
+node spike/load-key.mjs
 ```
 
-`.dev.vars` is gitignored. Delete the JSON from Downloads afterwards.
+It finds the key in `~/Downloads`, checks it really is a service-account key,
+and writes it base64'd onto one line. If it lives somewhere else, name it:
+`node spike/load-key.mjs <path>`.
+
+Base64 rather than a raw paste because the JSON is multi-line and its private
+key contains escaped newlines, which dotenv parsing mangles into a bad signature
+that reads like an auth bug. The same one-line format works later for the real
+Wrangler secret, so there is one thing to get right instead of two.
+
+The script replaces any earlier line rather than stacking another one, and
+refuses to write at all if `.dev.vars` is not in `.gitignore`. It prints the
+account address and project id so you can check them, and never the key.
+
+Delete the downloaded JSON afterwards.
 
 **2. The folder shared with the service account**, as Editor —
 `steward-uploads@steward-grants.iam.gserviceaccount.com`. The folder id is in
@@ -59,9 +68,14 @@ printf 'GOOGLE_SERVICE_ACCOUNT_B64=%s\n' \
 ## Run it
 
 ```
-npm run spike            # http://127.0.0.1:8788
-node spike/verify-signing.mjs   # optional, needs no credentials
+node spike/verify-signing.mjs
+npm run spike
 ```
+
+Then open `http://127.0.0.1:8788`.
+
+Do not paste a `#` comment onto the end of an `npm run` line. zsh passes it
+through as arguments and wrangler rejects the lot with `Unknown arguments`.
 
 Open the page, pick any file, press the button. It uploads into the
 `houstontexansfoundation` folder, and you can delete the file afterwards.
