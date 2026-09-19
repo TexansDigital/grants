@@ -783,4 +783,28 @@ describe('the database vocabulary and the code agree', () => {
       ).toBe(true);
     }
   });
+
+  /*
+   * A canary on a testing trap, not on this system.
+   *
+   * `toMatchObject({ field: /regex/ })` asserts NOTHING in vitest: a bare
+   * RegExp inside toMatchObject is satisfied by any string at all. Two tests in
+   * this repo were written that way and passed against a completely different
+   * error; a mutant found it, not the suite.
+   *
+   * If this test ever fails, vitest has fixed the trap, and the note on
+   * appErrorFrom in helpers.ts can be deleted along with this.
+   */
+  it('vitest still treats a regex inside toMatchObject as always satisfied', () => {
+    let threw = false;
+    try {
+      expect({ message: 'completely unrelated' }).toMatchObject({ message: /not this/ });
+    } catch {
+      threw = true;
+    }
+    expect(
+      threw,
+      'toMatchObject now enforces regexes: use them freely and drop appErrorFrom',
+    ).toBe(false);
+  });
 });

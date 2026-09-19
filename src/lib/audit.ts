@@ -53,6 +53,10 @@ export type AuditAction =
   | 'form_definition.version_created'
   // a draft report form written in one act from a program's metric definitions
   | 'form_definition.scaffolded'
+  // impact metrics, imported from a program's own spreadsheet
+  | 'metric_definition.created'
+  | 'metric_definition.updated'
+  | 'metric_definition.retired'
   // programs and cycles
   | 'program.created'
   | 'program_stage.created'
@@ -85,6 +89,8 @@ export type AuditAction =
   | 'report_period.created'
   // generated in bulk from an award term, rather than created one at a time
   | 'report_period.generated'
+  // a grantee's in-progress report, autosaved. Recorded against the period.
+  | 'report.draft_saved'
   | 'report.submitted'
   | 'report.accepted'
   | 'report.revisions_requested'
@@ -115,6 +121,7 @@ export type EntityType =
   | 'review_score'
   | 'award'
   | 'payment'
+  | 'metric_definition'
   | 'report_period'
   | 'report_submission'
   | 'attachment'

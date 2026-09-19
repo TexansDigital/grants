@@ -48,7 +48,7 @@ import { isStoredEmpty } from './fieldTypes';
  * local limit is far higher, which is exactly how this passes in tests and
  * fails in production). Statements built from a form's shape are chunked.
  */
-const MAX_BOUND_PARAMS = 90;
+export const MAX_BOUND_PARAMS = 90;
 
 interface ApplicationRow {
   id: string;
@@ -297,12 +297,18 @@ function clearHiddenStatements(
  * resolved to a signed URL. That is the path that hands one organization's
  * audited financial statements to another.
  *
- * Returns the attachment ids to stamp with this application as their parent.
+ * Returns the attachment ids to stamp with this parent.
+ *
+ * EXPORTED, and taking a `parentId` rather than an applicationId, because
+ * grantee reports upload files through exactly the same path and need exactly
+ * the same check. Copying it would mean two versions of the rule that stops one
+ * nonprofit's financial statements reaching another, and only one of them
+ * getting fixed next time.
  */
-async function resolveAttachments(
+export async function resolveAttachments(
   db: D1Database,
   organizationId: string,
-  applicationId: string,
+  parentId: string,
   definition: FormDefinition,
   answers: ReadonlyMap<string, StoredValue>,
 ): Promise<{ ids: string[]; errors: FieldError[] }> {
@@ -342,7 +348,7 @@ async function resolveAttachments(
             AND (parent_id IS NULL OR parent_id = ?)
             AND id IN (${chunk.map(() => '?').join(',')})`,
       )
-      .bind(organizationId, applicationId, ...chunk)
+      .bind(organizationId, parentId, ...chunk)
       .all<{ id: string }>();
     for (const r of results ?? []) owned.add(r.id);
   }
