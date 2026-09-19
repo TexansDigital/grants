@@ -81,6 +81,8 @@ export type AuditAction =
   | 'payment.recorded'
   // reporting
   | 'report_period.created'
+  // generated in bulk from an award term, rather than created one at a time
+  | 'report_period.generated'
   | 'report.submitted'
   | 'report.accepted'
   | 'report.revisions_requested'
