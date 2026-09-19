@@ -244,7 +244,17 @@ export type SignInProblemReason =
   /** The address signs in for a different organization than the EIN given. */
   | 'other_organization'
   /** Two or more live organizations share that EIN. A human has to pick. */
-  | 'ambiguous_organization';
+  | 'ambiguous_organization'
+  /**
+   * The program blocks a new application while a grant report is outstanding.
+   *
+   * It is here, and not an inline refusal, because the eligibility endpoint is
+   * public and unauthenticated: answering "you have an overdue report" to
+   * whoever typed the EIN turns it into an oracle on which nonprofits are
+   * delinquent with the Foundation. The mailbox owner is entitled to know;
+   * the caller may be anybody.
+   */
+  | 'reports_outstanding';
 
 export interface SignInProblemVars {
   reason: SignInProblemReason;
@@ -288,11 +298,19 @@ export const SIGN_IN_PROBLEM: EmailTemplate<SignInProblemVars> = {
       ambiguous_organization:
         'We hold more than one record under that EIN and cannot tell which one is yours. ' +
         'This is our records needing tidying rather than anything wrong with your application.',
+      reports_outstanding:
+        'This program asks that reports on previous grants are filed before a new ' +
+        'application is started, and our records show at least one still outstanding. ' +
+        'You can see what is outstanding, and file it, by signing in to the grant ' +
+        'reporting page with this address.',
     };
     const next: Record<SignInProblemReason, string> = {
       staff_account: 'Try again with an address belonging to the organization.',
       other_organization: 'Try again with an address for this organization.',
       ambiguous_organization: 'Reply to this email and we will sort it out and get you a link.',
+      reports_outstanding:
+        'File the outstanding report, then start your application again. If you believe ' +
+        'it is already filed, reply to this email and we will check.',
     };
 
     return {

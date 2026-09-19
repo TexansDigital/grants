@@ -439,12 +439,15 @@ describe('how late is late, on the staff side', () => {
     expect(isOverdue('open', day('2026-03-01'), day('2026-03-02'))).toBe(true);
   });
 
-  it('is never overdue once it is out of the grantee`s hands', () => {
+  it('is never overdue once it is out of the hands that owe it', () => {
+    // `now` is explicit rather than defaulted: a pure function that reads the
+    // wall clock behind its caller is one whose tests pass on a Tuesday.
+    const now = day('2026-03-01');
     for (const status of ['submitted', 'accepted', 'waived']) {
-      expect(isOverdue(status, day('2020-01-01')), status).toBe(false);
+      expect(isOverdue(status, day('2020-01-01'), now), status).toBe(false);
     }
     for (const status of ['scheduled', 'open', 'revisions_requested']) {
-      expect(isOverdue(status, day('2020-01-01')), status).toBe(true);
+      expect(isOverdue(status, day('2020-01-01'), now), status).toBe(true);
     }
   });
 });

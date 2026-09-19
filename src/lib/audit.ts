@@ -39,6 +39,8 @@ export type AuditAction =
   | 'application.status_changed'
   | 'application.decided'
   | 'application.internal_note_changed'
+  // refused a new application because a grant report is still outstanding
+  | 'application.blocked_by_compliance'
   // organizations
   | 'organization.created'
   | 'organization.updated'

@@ -25,6 +25,7 @@ import { loadFormDefinition } from './loadForm';
 import { allFields } from './forms';
 import { displayValue } from './answerDisplay';
 import { isStaffRole } from './scope';
+import { daysUntil as daysUntilDue, isOverdue as reportIsOverdue } from './reportDue';
 import type { StoredValue } from './fieldTypes';
 
 function assertStaff(session: Session): void {
@@ -73,29 +74,15 @@ export interface PortfolioFilters {
   offset?: number;
 }
 
-/** Whole calendar days from today to a due date. Negative means past. */
-export function daysUntil(dueIso: string, now: string = nowIso()): number {
-  const due = dueIso.slice(0, 10);
-  const today = now.slice(0, 10);
-  const a = Date.parse(`${due}T00:00:00Z`);
-  const b = Date.parse(`${today}T00:00:00Z`);
-  if (Number.isNaN(a) || Number.isNaN(b)) return 0;
-  return Math.round((a - b) / 86_400_000);
-}
-
-/**
- * A report is overdue when the date has passed and it has not been filed.
+/*
+ * daysUntil and isOverdue now live in reportDue.ts.
  *
- * Not "the date has passed". A report filed a week late and now sitting with
- * staff is OUR queue, not the grantee's failure, and a compliance view that
- * keeps it red is one staff learn to ignore.
+ * They moved because the application gate asks the same question, and a
+ * definition of "overdue" that forked between the compliance desk and the gate
+ * would mean refusing a nonprofit a grant cycle over a report the desk shows as
+ * fine. Re-exported so existing callers and their tests are unaffected.
  */
-export function isOverdue(status: string, dueIso: string, now: string = nowIso()): boolean {
-  if (status !== 'scheduled' && status !== 'open' && status !== 'revisions_requested') {
-    return false;
-  }
-  return daysUntil(dueIso, now) < 0;
-}
+export { daysUntil, isOverdue } from './reportDue';
 
 /**
  * The portfolio compliance view.
@@ -164,8 +151,8 @@ export async function reportPortfolio(
   const now = nowIso();
   let rows: PortfolioRow[] = (results ?? []).map((r) => ({
     ...r,
-    daysUntilDue: daysUntil(r.dueDate, now),
-    overdue: isOverdue(r.status, r.dueDate, now),
+    daysUntilDue: daysUntilDue(r.dueDate, now),
+    overdue: reportIsOverdue(r.status, r.dueDate, now),
   }));
 
   /*

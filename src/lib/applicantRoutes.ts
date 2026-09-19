@@ -39,6 +39,7 @@ import { formatCents } from './money';
 import { formatInZone } from './time';
 import { logError } from './errors';
 import { isAcceptingApplications } from './eligibility';
+import { assertCompliant } from './compliance';
 
 function orgId(session: Session): string {
   if (!session.organizationId) {
@@ -128,6 +129,17 @@ export async function createApplication(
     }
     priorSatisfied = (GATE_SATISFYING as readonly string[]).includes(existing.status);
   }
+
+  /*
+   * The program's compliance policy, on the AUTHENTICATED path.
+   *
+   * Told plainly here, unlike on the public eligibility screen. There is no
+   * oracle to protect: this caller holds a session for this organization and is
+   * entitled to know what their own organization owes. Saying "you are not
+   * eligible" with no reason is how somebody ends up emailing a program officer
+   * to ask what they did wrong.
+   */
+  await assertCompliant(env.DB, cycle.program_id, organizationId);
 
   if (!target) {
     throw new AppError('CONFLICT', 'You have already started every stage of this application.', {

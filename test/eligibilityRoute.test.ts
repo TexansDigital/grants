@@ -334,3 +334,202 @@ describe('identity conflicts are explained, not guessed', () => {
     expect(orgs!.n).toBe(1);
   });
 });
+
+// ---------------------------------------------------------------------------
+describe('an outstanding grant report, at the public front door', () => {
+  /** An organization that already holds an award with an overdue report. */
+  async function owingOrganization(programId: string, policy: 'block' | 'warn' | 'ignore') {
+    const knownEmail = `owing${++n}@example.org`;
+    await db.prepare(`UPDATE programs SET compliance_policy=? WHERE id=?`)
+      .bind(policy, programId).run();
+
+    const now = nowIso();
+    const orgEin = ein();
+    const orgId = newId();
+    await db.prepare(
+      `INSERT INTO organizations (id, legal_name, ein, status, created_at, updated_at)
+       VALUES (?,?,?,'active',?,?)`,
+    ).bind(orgId, 'Bayou Reach Collective', orgEin, now, now).run();
+
+    const awardId = newId();
+    await db.prepare(
+      `INSERT INTO awards (id, organization_id, program_id, awarded_amount_cents, awarded_at,
+         status, source_system, source_reference, created_at, updated_at)
+       VALUES (?,?,?,?,?,'active','spreadsheet',?,?,?)`,
+    ).bind(awardId, orgId, programId, 2_500_000, now, `EL-${awardId.slice(0, 8)}`, now, now).run();
+
+    await db.prepare(
+      `INSERT INTO report_periods (id, award_id, label, period_type, due_date, status,
+         created_at, updated_at)
+       VALUES (?,?,'Final report','final','2020-01-01T00:00:00.000Z','open',?,?)`,
+    ).bind(newId(), awardId, now, now).run();
+
+    /*
+     * A KNOWN contact for that organization.
+     *
+     * This is what makes the gate reach them, and it is worth being explicit
+     * about. Identity resolution deliberately refuses to put an unknown email
+     * inside an organization matched only by EIN -- an EIN is printed on every
+     * Form 990 and does not prove authority -- so a returning grantee applying
+     * from a NEW address lands in a fresh duplicate with no history, and no
+     * overdue report attached to it. The gate binds to the organization the
+     * system actually resolved, not to the EIN typed into the box. See the
+     * test below that pins exactly that.
+     */
+    const userId = newId();
+    await db.prepare(
+      `INSERT INTO users (id, email, role, organization_id, is_active, created_at, updated_at)
+       VALUES (?,?, 'applicant', ?, 1, ?, ?)`,
+    ).bind(userId, knownEmail, orgId, now, now).run();
+
+    return { orgId, ein: orgEin, email: knownEmail };
+  }
+
+  it('answers a blocked applicant exactly as it answers everyone else', async () => {
+    /*
+     * The oracle this prevents. A 409 saying "you have an overdue report" to
+     * whoever typed an EIN answers "is this nonprofit delinquent with the
+     * Foundation?" for anyone holding a Form 990. Every other refusal on this
+     * endpoint already returns the same shape and puts the reason in the
+     * mailbox; this one has to as well.
+     */
+    const c = await openCycle();
+    const owing = await owingOrganization(c.program.programId, 'block');
+
+    const res = await post('/api/public/eligibility', {
+      cycleId: c.cycleId,
+      answers: goodAnswers({ ein: owing.ein, contact_email: owing.email }),
+    });
+
+    // Byte-identical to a successful start, message and all -- not merely the
+    // same status code. A different sentence is the same oracle in prose.
+    const clean = await post('/api/public/eligibility', {
+      cycleId: c.cycleId,
+      answers: goodAnswers({ contact_email: `clean${++n}@example.org` }),
+    });
+    expect(res.status).toBe(clean.status);
+    const blockedBody = await res.json<{ message: string; email: string }>();
+    const cleanBody = await clean.json<{ message: string; email: string }>();
+    expect(blockedBody.message).toBe(cleanBody.message);
+    expect(blockedBody.email).toBe(owing.email);
+
+    // And nothing was created FOR THEM. The control applicant above has one,
+    // which is the point: the two responses are identical and the outcomes
+    // are not.
+    const apps = await db.prepare(
+      `SELECT COUNT(*) AS n FROM applications WHERE cycle_id=? AND organization_id=?`,
+    ).bind(c.cycleId, owing.orgId).first<{ n: number }>();
+    expect(apps!.n).toBe(0);
+  });
+
+  it('tells the mailbox owner why, since they are entitled to know', async () => {
+    const c = await openCycle();
+    const owing = await owingOrganization(c.program.programId, 'block');
+
+    await post('/api/public/eligibility', {
+      cycleId: c.cycleId,
+      answers: goodAnswers({ ein: owing.ein, contact_email: owing.email }),
+    });
+
+    const mail = await db.prepare(
+      `SELECT template_key, subject FROM email_messages WHERE to_email=?`,
+    ).bind(owing.email).first<{ template_key: string; subject: string }>();
+    expect(mail!.template_key).toBe('sign_in_problem');
+    // Never a sign-in link: the whole point is that they cannot start yet.
+    expect(mail!.subject).toBe('We could not send your sign-in link');
+  });
+
+  it('records the refusal, naming what it refused over', async () => {
+    const c = await openCycle();
+    const owing = await owingOrganization(c.program.programId, 'block');
+    await post('/api/public/eligibility', {
+      cycleId: c.cycleId,
+      answers: goodAnswers({ ein: owing.ein, contact_email: owing.email }),
+    });
+
+    const row = await db.prepare(
+      `SELECT after_json FROM audit_log
+        WHERE action='application.blocked_by_compliance' AND entity_id=?`,
+    ).bind(owing.orgId).first<{ after_json: string }>();
+    expect(row).not.toBeNull();
+    const after = JSON.parse(row!.after_json) as { overdue_report_period_ids: string[] };
+    expect(after.overdue_report_period_ids).toHaveLength(1);
+  });
+
+  it('lets them straight through when the program only warns', async () => {
+    const c = await openCycle();
+    const owing = await owingOrganization(c.program.programId, 'warn');
+    const res = await post('/api/public/eligibility', {
+      cycleId: c.cycleId,
+      answers: goodAnswers({ ein: owing.ein, contact_email: owing.email }),
+    });
+    expect(res.status).toBe(201);
+    const apps = await db.prepare(
+      `SELECT COUNT(*) AS n FROM applications WHERE cycle_id=?`,
+    ).bind(c.cycleId).first<{ n: number }>();
+    expect(apps!.n).toBe(1);
+  });
+
+  it('lets them through when the program ignores reporting entirely', async () => {
+    const c = await openCycle();
+    const owing = await owingOrganization(c.program.programId, 'ignore');
+    await post('/api/public/eligibility', {
+      cycleId: c.cycleId,
+      answers: goodAnswers({ ein: owing.ein, contact_email: owing.email }),
+    });
+    const apps = await db.prepare(
+      `SELECT COUNT(*) AS n FROM applications WHERE cycle_id=?`,
+    ).bind(c.cycleId).first<{ n: number }>();
+    expect(apps!.n).toBe(1);
+  });
+
+  it('does NOT reach a returning grantee who applies from a new address', async () => {
+    /*
+     * A real and deliberate limit, pinned so nobody discovers it by surprise.
+     *
+     * Identity refuses to put an unknown email inside an organization matched
+     * only by EIN -- an EIN is printed on every Form 990 and does not prove
+     * authority -- so this lands in a fresh duplicate organization with no
+     * award and nothing overdue. The gate binds to the organization the system
+     * resolved, which is the right thing for it to bind to; reuniting the
+     * duplicate is the organization-merge tool's job, and once merged the gate
+     * applies.
+     *
+     * The alternative -- gating on the EIN typed into the box -- would mail
+     * "you have reports outstanding" to whoever typed a stranger's EIN, which
+     * is precisely the oracle the test above exists to prevent.
+     */
+    const c = await openCycle();
+    const owing = await owingOrganization(c.program.programId, 'block');
+    const res = await post('/api/public/eligibility', {
+      cycleId: c.cycleId,
+      answers: goodAnswers({ ein: owing.ein, contact_email: `stranger${++n}@example.org` }),
+    });
+    expect(res.status).toBe(201);
+    const apps = await db.prepare(
+      `SELECT COUNT(*) AS n FROM applications WHERE cycle_id=?`,
+    ).bind(c.cycleId).first<{ n: number }>();
+    expect(apps!.n).toBe(1);
+
+    // And a duplicate organization now exists for an admin to merge.
+    const orgs = await db.prepare(
+      `SELECT COUNT(*) AS n FROM organizations WHERE ein=?`,
+    ).bind(owing.ein).first<{ n: number }>();
+    expect(orgs!.n).toBe(2);
+  });
+
+  it('does not block an organization with nothing outstanding', async () => {
+    const c = await openCycle();
+    await db.prepare(`UPDATE programs SET compliance_policy='block' WHERE id=?`)
+      .bind(c.program.programId).run();
+    const res = await post('/api/public/eligibility', {
+      cycleId: c.cycleId,
+      answers: goodAnswers({ contact_email: `clean${++n}@example.org` }),
+    });
+    expect(res.status).toBe(201);
+    const apps = await db.prepare(
+      `SELECT COUNT(*) AS n FROM applications WHERE cycle_id=?`,
+    ).bind(c.cycleId).first<{ n: number }>();
+    expect(apps!.n).toBe(1);
+  });
+});

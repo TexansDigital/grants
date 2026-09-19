@@ -26,6 +26,7 @@ import {
   requestSignInLink, renderVerifyInterstitial, completeSignIn, signOutRoute,
 } from './lib/authRoutes';
 import { submitEligibility } from './lib/eligibility';
+import { listOpenCycles, readPublicForm } from './lib/publicRoutes';
 import { createApplication, readDraft, autosaveDraft, submitDraft } from './lib/applicantRoutes';
 import { presignUpload, presignReportUpload } from './lib/uploads';
 import {
@@ -148,6 +149,30 @@ const routes: readonly Route[] = [
   // logs.
   { method: 'GET', path: '/', roles: [], public: true, handler: serveAppShell },
   { method: 'GET', path: '/sign-in', roles: [], public: true, handler: serveAppShell },
+
+  // --- The public front door -------------------------------------------------
+  //
+  // Reads only, and narrow: open cycles, and the eligibility form of an open
+  // cycle. `cycles.status = 'open'` is the gate, and the only one -- an admin
+  // opening a cycle is the deliberate act that publishes it to the world.
+  {
+    method: 'GET',
+    path: '/api/public/cycles',
+    roles: [],
+    public: true,
+    handler: ({ env }) => listOpenCycles(env, nowIso()),
+  },
+  {
+    method: 'GET',
+    path: '/api/public/forms/:id',
+    roles: [],
+    public: true,
+    handler: ({ env, params }) => readPublicForm(env, params.id!, nowIso()),
+  },
+  // The public pages themselves. Listed explicitly, as every other SPA path
+  // is, so a mistyped URL still 404s.
+  { method: 'GET', path: '/apply', roles: [], public: true, handler: serveAppShell },
+  { method: 'GET', path: '/apply/start/:id', roles: [], public: true, handler: serveAppShell },
 
   // --- Applicant sign-in -----------------------------------------------------
   {

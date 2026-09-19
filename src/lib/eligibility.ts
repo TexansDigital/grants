@@ -41,6 +41,7 @@ import { sendEmail, transportFor } from './email';
 import { SIGN_IN_LINK, SIGN_IN_PROBLEM } from './emailTemplates';
 import { checkRateLimit, SIGN_IN_EMAIL_LIMIT, SIGN_IN_IP_LIMIT } from './rateLimit';
 import { verifyTurnstile } from './turnstile';
+import { checkCompliance } from './compliance';
 
 interface CycleRow {
   id: string;
@@ -248,6 +249,55 @@ export async function submitEligibility(
     // unauthenticated caller answers "has this nonprofit applied?" for anyone
     // holding a public EIN. The applicant gets a working link either way, and
     // the email itself can tell them which application it opens.
+    return accepted(email, 'new');
+  }
+
+  /*
+   * --- the program's compliance policy -------------------------------------
+   *
+   * Checked HERE, after the already-applied short-circuit, on purpose. The gate
+   * is on STARTING an application, not on continuing one: an organization that
+   * got in before the policy bit, or before a report went late, keeps the link
+   * to the application they already have.
+   *
+   * And it answers like every other refusal on this endpoint -- the same
+   * `accepted` shape to the caller, the reason to the mailbox. Saying "you have
+   * an overdue report" inline would turn a public, unauthenticated endpoint
+   * into an oracle on which nonprofits are delinquent with the Foundation, for
+   * anyone holding an EIN off a Form 990.
+   */
+  const compliance = await checkCompliance(env.DB, cycle.program_id, identity.organizationId);
+  if (compliance.decision === 'block') {
+    await sendEmail(
+      env,
+      ctx,
+      {
+        template: SIGN_IN_PROBLEM,
+        to: email,
+        idempotencyKey: `sign_in_problem:reports_outstanding:${email}`,
+        vars: {
+          reason: 'reports_outstanding',
+          supportEmail: SUPPORT_EMAIL,
+          destination: 'grant application',
+        },
+        context: { reason: 'reports_outstanding' },
+      },
+      transportFor(env),
+    );
+
+    await writeAudit(env.DB, ctx, {
+      action: 'application.blocked_by_compliance',
+      entityType: 'organization',
+      entityId: identity.organizationId,
+      after: {
+        cycle_id: cycle.id,
+        program_id: cycle.program_id,
+        policy: compliance.policy,
+        // Ids, not the message. The reports are rows anyone can go and read.
+        overdue_report_period_ids: compliance.overdue.map((r) => r.reportPeriodId),
+      },
+    });
+
     return accepted(email, 'new');
   }
 

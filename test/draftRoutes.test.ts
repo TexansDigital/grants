@@ -398,3 +398,73 @@ describe('scoping: another organization does not exist', () => {
     expect(res.status).toBe(409);
   });
 });
+
+// ---------------------------------------------------------------------------
+describe('an outstanding report, on the signed-in path', () => {
+  /** Give this organization an award with a report that went late. */
+  async function owe(organizationId: string, programId: string) {
+    const now = nowIso();
+    const awardId = newId();
+    await db.prepare(
+      `INSERT INTO awards (id, organization_id, program_id, awarded_amount_cents, awarded_at,
+         status, source_system, source_reference, created_at, updated_at)
+       VALUES (?,?,?,?,?,'active','spreadsheet',?,?,?)`,
+    ).bind(awardId, organizationId, programId, 2_500_000, now, `DR-${awardId.slice(0, 8)}`,
+           now, now).run();
+    await db.prepare(
+      `INSERT INTO report_periods (id, award_id, label, period_type, due_date, status,
+         created_at, updated_at)
+       VALUES (?,?,'Final report','final','2020-01-01T00:00:00.000Z','open',?,?)`,
+    ).bind(newId(), awardId, now, now).run();
+  }
+
+  it('refuses a new application and says which report to file', async () => {
+    /*
+     * Told plainly here, unlike at the public door. There is no oracle to
+     * protect: this caller holds a session for this organization and is
+     * entitled to know what their own organization owes. "You are not
+     * eligible" with no reason is how somebody ends up emailing a program
+     * officer to ask what they did wrong.
+     */
+    const a = await signedInApplicant();
+    const programId = await db.prepare(`SELECT program_id AS p FROM cycles WHERE id=?`)
+      .bind(a.cycleId).first<{ p: string }>();
+    await db.prepare(`UPDATE programs SET compliance_policy='block' WHERE id=?`)
+      .bind(programId!.p).run();
+    await owe(a.organizationId, programId!.p);
+
+    const res = await call('/api/applications', {
+      method: 'POST', cookie: a.cookie, body: { cycleId: a.cycleId },
+    });
+    expect(res.status).toBe(409);
+    const body = await res.json<{ error: { message: string } }>();
+    expect(body.error.message).toContain('Final report');
+  });
+
+  it('lets them through when the program only warns', async () => {
+    const a = await signedInApplicant();
+    const programId = await db.prepare(`SELECT program_id AS p FROM cycles WHERE id=?`)
+      .bind(a.cycleId).first<{ p: string }>();
+    await db.prepare(`UPDATE programs SET compliance_policy='warn' WHERE id=?`)
+      .bind(programId!.p).run();
+    await owe(a.organizationId, programId!.p);
+
+    const res = await call('/api/applications', {
+      method: 'POST', cookie: a.cookie, body: { cycleId: a.cycleId },
+    });
+    expect(res.status).toBe(201);
+  });
+
+  it('does not refuse an organization with nothing outstanding', async () => {
+    const a = await signedInApplicant();
+    const programId = await db.prepare(`SELECT program_id AS p FROM cycles WHERE id=?`)
+      .bind(a.cycleId).first<{ p: string }>();
+    await db.prepare(`UPDATE programs SET compliance_policy='block' WHERE id=?`)
+      .bind(programId!.p).run();
+
+    const res = await call('/api/applications', {
+      method: 'POST', cookie: a.cookie, body: { cycleId: a.cycleId },
+    });
+    expect(res.status).toBe(201);
+  });
+});
