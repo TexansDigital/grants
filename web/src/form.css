@@ -761,3 +761,162 @@
 .confirmation .help {
   margin: 0;
 }
+
+/* ---- grantee portal ------------------------------------------------------ */
+/*
+ * The portal shares the applicant form's light ground and every control in it.
+ * These classes are the page's own layout: a list of grants, a list of
+ * obligations under each, and one call to action.
+ *
+ * Mobile first, and meant literally -- a program director files this from a
+ * phone. Nothing here is a table, nothing scrolls sideways, every control
+ * clears 44px.
+ */
+
+.portal-todo {
+  border: 1px solid var(--blue);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-1);
+  padding: var(--space-5) var(--space-6);
+  margin-bottom: var(--space-6);
+}
+.portal-todo h3 {
+  font-size: var(--step-2);
+  margin-bottom: var(--space-4);
+}
+
+.portal-award {
+  margin-bottom: var(--space-5);
+}
+.portal-award-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+.portal-award-head h3 {
+  font-size: var(--step-2);
+}
+.portal-amount {
+  font-size: var(--step-3);
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+
+.portal-meta {
+  color: var(--ink-2);
+  font-size: var(--step--1);
+  margin-top: var(--space-1);
+}
+
+.portal-list {
+  list-style: none;
+  margin: var(--space-4) 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+.portal-list > li {
+  border-top: 1px solid var(--line-2);
+  padding-top: var(--space-4);
+}
+.portal-list > li:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.portal-todo-row,
+.portal-report-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+.portal-todo-row > div,
+.portal-report-row > div {
+  /* Let the text column shrink rather than pushing the button off the row. */
+  min-width: 0;
+  flex: 1 1 18rem;
+}
+
+.portal-todo-title {
+  font-size: var(--step-1);
+  font-weight: 650;
+}
+.portal-report-title {
+  font-weight: 600;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.portal-due {
+  margin-top: var(--space-1);
+  font-size: var(--step--1);
+  color: var(--ink-2);
+}
+/* Red ONLY when a date has actually passed. Reserved means reserved: a report
+   due in three weeks is not an alert. */
+.portal-due[data-tone='late'] {
+  color: var(--danger);
+  font-weight: 600;
+}
+.portal-due[data-tone='done'] {
+  color: var(--ok);
+}
+
+.portal-chip {
+  font-size: var(--step--1);
+  font-weight: 600;
+  padding: 2px var(--space-2);
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  color: var(--ink-2);
+  background: var(--surface-2);
+  white-space: nowrap;
+}
+.portal-chip[data-tone='todo'] {
+  border-color: var(--blue);
+  color: var(--blue-ink);
+}
+.portal-chip[data-tone='late'] {
+  border-color: var(--danger-line);
+  color: var(--danger);
+  background: var(--danger-bg);
+}
+.portal-chip[data-tone='done'] {
+  border-color: transparent;
+  color: var(--ok);
+  background: var(--ok-bg);
+}
+
+.portal-feedback {
+  margin-top: var(--space-2);
+  padding: var(--space-3);
+  border-left: 3px solid var(--blue);
+  background: var(--surface-2);
+  font-size: var(--step-0);
+}
+
+.portal-section {
+  margin-bottom: var(--space-6);
+}
+.portal-section:last-of-type {
+  margin-bottom: var(--space-4);
+}
+
+.portal-empty h3,
+.portal-done h2 {
+  font-size: var(--step-2);
+  margin-bottom: var(--space-3);
+}
+.portal-done p {
+  max-width: var(--measure);
+  margin-bottom: var(--space-3);
+}

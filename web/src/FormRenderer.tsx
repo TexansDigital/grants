@@ -28,7 +28,7 @@ import type { FormDefinition, SectionDef } from '../../src/lib/forms';
 import { isFieldVisible, validateSubmission } from '../../src/lib/forms';
 import { formatCents } from '../../src/lib/money';
 import { Field } from './Field';
-import { saveStateLabel, type DraftSyncState } from './draftSync';
+import { ServerSaveState } from './SaveState';
 import { applicantApi, draftPathFor, uploadPathFor } from './applicantApi';
 import type { ApiError } from './http';
 import { useDraftSync } from './useDraftSync';
@@ -667,49 +667,13 @@ function ErrorSummary({
 }
 
 /**
- * The saved-state indicator.
+ * The saved-state indicator on the PREVIEW path, where answers live in this
+ * browser and nowhere else.
  *
- * A polite live region: an applicant using a screen reader hears "Saved 2:14 PM"
- * without having it interrupt what they are typing.
+ * Kept separate from ServerSaveState deliberately: they say different things
+ * because they mean different things, and a preview that borrowed the server's
+ * wording would tell staff their answers were saved somewhere they are not.
  */
-/**
- * The saved-state indicator on the applicant path.
- *
- * The sentence itself comes from saveStateLabel, which is tested on its own --
- * this component decides only WHEN to interrupt a screen-reader user.
- *
- * Announcing every autosave would read "Saved at 9:51 PM" over somebody in the
- * middle of a 500-word narrative, every few seconds. Only a change of STATUS is
- * worth interrupting for; a fresher timestamp in the same status is not. A
- * failure is assertive, because it is the one the applicant has to act on.
- *
- * It re-renders on a timer so "just now" becomes "40 seconds ago" without an
- * answer changing. A stale relative time is worse than none: it is the number
- * somebody uses to decide whether it is safe to close the tab.
- */
-function ServerSaveState({ state }: { state: DraftSyncState }): ReactElement {
-  const [, setTick] = useState(0);
-  useEffect(() => {
-    const id = window.setInterval(() => setTick((n) => n + 1), 15_000);
-    return () => window.clearInterval(id);
-  }, []);
-
-  const announced = useRef(state.status);
-  const changed = announced.current !== state.status;
-  announced.current = state.status;
-  const bad = state.status === 'failed' || state.status === 'signed_out';
-
-  return (
-    <span
-      className={bad ? 'counter danger' : 'counter'}
-      role={bad ? 'status' : undefined}
-      aria-live={bad ? 'assertive' : changed ? 'polite' : 'off'}
-    >
-      {saveStateLabel(state)}
-    </span>
-  );
-}
-
 function SaveState({ savedAt, failed }: { savedAt: Date | null; failed: boolean }): ReactElement {
   // The timestamp changes on every autosave, so a live region re-announced
   // "Saved at 9:51 PM" behind somebody in the middle of a 500-word narrative.

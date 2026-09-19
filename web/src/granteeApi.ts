@@ -1,0 +1,103 @@
+/**
+ * The grantee portal's view of the API.
+ *
+ * Money crosses this boundary as INTEGER CENTS and is formatted at the display
+ * edge with the same formatCents the Worker and the confirmation email use. A
+ * portal that did its own division is a portal that eventually shows somebody
+ * $187.50 of a $18,750 grant.
+ */
+
+import { request } from './http';
+import type { FormDefinition } from '../../src/lib/forms';
+
+export type ReportState =
+  | 'open'
+  | 'not_open_yet'
+  | 'in_progress'
+  | 'submitted'
+  | 'changes_requested'
+  | 'accepted'
+  | 'waived'
+  | 'no_form_yet';
+
+export interface ReportSummary {
+  id: string;
+  label: string;
+  type: string;
+  periodStart: string | null;
+  periodEnd: string | null;
+  dueDate: string;
+  opensAt: string | null;
+  state: ReportState;
+  outstanding: boolean;
+  submittedAt: string | null;
+  /** Staff feedback, present only when changes were requested. */
+  feedback: string | null;
+}
+
+export interface AwardSummary {
+  id: string;
+  program: string;
+  /** Integer cents. Formatted at the display edge, never here. */
+  amountCents: number;
+  awardedAt: string;
+  termStart: string | null;
+  termEnd: string | null;
+  status: string;
+  reports: ReportSummary[];
+}
+
+export interface GranteeHomeResponse {
+  organization: { name: string | null };
+  awards: AwardSummary[];
+}
+
+export interface ReportResponse {
+  report: {
+    id: string;
+    label: string;
+    type: string;
+    periodStart: string | null;
+    periodEnd: string | null;
+    dueDate: string;
+    state: ReportState;
+    canFile: boolean;
+    feedback: string | null;
+    savedAt: string | null;
+  };
+  award: {
+    program: string | null;
+    amountCents: number | null;
+    termStart: string | null;
+    termEnd: string | null;
+  };
+  answers: Record<string, unknown>;
+  /** Absent when the report is closed: there is nothing to fill in. */
+  form?: FormDefinition;
+  uploadFields?: string[];
+}
+
+export interface FileReportResponse {
+  reportSubmissionId: string;
+  submittedAt: string;
+  metricsRecorded: number;
+}
+
+const enc = encodeURIComponent;
+
+export const granteeApi = {
+  home: (signal?: AbortSignal) =>
+    request<GranteeHomeResponse>('/api/grantee/home', signal ? { signal } : {}),
+
+  report: (reportPeriodId: string, signal?: AbortSignal) =>
+    request<ReportResponse>(
+      `/api/grantee/reports/${enc(reportPeriodId)}`,
+      signal ? { signal } : {},
+    ),
+
+  file: (reportPeriodId: string, answers: Record<string, unknown>) =>
+    request<FileReportResponse>(`/api/grantee/reports/${enc(reportPeriodId)}/submit`, {
+      method: 'POST',
+      body: { answers },
+    }),
+};

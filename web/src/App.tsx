@@ -17,6 +17,9 @@ import { ApiError, api } from './api';
 import { applicantApi, type DraftResponse } from './applicantApi';
 import type { CycleRow, FormSummary, ProgramRow, SessionUser } from './api';
 import type { FormDefinition } from '../../src/lib/forms';
+import { granteeApi, type GranteeHomeResponse, type ReportResponse } from './granteeApi';
+import { GranteeHome } from './GranteeHome';
+import { ReportForm } from './ReportForm';
 import { Home } from './Home';
 import { FormRenderer } from './FormRenderer';
 import { Pipeline } from './Pipeline';
@@ -36,7 +39,9 @@ type Route =
   | { name: 'pipeline' }
   | { name: 'application'; id: string }
   | { name: 'form'; id: string }
-  | { name: 'apply'; id: string };
+  | { name: 'apply'; id: string }
+  | { name: 'portal' }
+  | { name: 'report'; id: string };
 
 function parseRoute(pathname: string): Route | null {
   const parts = pathname.split('/').filter((s) => s.length > 0);
@@ -50,6 +55,12 @@ function parseRoute(pathname: string): Route | null {
   // The applicant's own application. Not behind Cloudflare Access -- an
   // applicant holds an app-native session from a magic link.
   if (parts.length === 2 && parts[0] === 'apply' && parts[1]) return { name: 'apply', id: parts[1] };
+  // The grantee portal. Same front door as the applicant: an app-native
+  // session from a magic link, never Cloudflare Access.
+  if (parts.length === 1 && parts[0] === 'reports') return { name: 'portal' };
+  if (parts.length === 2 && parts[0] === 'reports' && parts[1]) {
+    return { name: 'report', id: parts[1] };
+  }
   return null;
 }
 
@@ -65,6 +76,8 @@ export function App(): ReactElement {
   const [home, setHome] = useState<HomeData | null>(null);
   const [form, setForm] = useState<FormDefinition | null>(null);
   const [draft, setDraft] = useState<DraftResponse | null>(null);
+  const [portal, setPortal] = useState<GranteeHomeResponse | null>(null);
+  const [report, setReport] = useState<ReportResponse | null>(null);
   const [error, setError] = useState<ApiError | null>(null);
   const [loading, setLoading] = useState(true);
   const [themePref, setThemePref] = useState<ThemePreference>(loadPreference);
@@ -130,7 +143,12 @@ export function App(): ReactElement {
    * readability problem, and an applicant has no toggle to escape it with.
    */
   useEffect(() => {
-    const internal = route?.name !== 'form' && route?.name !== 'apply';
+    const external =
+      route?.name === 'form' ||
+      route?.name === 'apply' ||
+      route?.name === 'portal' ||
+      route?.name === 'report';
+    const internal = !external;
     const html = document.documentElement;
     html.dataset.surface = internal ? 'internal' : 'applicant';
     html.dataset.theme = internal ? resolvedTheme : 'light';
@@ -151,6 +169,8 @@ export function App(): ReactElement {
       home: 'Configuration · Steward',
       form: 'Form preview · Steward',
       apply: 'Your application · Steward',
+      portal: 'Your grants · Steward',
+      report: 'File your report · Steward',
     };
     document.title = route ? (titles[route.name] ?? 'Steward') : 'Page not found · Steward';
     if (loading) return;
@@ -191,6 +211,10 @@ export function App(): ReactElement {
         } else if (route?.name === 'apply') {
           const d = await applicantApi.draft(route.id, signal);
           setDraft(d);
+        } else if (route?.name === 'portal') {
+          setPortal(await granteeApi.home(signal));
+        } else if (route?.name === 'report') {
+          setReport(await granteeApi.report(route.id, signal));
         }
       } catch (e) {
         if (e instanceof DOMException && e.name === 'AbortError') return;
@@ -253,6 +277,27 @@ export function App(): ReactElement {
       <Message title="Loading">
         <p aria-live="polite">Loading…</p>
       </Message>
+    );
+  }
+
+  if (route.name === 'portal') {
+    if (!portal) return <Message title="Loading"><p>Loading…</p></Message>;
+    return (
+      <PortalShell organization={portal.organization.name}>
+        <GranteeHome
+          data={portal}
+          onOpenReport={(id) => navigate(`/reports/${encodeURIComponent(id)}`)}
+        />
+      </PortalShell>
+    );
+  }
+
+  if (route.name === 'report') {
+    if (!report) return <Message title="Loading"><p>Loading…</p></Message>;
+    return (
+      <PortalShell organization={null}>
+        <ReportForm data={report} onBack={() => navigate('/reports')} />
+      </PortalShell>
     );
   }
 
@@ -331,6 +376,36 @@ export function App(): ReactElement {
       forms={home.forms}
       onOpenForm={(id) => navigate(`/forms/${encodeURIComponent(id)}`)}
     />,
+  );
+}
+
+/**
+ * The portal's frame.
+ *
+ * Deliberately not the internal Shell: there is no navigation here, because
+ * there is nowhere else to go. A grantee's whole relationship with this system
+ * is one page and the report they are filing from it, and a sidebar of links
+ * they cannot use would only invite the question of what is behind them.
+ */
+function PortalShell({
+  organization,
+  children,
+}: {
+  organization: string | null;
+  children: ReactNode;
+}): ReactElement {
+  return (
+    <div className="page">
+      <header className="masthead">
+        <div className="masthead-inner">
+          <h1>Houston Texans Foundation</h1>
+          <span className="program">{organization ?? 'Grant reporting'}</span>
+        </div>
+      </header>
+      <div className="shell single">
+        <main>{children}</main>
+      </div>
+    </div>
   );
 }
 

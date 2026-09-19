@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Steward — multi-program grantmaking platform on Cloudflare",
+  "description": "Steward \u2014 multi-program grantmaking platform on Cloudflare",
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
@@ -24,7 +24,8 @@
     "migrate:staging": "wrangler d1 migrations apply steward-staging --remote --env staging",
     "dev:staging": "wrangler dev --env staging",
     "e2e:applicant": "node scripts/e2e-applicant.mjs",
-    "whoami": "bash scripts/preflight.sh"
+    "whoami": "bash scripts/preflight.sh",
+    "e2e:grantee": "node scripts/e2e-grantee.mjs"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.12.21",
