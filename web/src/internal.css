@@ -605,6 +605,18 @@ th.num {
   flex-direction: column;
   gap: var(--space-4);
 }
+/* .actions carries a top border and a full line of margin, because on the
+   applicant form it is the footer of a long page. Inside a decision block it
+   pushes the button a rule and two lines away from the sentence describing
+   what the button will do -- which is the one place they must read as one
+   thing. Seen in the browser on the merge panel; it was equally wrong on the
+   report accept/revise block. */
+.panel-decide > .actions {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+
 .panel-decide textarea {
   width: 100%;
   max-width: var(--measure);

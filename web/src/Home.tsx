@@ -11,6 +11,7 @@ import { useCallback, useState } from 'react';
 import type { ReactElement } from 'react';
 import { ApiError, api } from './api';
 import type { CycleRow, FormSummary, ProgramRow } from './api';
+import { Duplicates } from './Duplicates';
 
 interface Props {
   programs: ProgramRow[];
@@ -151,6 +152,15 @@ export function Home({
             </section>
           );
         })}
+
+        {/*
+          Data health, not program configuration -- but it belongs on the same
+          screen, because a duplicate organization is something an admin notices
+          while doing something else and must be able to act on immediately. It
+          spans every program, so it sits after the per-program panels rather
+          than inside one.
+        */}
+        <Duplicates isAdmin={isAdmin} />
     </>
   );
 }

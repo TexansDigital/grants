@@ -160,6 +160,42 @@ export interface StaffReport {
   }[];
 }
 
+export interface OrganizationSummary {
+  id: string;
+  legalName: string;
+  ein: string | null;
+  status: string;
+  createdAt: string;
+  applications: number;
+  awards: number;
+  contacts: number;
+  users: number;
+  openReports: number;
+  lastActivityAt: string | null;
+}
+
+export interface DuplicateGroup {
+  reason: 'same_ein' | 'same_name';
+  key: string;
+  organizations: OrganizationSummary[];
+}
+
+export interface MergePlan {
+  survivor: OrganizationSummary;
+  merged: OrganizationSummary;
+  moves: {
+    applications: number;
+    awards: number;
+    reportDrafts: number;
+    contacts: number;
+    contactsRetired: number;
+    users: number;
+    attachments: number;
+  };
+  conflicts: string[];
+  ok: boolean;
+}
+
 export const api = {
   session: (signal?: AbortSignal) => get<{ user: SessionUser }>('/api/session', signal),
   programs: (signal?: AbortSignal) => get<{ programs: ProgramRow[] }>('/api/programs', signal),
@@ -194,6 +230,19 @@ export const api = {
       method: 'POST',
       body: {},
     }),
+  duplicates: (signal?: AbortSignal) =>
+    get<{ groups: DuplicateGroup[] }>('/api/organizations/duplicates', signal),
+  mergePreview: (duplicateId: string, into: string, signal?: AbortSignal) =>
+    get<MergePlan>(
+      `/api/organizations/${encodeURIComponent(duplicateId)}/merge-preview` +
+        `?into=${encodeURIComponent(into)}`,
+      signal,
+    ),
+  merge: (duplicateId: string, into: string) =>
+    request<{ survivorId: string; mergedId: string }>(
+      `/api/organizations/${encodeURIComponent(duplicateId)}/merge`,
+      { method: 'POST', body: { into } },
+    ),
   reports: (query: string, signal?: AbortSignal) =>
     get<{ rows: PortfolioRow[]; total: number }>(
       `/api/reports${query ? `?${query}` : ''}`,
