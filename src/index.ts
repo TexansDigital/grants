@@ -27,7 +27,10 @@ import {
 } from './lib/authRoutes';
 import { submitEligibility } from './lib/eligibility';
 import { createApplication, readDraft, autosaveDraft, submitDraft } from './lib/applicantRoutes';
-import { presignUpload } from './lib/uploads';
+import { presignUpload, presignReportUpload } from './lib/uploads';
+import {
+  granteeHome, granteeMe, readReport, autosaveReport, fileReport,
+} from './lib/granteeRoutes';
 import { requireStaffSession } from './lib/auth';
 import { loadFormDefinition } from './lib/loadForm';
 import {
@@ -247,6 +250,73 @@ const routes: readonly Route[] = [
         { headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } },
       ),
   },
+  // --- The grantee portal ----------------------------------------------------
+  //
+  // Same front door as the applicant: one magic link, one external session.
+  // A grantee IS an applicant who has been funded, and making them hold two
+  // accounts to tell us how it went would be a choice nobody asked for.
+  {
+    method: 'GET',
+    path: '/api/grantee/home',
+    roles: EXTERNAL_USER,
+    auth: 'applicant',
+    handler: ({ env, session }) => granteeHome(env, session),
+  },
+  {
+    method: 'GET',
+    path: '/api/grantee/me',
+    roles: EXTERNAL_USER,
+    auth: 'applicant',
+    handler: ({ env, session }) => granteeMe(env, session),
+  },
+  {
+    method: 'GET',
+    path: '/api/grantee/reports/:id',
+    roles: EXTERNAL_USER,
+    auth: 'applicant',
+    handler: ({ env, session, params }) => readReport(env, session, params.id!),
+  },
+  {
+    method: 'PATCH',
+    path: '/api/grantee/reports/:id/draft',
+    roles: EXTERNAL_USER,
+    auth: 'applicant',
+    handler: ({ request, env, ctx, session, params }) =>
+      autosaveReport(request, env, ctx, session, params.id!),
+  },
+  {
+    method: 'POST',
+    path: '/api/grantee/reports/:id/submit',
+    roles: EXTERNAL_USER,
+    auth: 'applicant',
+    handler: ({ request, env, ctx, session, params }) =>
+      fileReport(request, env, ctx, session, params.id!),
+  },
+  {
+    method: 'POST',
+    path: '/api/grantee/reports/:id/uploads',
+    roles: EXTERNAL_USER,
+    auth: 'applicant',
+    handler: async ({ request, env, ctx, session, params }) => {
+      const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+      const result = await presignReportUpload(env, ctx, session, params.id!, {
+        fieldKey: String(body.fieldKey ?? ''),
+        filename: String(body.filename ?? ''),
+        mimeType: String(body.mimeType ?? ''),
+        sizeBytes: Number(body.sizeBytes ?? 0),
+      });
+      return new Response(JSON.stringify(result), {
+        status: 201,
+        headers: { 'content-type': 'application/json', 'cache-control': 'no-store' },
+      });
+    },
+  },
+  // The portal's own paths. The shell is public; every call it makes is
+  // scoped by the session behind it, so a signed-out grantee gets a 401 from
+  // the data endpoint rather than a blank page.
+  { method: 'GET', path: '/reports', roles: [], public: true, handler: serveAppShell },
+  { method: 'GET', path: '/reports/:id', roles: [], public: true, handler: serveAppShell },
+
   { method: 'GET', path: '/forms/:id', roles: [], public: true, handler: serveAppShell },
   // The applicant's own application. The shell is public; every API call it
   // makes is scoped by the session behind it, and a signed-out applicant gets

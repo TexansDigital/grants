@@ -26,7 +26,7 @@ import { applicantApi } from './applicantApi';
  * and never depend on the handle as a whole.
  */
 export interface DraftSyncHandle {
-  /** False in preview, where there is no application to save against. */
+  /** False in preview, where there is nothing on the server to save against. */
   enabled: boolean;
   state: DraftSyncState;
   /** Stable identity. Safe in a dependency array. */
@@ -35,7 +35,13 @@ export interface DraftSyncHandle {
   flush: () => Promise<boolean>;
 }
 
-export function useDraftSync(applicationId: string | null): DraftSyncHandle {
+/**
+ * `draftPath` is the endpoint to PATCH, or null when there is nothing to save
+ * against -- a staff preview. It is a path rather than an id because the
+ * applicant form and the grantee report post the same body to two different
+ * routes, and one autosave engine serving both is the point.
+ */
+export function useDraftSync(draftPath: string | null): DraftSyncHandle {
   /**
    * Created and destroyed by the SAME effect.
    *
@@ -53,17 +59,17 @@ export function useDraftSync(applicationId: string | null): DraftSyncHandle {
   const [sync, setSync] = useState<DraftSync<Record<string, unknown>> | null>(null);
 
   useEffect(() => {
-    if (applicationId === null) {
+    if (draftPath === null) {
       setSync(null);
       return undefined;
     }
     const instance = new DraftSync<Record<string, unknown>>(async (values) => {
-      const out = await applicantApi.save(applicationId, values);
+      const out = await applicantApi.saveDraftAt(draftPath, values);
       return { savedAt: out.savedAt };
     });
     setSync(instance);
     return () => instance.dispose();
-  }, [applicationId]);
+  }, [draftPath]);
 
   // A stable empty state, so the no-application case can still be read without
   // every caller branching on null before touching `.state`.
@@ -105,7 +111,7 @@ export function useDraftSync(applicationId: string | null): DraftSyncHandle {
   const flush = useCallback(async () => (sync ? sync.flush() : true), [sync]);
 
   return useMemo(
-    () => ({ enabled: applicationId !== null, state, change, flush }),
-    [applicationId, change, flush, state],
+    () => ({ enabled: draftPath !== null, state, change, flush }),
+    [draftPath, change, flush, state],
   );
 }

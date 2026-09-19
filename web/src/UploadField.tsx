@@ -29,7 +29,7 @@ interface InFlight {
 
 interface Props {
   field: FieldDef;
-  applicationId: string;
+  uploadPath: string;
   value: AttachmentRef[];
   onChange: (next: AttachmentRef[]) => void;
   onBlur: () => void;
@@ -38,7 +38,7 @@ interface Props {
 
 export function UploadField({
   field,
-  applicationId,
+  uploadPath,
   value,
   onChange,
   onBlur,
@@ -78,7 +78,7 @@ export function UploadField({
             { key, filename: file.name, sizeBytes: file.size, fraction: null },
           ]);
           try {
-            const ref = await uploadFile(applicationId, field, file, (p) => {
+            const ref = await uploadFile(uploadPath, field, file, (p) => {
               setInFlight((f) =>
                 f.map((x) => (x.key === key ? { ...x, fraction: p.fraction } : x)),
               );
@@ -100,7 +100,7 @@ export function UploadField({
       if (inputRef.current) inputRef.current.value = '';
       onBlur();
     },
-    [applicationId, field, maxFiles, onBlur, onChange, remaining],
+    [uploadPath, field, maxFiles, onBlur, onChange, remaining],
   );
 
   const remove = useCallback(

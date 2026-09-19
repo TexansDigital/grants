@@ -35,7 +35,7 @@ export interface FieldProps {
    * The application uploads belong to. Absent in the staff preview, where
    * there is no application to attach anything to and the control says so.
    */
-  applicationId?: string;
+  uploadPath?: string;
 }
 
 /**
@@ -80,7 +80,7 @@ export function Field({
   error,
   onChange,
   onBlur,
-  applicationId,
+  uploadPath,
 }: FieldProps): ReactElement {
   const uid = useId();
   const inputId = `f${uid}`;
@@ -148,7 +148,7 @@ export function Field({
     </p>
   ) : null;
 
-  const body = renderControl(field, value, onChange, common, error, applicationId);
+  const body = renderControl(field, value, onChange, common, error, uploadPath);
 
   // An attestation reads as a sentence; the checkbox carries its own label and
   // a second one above it would be read out twice.
@@ -198,7 +198,7 @@ function renderControl(
   onChange: (v: unknown) => void,
   common: ControlProps,
   error: string | null,
-  applicationId: string | undefined,
+  uploadPath: string | undefined,
 ): ReactElement {
   const v = field.validation ?? {};
 
@@ -454,11 +454,11 @@ function renderControl(
     }
 
     case 'file_upload':
-      if (applicationId) {
+      if (uploadPath) {
         return (
           <UploadField
             field={field}
-            applicationId={applicationId}
+            uploadPath={uploadPath}
             value={asRefs(value)}
             onChange={onChange}
             onBlur={common.onBlur as () => void}

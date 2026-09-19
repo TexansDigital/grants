@@ -49,6 +49,15 @@ export interface PresignResponse {
 
 const enc = encodeURIComponent;
 
+export const draftPathFor = (applicationId: string) =>
+  `/api/applications/${enc(applicationId)}/draft`;
+export const uploadPathFor = (applicationId: string) =>
+  `/api/applications/${enc(applicationId)}/uploads`;
+export const reportDraftPathFor = (reportPeriodId: string) =>
+  `/api/grantee/reports/${enc(reportPeriodId)}/draft`;
+export const reportUploadPathFor = (reportPeriodId: string) =>
+  `/api/grantee/reports/${enc(reportPeriodId)}/uploads`;
+
 export const applicantApi = {
   draft: (applicationId: string, signal?: AbortSignal) =>
     request<DraftResponse>(
@@ -56,8 +65,17 @@ export const applicantApi = {
       signal ? { signal } : {},
     ),
 
-  save: (applicationId: string, answers: Record<string, unknown>, signal?: AbortSignal) =>
-    request<SaveResponse>(`/api/applications/${enc(applicationId)}/draft`, {
+  /**
+   * Autosave, addressed by ENDPOINT rather than by application id.
+   *
+   * An applicant's draft and a grantee's report draft are the same exchange --
+   * post the answers, get back a saved-at and any type errors -- against two
+   * different paths. Taking the path is what lets one autosave engine, one
+   * indicator and one set of tests serve both, instead of a second copy that
+   * drifts.
+   */
+  saveDraftAt: (path: string, answers: Record<string, unknown>, signal?: AbortSignal) =>
+    request<SaveResponse>(path, {
       method: 'PATCH',
       body: { answers },
       ...(signal ? { signal } : {}),
@@ -73,12 +91,10 @@ export const applicantApi = {
       body: { answers, ...(guidelinesVersion ? { guidelinesVersion } : {}) },
     }),
 
-  presignUpload: (
-    applicationId: string,
+  /** Authorize one upload. Same exchange on both surfaces; only the path differs. */
+  presignUploadAt: (
+    path: string,
     intent: { fieldKey: string; filename: string; mimeType: string; sizeBytes: number },
   ) =>
-    request<PresignResponse>(`/api/applications/${enc(applicationId)}/uploads`, {
-      method: 'POST',
-      body: intent,
-    }),
+    request<PresignResponse>(path, { method: 'POST', body: intent }),
 };

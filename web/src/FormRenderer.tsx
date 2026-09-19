@@ -29,7 +29,7 @@ import { isFieldVisible, validateSubmission } from '../../src/lib/forms';
 import { formatCents } from '../../src/lib/money';
 import { Field } from './Field';
 import { saveStateLabel, type DraftSyncState } from './draftSync';
-import { applicantApi } from './applicantApi';
+import { applicantApi, draftPathFor, uploadPathFor } from './applicantApi';
 import type { ApiError } from './http';
 import { useDraftSync } from './useDraftSync';
 
@@ -88,7 +88,7 @@ export function FormRenderer({ def, onBack, draft }: Props): ReactElement {
    */
   const [serverErrors, setServerErrors] = useState<ReadonlyMap<string, string>>(new Map());
   const { state: draftState, change: pushDraft, flush: flushDraft } = useDraftSync(
-    draft?.applicationId ?? null,
+    draft ? draftPathFor(draft.applicationId) : null,
   );
   // Which fields have been interacted with. An error is not shown on a field
   // nobody has touched yet -- a form that is red before you start is hostile.
@@ -554,7 +554,7 @@ export function FormRenderer({ def, onBack, draft }: Props): ReactElement {
                       error={errorFor(f, step)}
                       onChange={(v) => setValue(f.field_key, v)}
                       onBlur={() => markTouched(f.field_key)}
-                      {...(draft ? { applicationId: draft.applicationId } : {})}
+                      {...(draft ? { uploadPath: uploadPathFor(draft.applicationId) } : {})}
                     />
                   ))}
                 </div>

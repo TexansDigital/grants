@@ -163,7 +163,8 @@ export function putToR2(
  * counts -- a presigned URL is a credential, and a client check is a courtesy.
  */
 export async function uploadFile(
-  applicationId: string,
+  /** The presign endpoint. See applicantApi: only the path differs by surface. */
+  uploadPath: string,
   field: FieldDef,
   file: File,
   onProgress: (p: UploadProgress) => void,
@@ -185,7 +186,7 @@ export async function uploadFile(
 
   let presigned;
   try {
-    presigned = await applicantApi.presignUpload(applicationId, intent);
+    presigned = await applicantApi.presignUploadAt(uploadPath, intent);
   } catch (err) {
     if (err instanceof ApiError) {
       // The server's message, not ours: it knows why it refused, and it has
