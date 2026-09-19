@@ -562,3 +562,56 @@ th.num {
   color: var(--ink-3);
   font-variant-numeric: tabular-nums;
 }
+
+/* ---- report compliance desk ---------------------------------------------- */
+/*
+ * Statuses, on the same discipline as the application badges above: outline
+ * blue for work in flight, filled blue for the affirmative end state, muted
+ * for the ones that are simply over.
+ *
+ * Red appears in exactly ONE place on this screen -- the days-late marker --
+ * and nowhere else. A report a nonprofit has already filed is our queue, not
+ * their failure, so `submitted` is blue however late it arrived.
+ */
+.badge-revisions_requested {
+  border-color: var(--warn);
+  color: var(--warn);
+  background: var(--warn-bg);
+}
+.badge-accepted {
+  border-color: var(--blue-fill);
+  background: var(--blue-fill);
+  color: var(--white);
+}
+.badge-scheduled,
+.badge-waived {
+  border-color: var(--line);
+  color: var(--ink-3);
+}
+
+.meta.strong[data-overdue='true'] {
+  color: var(--danger);
+  font-weight: 700;
+  display: block;
+}
+
+/* The decision block sits below everything it is a decision about. A pair of
+   buttons above the report they judge invites a click before a read. */
+.panel-decide {
+  border-top: 1px solid var(--line);
+  margin-top: var(--space-5);
+  padding-top: var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+.panel-decide textarea {
+  width: 100%;
+  max-width: var(--measure);
+  font: inherit;
+  padding: var(--space-3);
+  border: 1px solid var(--line-control);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--ink);
+}

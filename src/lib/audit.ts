@@ -94,6 +94,7 @@ export type AuditAction =
   | 'report.submitted'
   | 'report.accepted'
   | 'report.revisions_requested'
+  | 'report.waived'
   // files and access
   | 'attachment.uploaded'
   | 'attachment.deleted'

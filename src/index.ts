@@ -41,6 +41,9 @@ import {
 } from './lib/scope';
 import { searchApplications } from './lib/search';
 import {
+  reportPortfolio, readReportForStaff, acceptReport, requestReportRevisions, waiveReport,
+} from './lib/reportAdmin';
+import {
   ADMIN_ONLY,
   STAFF_READ,
   EXTERNAL_USER,
@@ -330,6 +333,63 @@ const routes: readonly Route[] = [
     roles: STAFF_READ,
     handler: async ({ ctx, session }) =>
       json({ user: { email: session.email, role: session.role } }, ctx),
+  },
+
+  // ---- grantee reporting, from the staff side -------------------------------
+  {
+    method: 'GET',
+    path: '/api/reports',
+    roles: STAFF_READ,
+    handler: async ({ env, ctx, url, session }) => {
+      const q = url.searchParams;
+      const out = await reportPortfolio(env.DB, session, {
+        programId: q.get('program_id'),
+        organizationId: q.get('organization_id'),
+        status: q.get('status'),
+        overdueOnly: q.get('overdue') === 'true',
+        limit: Number(q.get('limit') ?? '100'),
+        offset: Number(q.get('offset') ?? '0'),
+      });
+      return json(out, ctx);
+    },
+  },
+  {
+    method: 'GET',
+    path: '/api/reports/:id',
+    roles: STAFF_READ,
+    handler: async ({ env, ctx, params, session }) =>
+      json(await readReportForStaff(env.DB, session, params.id!), ctx),
+  },
+  {
+    method: 'POST',
+    path: '/api/reports/:id/accept',
+    roles: ADMIN_ONLY,
+    handler: async ({ env, ctx, params, session }) =>
+      json(await acceptReport(env.DB, ctx, session, params.id!), ctx),
+  },
+  {
+    method: 'POST',
+    path: '/api/reports/:id/revisions',
+    roles: ADMIN_ONLY,
+    handler: async ({ request, env, ctx, params, session }) => {
+      const body = await readJsonBody(request);
+      return json(
+        await requestReportRevisions(
+          env.DB, ctx, session, params.id!, String(body.feedback ?? ''),
+        ),
+        ctx,
+      );
+    },
+  },
+  {
+    method: 'POST',
+    path: '/api/reports/:id/waive',
+    roles: ADMIN_ONLY,
+    handler: async ({ request, env, ctx, params, session }) => {
+      const body = await readJsonBody(request);
+      await waiveReport(env.DB, ctx, session, params.id!, String(body.reason ?? ''));
+      return json({ waived: true }, ctx);
+    },
   },
 
   // ---- programs ------------------------------------------------------------

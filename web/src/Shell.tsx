@@ -22,6 +22,7 @@ interface Props {
 
 const NAV: { path: string; label: string; route: string }[] = [
   { path: '/pipeline', label: 'Pipeline', route: 'pipeline' },
+  { path: '/reporting', label: 'Reporting', route: 'reporting' },
   { path: '/configuration', label: 'Configuration', route: 'home' },
 ];
 

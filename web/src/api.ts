@@ -109,6 +109,57 @@ export { ApiError } from './http';
 const get = <T,>(path: string, signal?: AbortSignal): Promise<T> =>
   request<T>(path, signal ? { signal } : {});
 
+export interface PortfolioRow {
+  reportPeriodId: string;
+  awardId: string;
+  organizationId: string;
+  organizationName: string;
+  programName: string;
+  label: string;
+  periodType: string;
+  dueDate: string;
+  status: string;
+  /** Integer cents. Formatted at the display edge, never before. */
+  awardedAmountCents: number;
+  submittedAt: string | null;
+  fundsSpentCents: number | null;
+  daysUntilDue: number;
+  overdue: boolean;
+}
+
+export interface StaffReport {
+  period: {
+    id: string;
+    label: string;
+    periodType: string;
+    periodStart: string | null;
+    periodEnd: string | null;
+    dueDate: string;
+    status: string;
+    waivedReason: string | null;
+  };
+  award: {
+    id: string;
+    organizationId: string;
+    organizationName: string;
+    programName: string;
+    awardedAmountCents: number;
+    termStart: string | null;
+    termEnd: string | null;
+  };
+  submissions: {
+    id: string;
+    submittedAt: string;
+    submittedBy: string | null;
+    fundsSpentCents: number | null;
+    adminFeedback: string | null;
+    acceptedAt: string | null;
+    answers: { fieldKey: string; label: string; display: string | null }[];
+    metrics: { metricKey: string; label: string; display: string | null }[];
+    attachments: { id: string; filename: string; sizeBytes: number }[];
+  }[];
+}
+
 export const api = {
   session: (signal?: AbortSignal) => get<{ user: SessionUser }>('/api/session', signal),
   programs: (signal?: AbortSignal) => get<{ programs: ProgramRow[] }>('/api/programs', signal),
@@ -128,6 +179,28 @@ export const api = {
       `/api/organizations/${encodeURIComponent(organizationId)}/history`,
       signal,
     ),
+  reports: (query: string, signal?: AbortSignal) =>
+    get<{ rows: PortfolioRow[]; total: number }>(
+      `/api/reports${query ? `?${query}` : ''}`,
+      signal,
+    ),
+  report: (id: string, signal?: AbortSignal) =>
+    get<StaffReport>(`/api/reports/${encodeURIComponent(id)}`, signal),
+  acceptReport: (id: string) =>
+    request<{ reportSubmissionId: string; acceptedAt: string }>(
+      `/api/reports/${encodeURIComponent(id)}/accept`,
+      { method: 'POST', body: {} },
+    ),
+  requestReportRevisions: (id: string, feedback: string) =>
+    request<{ reportSubmissionId: string }>(
+      `/api/reports/${encodeURIComponent(id)}/revisions`,
+      { method: 'POST', body: { feedback } },
+    ),
+  waiveReport: (id: string, reason: string) =>
+    request<{ waived: boolean }>(`/api/reports/${encodeURIComponent(id)}/waive`, {
+      method: 'POST',
+      body: { reason },
+    }),
   form: (id: string, signal?: AbortSignal) =>
     get<{ form: import('../../src/lib/forms').FormDefinition }>(
       `/api/forms/${encodeURIComponent(id)}`,

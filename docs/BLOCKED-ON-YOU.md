@@ -4,7 +4,7 @@ One list, kept current. Everything here blocks work that is otherwise ready to
 start, or blocks the platform going live. Nothing here is something I can do
 myself, decide on your behalf, or work around.
 
-Last updated: 9 September 2026.
+Last updated: 19 September 2026.
 
 ---
 
@@ -126,6 +126,40 @@ against a guessed rubric would mean rebuilding it.
 **What I need.** Criteria, weights and maximum scores, as a spreadsheet (CSV or
 XLSX). It gets parsed, confirmed by an admin, and versioned per cycle, so a
 2026 score keeps meaning what it meant in 2026.
+
+### 2.1a Your impact metrics, as a spreadsheet
+
+**Status: the machinery is finished and waiting; the content is not here.**
+
+Grantee reporting is now built end to end — a nonprofit can sign in, see their
+grants, and file a report from a phone. What they are ASKED is the one part
+that is still invented. `docs/metrics-import-template.csv` holds a plausible
+starter set that I made up. **It is not confirmed by anyone and must not be
+treated as your metrics.**
+
+**What I need.** One CSV per program, in the template's shape:
+
+```
+metric_key,label,help_text,metric_type,unit,is_required,sort_order,promotes_to
+```
+
+- `metric_key` is the identity that ties this year's answer to last year's.
+  Lower-case letters, digits and underscores. **It must be the same string next
+  year.** Reword the question whenever you like; changing the key splits the
+  series in two, silently, and the first anyone notices is a board report with
+  half the numbers.
+- `metric_type` is one of `integer`, `currency`, `decimal`, `text`. It is
+  **frozen** once anybody reports against it, because reinterpreting last
+  year's answers restates history. Changing your mind later means retiring the
+  metric and adding a new one under a new key.
+- `promotes_to` is blank on every row but one: put `funds_spent_cents` on the
+  currency metric that answers "how much of the grant has been spent", if you
+  ask that. At most one per program.
+
+Run it with the importer and it becomes the report form. Re-running it is the
+normal case — reword a question, add one, reorder them — and a metric missing
+from the file is REPORTED, never removed, because a column somebody forgot to
+paste is far more common than a decision to stop asking.
 
 ### 2.2 Decline letter wording
 

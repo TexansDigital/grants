@@ -23,6 +23,7 @@ import { ReportForm } from './ReportForm';
 import { Home } from './Home';
 import { FormRenderer } from './FormRenderer';
 import { Pipeline } from './Pipeline';
+import { Reports } from './Reports';
 import { ApplicationDetail } from './ApplicationDetail';
 import { Shell } from './Shell';
 import {
@@ -40,6 +41,7 @@ type Route =
   | { name: 'application'; id: string }
   | { name: 'form'; id: string }
   | { name: 'apply'; id: string }
+  | { name: 'reporting' }
   | { name: 'portal' }
   | { name: 'report'; id: string };
 
@@ -48,6 +50,9 @@ function parseRoute(pathname: string): Route | null {
   if (parts.length === 0) return { name: 'pipeline' };
   if (parts.length === 1 && parts[0] === 'configuration') return { name: 'home' };
   if (parts.length === 1 && parts[0] === 'pipeline') return { name: 'pipeline' };
+  // The staff compliance desk. NOT /reports, which is the grantee portal --
+  // two different audiences must never share a path.
+  if (parts.length === 1 && parts[0] === 'reporting') return { name: 'reporting' };
   if (parts.length === 2 && parts[0] === 'applications' && parts[1]) {
     return { name: 'application', id: parts[1] };
   }
@@ -167,6 +172,7 @@ export function App(): ReactElement {
       pipeline: 'Pipeline · Steward',
       application: 'Application · Steward',
       home: 'Configuration · Steward',
+      reporting: 'Grant reports · Steward',
       form: 'Form preview · Steward',
       apply: 'Your application · Steward',
       portal: 'Your grants · Steward',
@@ -197,7 +203,12 @@ export function App(): ReactElement {
 
     (async () => {
       try {
-        if (route?.name === 'home' || route?.name === 'pipeline' || route?.name === 'application') {
+        if (
+          route?.name === 'home' ||
+          route?.name === 'pipeline' ||
+          route?.name === 'application' ||
+          route?.name === 'reporting'
+        ) {
           const [s, p, c, f] = await Promise.all([
             api.session(signal),
             api.programs(signal),
@@ -353,6 +364,17 @@ export function App(): ReactElement {
       <ApplicationDetail
         applicationId={route.id}
         onBack={() => navigate(toPipeline())}
+      />,
+    );
+  }
+
+  if (route.name === 'reporting') {
+    return shell(
+      <Reports
+        programs={home.programs}
+        isAdmin={home.user.role === 'admin'}
+        query={search}
+        onQueryChange={setPipelineQuery}
       />,
     );
   }

@@ -8,6 +8,9 @@ import { __resetJwksCache, ACCESS_JWT_HEADER } from '../src/lib/access';
 import { newId } from '../src/lib/ids';
 import { nowIso } from '../src/lib/time';
 import type { Env } from '../src/types';
+import { buildReportForm } from '../src/lib/reportForm';
+import { generateReportPeriods } from '../src/lib/reportPeriods';
+import { submitReport } from '../src/lib/reportSubmit';
 
 /**
  * HTTP-level tests for the staff API.
@@ -82,6 +85,23 @@ async function call(path: string, token?: string, env: Env = workerEnv()): Promi
   const headers: Record<string, string> = {};
   if (token) headers[ACCESS_JWT_HEADER] = token;
   return worker.fetch(new Request(`https://steward.example.org${path}`, { headers }), env, exec);
+}
+
+async function post(
+  path: string,
+  token: string,
+  body: unknown,
+  env: Env = workerEnv(),
+): Promise<Response> {
+  return worker.fetch(
+    new Request(`https://steward.example.org${path}`, {
+      method: 'POST',
+      headers: { [ACCESS_JWT_HEADER]: token, 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+    env,
+    exec,
+  );
 }
 
 /** Insert a staff user directly; the seed deliberately contains no users. */
@@ -494,5 +514,142 @@ describe('the error boundary', () => {
     expect(row?.code).toBe('UNAUTHENTICATED');
     expect(row?.http_status).toBe(401);
     expect(row?.route).toBe('/api/session');
+  });
+});
+
+// ---------------------------------------------------------------------------
+describe('the report compliance desk, over HTTP', () => {
+  /** A funded organization with one filed report, reachable by the staff API. */
+  async function filedReport() {
+    const adminCtx = ctxFor(adminSession());
+    const p = await seedProgram(db, adminCtx, { ...INSPIRE_CHANGE, slug: `rt-${newId().slice(0, 6)}` });
+    const now = nowIso();
+
+    const metricId = newId();
+    await db.prepare(
+      `INSERT INTO metric_definitions
+         (id, program_id, metric_key, label, metric_type, unit, is_required, sort_order,
+          status, promotes_to, created_at, updated_at)
+       VALUES (?,?,'individuals_served','How many individuals?','integer','people',1,10,
+               'active',NULL,?,?)`,
+    ).bind(metricId, p.programId, now, now).run();
+
+    const form = await buildReportForm(db, adminCtx, { programId: p.programId });
+    await db.prepare(`UPDATE form_definitions SET status='published', published_at=? WHERE id=?`)
+      .bind(now, form.formDefinitionId).run();
+
+    const orgId = newId();
+    await db.prepare(
+      `INSERT INTO organizations (id, legal_name, ein, status, created_at, updated_at)
+       VALUES (?,?,?,'active',?,?)`,
+    ).bind(orgId, 'Route Harbor Trust', String(860000000 + (n += 1)), now, now).run();
+
+    const awardId = newId();
+    await db.prepare(
+      `INSERT INTO awards (id, organization_id, program_id, awarded_amount_cents, awarded_at,
+         status, source_system, source_reference, term_start, term_end, created_at, updated_at)
+       VALUES (?,?,?,?,?,'active','spreadsheet',?,?,?,?,?)`,
+    ).bind(awardId, orgId, p.programId, 2_500_000, now, `RT-${awardId.slice(0, 8)}`,
+           '2025-01-01T00:00:00.000Z', '2025-12-31T00:00:00.000Z', now, now).run();
+    await generateReportPeriods(db, adminCtx, awardId);
+
+    const period = await db.prepare(`SELECT id FROM report_periods WHERE award_id=?`)
+      .bind(awardId).first<{ id: string }>();
+
+    const granteeId = newId();
+    await db.prepare(
+      `INSERT INTO users (id, email, role, organization_id, is_active, created_at, updated_at)
+       VALUES (?,?, 'grantee', ?, 1, ?, ?)`,
+    ).bind(granteeId, `rt-g-${newId().slice(0, 6)}@example.org`, orgId, now, now).run();
+    const grantee = {
+      userId: granteeId, email: 'g@example.org', role: 'grantee' as const, organizationId: orgId,
+    };
+    await submitReport(db, ctxFor(grantee), grantee, period!.id, {
+      narrative: 'We ran a summer reading programme.',
+      metric_individuals_served: '412',
+    });
+
+    return { periodId: period!.id, orgId, programId: p.programId };
+  }
+
+  let n = 0;
+
+  it('lists the portfolio for staff and refuses it to everyone else', async () => {
+    const f = await filedReport();
+    await makeUser('desk-admin@texans.com', 'admin');
+    await makeUser('desk-reviewer@texans.com', 'reviewer');
+
+    for (const email of ['desk-admin@texans.com', 'desk-reviewer@texans.com']) {
+      const res = await call('/api/reports', await mint(email));
+      expect(res.status, email).toBe(200);
+      const body = await res.json<{ rows: { reportPeriodId: string }[] }>();
+      expect(body.rows.map((r) => r.reportPeriodId)).toContain(f.periodId);
+    }
+
+    // No assertion at all.
+    expect((await call('/api/reports')).status).toBe(401);
+  });
+
+  it('reads one report, with the money still in cents on the wire', async () => {
+    const f = await filedReport();
+    await makeUser('desk-read@texans.com', 'reviewer');
+    const res = await call(`/api/reports/${f.periodId}`, await mint('desk-read@texans.com'));
+    expect(res.status).toBe(200);
+    const body = await res.json<{
+      award: { awardedAmountCents: number };
+      submissions: { answers: { fieldKey: string }[] }[];
+    }>();
+    expect(body.award.awardedAmountCents).toBe(2_500_000);
+    expect(body.submissions[0]!.answers.map((a) => a.fieldKey)).toContain('narrative');
+  });
+
+  it('lets an admin accept, and refuses a reviewer', async () => {
+    const f = await filedReport();
+    await makeUser('desk-a@texans.com', 'admin');
+    await makeUser('desk-r@texans.com', 'reviewer');
+
+    // A reviewer can read the whole thing and decide none of it.
+    const refused = await post(`/api/reports/${f.periodId}/accept`, await mint('desk-r@texans.com'), {});
+    expect(refused.status).toBe(403);
+
+    const ok = await post(`/api/reports/${f.periodId}/accept`, await mint('desk-a@texans.com'), {});
+    expect(ok.status).toBe(200);
+    expect(await db.prepare(`SELECT status FROM report_periods WHERE id=?`)
+      .bind(f.periodId).first<{ status: string }>()).toMatchObject({ status: 'accepted' });
+  });
+
+  it('refuses a send-back with nothing useful in it', async () => {
+    const f = await filedReport();
+    await makeUser('desk-b@texans.com', 'admin');
+    const token = await mint('desk-b@texans.com');
+
+    const empty = await post(`/api/reports/${f.periodId}/revisions`, token, { feedback: '' });
+    expect(empty.status).toBe(400);
+
+    const real = await post(`/api/reports/${f.periodId}/revisions`, token, {
+      feedback: 'Please break the spend out by site.',
+    });
+    expect(real.status).toBe(200);
+    expect(await db.prepare(`SELECT status FROM report_periods WHERE id=?`)
+      .bind(f.periodId).first<{ status: string }>())
+      .toMatchObject({ status: 'revisions_requested' });
+  });
+
+  it('waives with a reason and refuses one without', async () => {
+    const f = await filedReport();
+    await makeUser('desk-c@texans.com', 'admin');
+    const token = await mint('desk-c@texans.com');
+
+    expect((await post(`/api/reports/${f.periodId}/waive`, token, { reason: '' })).status).toBe(400);
+    const ok = await post(`/api/reports/${f.periodId}/waive`, token, {
+      reason: 'Grant returned unspent in March.',
+    });
+    expect(ok.status).toBe(200);
+  });
+
+  it('404s a report period that does not exist', async () => {
+    await makeUser('desk-d@texans.com', 'admin');
+    const res = await call('/api/reports/nope', await mint('desk-d@texans.com'));
+    expect(res.status).toBe(404);
   });
 });
