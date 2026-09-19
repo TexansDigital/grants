@@ -10,30 +10,48 @@ Last updated: 9 September 2026.
 
 ## 1. Blocking the public form going live
 
-### 1.1 A domain, and its DNS
+### 1.1 DNS records on a domain that already exists
 
-**Status: nothing exists.** `houstontexansfoundation.org` does not resolve —
-no A record on the apex, on `www`, or on the planned
-`applications.houstontexansfoundation.org`. I checked from this environment
-and calibrated the result: a real-but-unreachable domain returns a different
-error than an unregistered one, and this returns the unregistered one. I could
-not run a WHOIS to tell "never registered" from "registered, no DNS", because
-outbound is proxy-blocked here — check the registrar or Cloudflare dashboard.
+**Status: better than I previously reported, and I should correct that.** I
+earlier said the domain "does not resolve" and implied it might not be
+registered. That was an overreach from an incomplete check — I looked at the
+apex and at `applications.`, found nothing, and drew a conclusion the evidence
+did not support.
 
-**Why it blocks.** DNS is lead time, not effort. Three things hang off it:
+**What is actually true**, re-checked properly:
 
-- The sign-in link. An applicant's magic link has to point at a hostname that
-  exists, and the link is the whole authentication system for external users.
-- Email deliverability. SPF, DKIM and DMARC are records on this domain. A
-  grantee who cannot receive a login link cannot file a report, and a decline
-  letter landing in spam is a decline letter that gets re-sent by a human.
-- Cloudflare Access. Staff sit behind Access on this hostname; the public
-  applicant routes must sit outside it. That is a policy written against a real
-  domain.
+| | State |
+|---|---|
+| Zone on Cloudflare | Live. Nameservers `crystal.ns.cloudflare.com`, `jay.ns.cloudflare.com`, valid SOA. |
+| `grants.` — staff | Resolving, proxied through Cloudflare. |
+| `apply.` — applicants and grantees | **Nothing published.** This is the one the portal needs. |
+| SPF, DKIM, DMARC | **No TXT records at all.** |
+| MX | None. |
 
-**What I need.** The domain registered and its nameservers on Cloudflare.
-`docs/EMAIL-DNS-SETUP.md` is the step-by-step for the email records once it
-exists — written for someone who has not done this before.
+The apex having no A record is normal for a zone used only through subdomains.
+It is not evidence of anything.
+
+**The hostname is `apply.`, not `applications.`** — `docs/DECISIONS.md` §15
+settled that, and earlier versions of this file had it wrong.
+
+**What I need.** An `apply.` record pointing at the Worker, and the Resend DNS
+records below. Both are dashboard work, not registration lead time.
+
+**How to check it yourself** (I cannot — the sandbox blocks outbound to your
+domain):
+
+```
+dig +short NS  houstontexansfoundation.org
+dig +short A   grants.houstontexansfoundation.org   # answers today
+dig +short A   apply.houstontexansfoundation.org    # empty today
+dig +short TXT houstontexansfoundation.org          # SPF goes here
+dig +short TXT _dmarc.houstontexansfoundation.org
+curl -sS https://grants.houstontexansfoundation.org/health
+```
+
+That last one is the real test. `{"status":"ok"…}` means the Worker is live
+behind Access. A Cloudflare Access login page also passes — it means Access is
+doing its job and you are not signed in.
 
 ### 1.2 Resend: domain verification and an API key
 

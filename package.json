@@ -23,7 +23,8 @@
     "dev:web": "vite web",
     "migrate:staging": "wrangler d1 migrations apply steward-staging --remote --env staging",
     "dev:staging": "wrangler dev --env staging",
-    "e2e:applicant": "node scripts/e2e-applicant.mjs"
+    "e2e:applicant": "node scripts/e2e-applicant.mjs",
+    "whoami": "bash scripts/preflight.sh"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.12.21",
