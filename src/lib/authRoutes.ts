@@ -112,7 +112,16 @@ export async function requestSignInLink(
           vars: {
             url: `${base}/auth/verify?token=${encodeURIComponent(issued.token)}`,
             expiresInMinutes: Math.round(TOKEN_TTL_MS / 60000),
-            destination: 'Inspire Change application',
+            /*
+             * What they are signing in to, in their words.
+             *
+             * It said "Inspire Change application" to everybody, including a
+             * grantee whose only business here is reporting on a grant they
+             * already hold -- and including an applicant to any other program
+             * this platform runs, which is the whole point of the platform.
+             */
+            destination:
+              user.role === 'grantee' ? 'grant reporting' : 'grant application',
             requestedAtDisplay: formatInZone(nowIso(), env.DISPLAY_TIMEZONE),
             requestAnotherUrl: `${base}/sign-in`,
           },
@@ -235,7 +244,7 @@ export async function completeSignIn(
   return new Response(null, {
     status: 303,
     headers: {
-      location: '/',
+      location: await signedInDestination(env.DB, outcome.userId),
       'set-cookie': sessionCookie(session.sessionToken, Math.floor(SESSION_TTL_MS / 1000)),
       'cache-control': 'no-store',
     },
@@ -361,3 +370,41 @@ function failurePage(message: string): string {
   );
 }
 
+
+/**
+ * Where a magic link lands somebody.
+ *
+ * It landed everybody on `/`, which is the STAFF pipeline. A grantee clicking
+ * the link in their reporting email arrived at an internal screen, whose first
+ * API call 401s, and were told their Cloudflare Access session had expired --
+ * a sentence about a product they have never heard of, on the first screen of
+ * the only interaction they have with this system. An applicant got the same.
+ *
+ * The rule is now: send them to the thing they have to do.
+ *
+ *   1. A draft application in progress. Finishing it is the only reason an
+ *      applicant asks for a link at all.
+ *   2. Otherwise the grant portal, which renders their awards and what is
+ *      due -- and, for somebody with none, says so plainly rather than
+ *      erroring. That honest empty page is a better landing than any guess.
+ *
+ * Role is deliberately NOT the first question. A contact can be both: an
+ * organization reporting on last year's grant while applying for the next one
+ * holds one account, and what matters is which piece of work is unfinished.
+ */
+export async function signedInDestination(db: D1Database, userId: string): Promise<string> {
+  const draft = await db
+    .prepare(
+      `SELECT a.id
+         FROM applications a
+         JOIN users u ON u.organization_id = a.organization_id
+        WHERE u.id = ? AND a.status = 'draft' AND a.deleted_at IS NULL
+        ORDER BY a.updated_at DESC
+        LIMIT 1`,
+    )
+    .bind(userId)
+    .first<{ id: string }>();
+
+  if (draft) return `/apply/${encodeURIComponent(draft.id)}`;
+  return '/reports';
+}

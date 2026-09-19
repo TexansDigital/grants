@@ -1,7 +1,10 @@
 import { env as testEnv } from 'cloudflare:test';
 import { describe, it, expect, beforeEach } from 'vitest';
 import worker from '../src/index';
-import { db } from './helpers';
+import { db, ctxFor, adminSession } from './helpers';
+import { seedProgram } from '../src/seed/seedProgram';
+import { INSPIRE_CHANGE } from '../src/seed/inspireChange';
+import { signedInDestination } from '../src/lib/authRoutes';
 import { newId } from '../src/lib/ids';
 import { nowIso } from '../src/lib/time';
 import { hashToken } from '../src/lib/tokens';
@@ -257,7 +260,9 @@ describe('completing sign-in', () => {
     expect(cookie).toContain('Secure');
     expect(cookie).toContain('Path=/');
     // 303 so the browser re-requests with GET and the token leaves the bar.
-    expect(res.headers.get('location')).toBe('/');
+    // Never '/', which is the STAFF pipeline: landing an applicant or a
+    // grantee there told them their Cloudflare Access session had expired.
+    expect(res.headers.get('location')).toBe('/reports');
   });
 
   it('the session it hands out actually works', async () => {
@@ -345,5 +350,163 @@ describe('the applicant door is separate from the staff door', () => {
     const other = await call('/api/me', { headers: { cookie: `${SESSION_COOKIE}=${b.sessionToken}` } });
     expect(other.status).toBe(401);
     void hashToken;
+  });
+});
+
+// ---------------------------------------------------------------------------
+describe('where a magic link lands somebody', () => {
+  it('sends a grantee to the grant portal, never to the staff pipeline', async () => {
+    // Before this, everybody landed on '/', which renders the internal shell.
+    // Its first API call 401s, and the page told a nonprofit their Cloudflare
+    // Access session had expired -- a sentence about a product they have never
+    // heard of, on the first screen of their only interaction with us.
+    const now = nowIso();
+    const orgId = newId();
+    await db.prepare(
+      `INSERT INTO organizations (id, legal_name, ein, status, created_at, updated_at)
+       VALUES (?,?,?,'active',?,?)`,
+    ).bind(orgId, 'Destination Trust', String(880000001), now, now).run();
+    const userId = newId();
+    await db.prepare(
+      `INSERT INTO users (id, email, role, organization_id, is_active, created_at, updated_at)
+       VALUES (?,?, 'grantee', ?, 1, ?, ?)`,
+    ).bind(userId, `dest-${newId().slice(0, 8)}@example.org`, orgId, now, now).run();
+
+    expect(await signedInDestination(db, userId)).toBe('/reports');
+  });
+
+  it('sends somebody with a draft application back to that draft', async () => {
+    // Finishing it is the only reason an applicant asks for a link at all.
+    const p = await seedProgram(db, ctxFor(adminSession()), { ...INSPIRE_CHANGE, slug: `dest-${newId().slice(0, 6)}` });
+    const cycleId = Object.values(p.cycleIds)[0]!;
+    const stageId = Object.values(p.stageIds)[0]!;
+    const formId = Object.values(p.formDefinitionIds)[0]!;
+    const now = nowIso();
+    const orgId = newId();
+    await db.prepare(
+      `INSERT INTO organizations (id, legal_name, ein, status, created_at, updated_at)
+       VALUES (?,?,?,'active',?,?)`,
+    ).bind(orgId, 'Halfway Through', String(880000002), now, now).run();
+    const userId = newId();
+    await db.prepare(
+      `INSERT INTO users (id, email, role, organization_id, is_active, created_at, updated_at)
+       VALUES (?,?, 'applicant', ?, 1, ?, ?)`,
+    ).bind(userId, `draft-${newId().slice(0, 8)}@example.org`, orgId, now, now).run();
+    const appId = newId();
+    await db.prepare(
+      `INSERT INTO applications (id, cycle_id, stage_id, organization_id, form_definition_id,
+         status, created_at, updated_at)
+       VALUES (?,?,?,?,?, 'draft', ?,?)`,
+    ).bind(appId, cycleId, stageId, orgId, formId, now, now).run();
+
+    expect(await signedInDestination(db, userId)).toBe(`/apply/${appId}`);
+  });
+
+  it('ignores a submitted application and falls back to the portal', async () => {
+    const p = await seedProgram(db, ctxFor(adminSession()), { ...INSPIRE_CHANGE, slug: `dest2-${newId().slice(0, 6)}` });
+    const cycleId = Object.values(p.cycleIds)[0]!;
+    const stageId = Object.values(p.stageIds)[0]!;
+    const formId = Object.values(p.formDefinitionIds)[0]!;
+    const now = nowIso();
+    const orgId = newId();
+    await db.prepare(
+      `INSERT INTO organizations (id, legal_name, ein, status, created_at, updated_at)
+       VALUES (?,?,?,'active',?,?)`,
+    ).bind(orgId, 'Already Sent', String(880000003), now, now).run();
+    const userId = newId();
+    await db.prepare(
+      `INSERT INTO users (id, email, role, organization_id, is_active, created_at, updated_at)
+       VALUES (?,?, 'applicant', ?, 1, ?, ?)`,
+    ).bind(userId, `sent-${newId().slice(0, 8)}@example.org`, orgId, now, now).run();
+    await db.prepare(
+      `INSERT INTO applications (id, cycle_id, stage_id, organization_id, form_definition_id,
+         status, submitted_at, created_at, updated_at)
+       VALUES (?,?,?,?,?, 'submitted', ?,?,?)`,
+    ).bind(newId(), cycleId, stageId, orgId, formId, now, now, now).run();
+
+    expect(await signedInDestination(db, userId)).toBe('/reports');
+  });
+
+  it('never leaves somebody on a page that does not exist', async () => {
+    // An account with nothing at all still lands somewhere honest: the portal
+    // says "there are no grants on this account yet" rather than erroring.
+    const now = nowIso();
+    const orgId = newId();
+    await db.prepare(
+      `INSERT INTO organizations (id, legal_name, ein, status, created_at, updated_at)
+       VALUES (?,?,?,'active',?,?)`,
+    ).bind(orgId, 'Nothing Yet', String(880000004), now, now).run();
+    const userId = newId();
+    await db.prepare(
+      `INSERT INTO users (id, email, role, organization_id, is_active, created_at, updated_at)
+       VALUES (?,?, 'applicant', ?, 1, ?, ?)`,
+    ).bind(userId, `none-${newId().slice(0, 8)}@example.org`, orgId, now, now).run();
+
+    expect(await signedInDestination(db, userId)).toBe('/reports');
+  });
+
+  it('offers the draft this account owns, never another one', async () => {
+    // The join is on the user's own organization. Without it, whoever had the
+    // most recently touched draft anywhere got offered it -- which 404s on
+    // arrival, because readDraft is scoped, so the link simply breaks.
+    const p = await seedProgram(db, ctxFor(adminSession()), { ...INSPIRE_CHANGE, slug: `dest3-${newId().slice(0, 6)}` });
+    const cycleId = Object.values(p.cycleIds)[0]!;
+    const stageId = Object.values(p.stageIds)[0]!;
+    const formId = Object.values(p.formDefinitionIds)[0]!;
+    const now = nowIso();
+
+    const make = async (name: string, ein: string) => {
+      const orgId = newId();
+      await db.prepare(
+        `INSERT INTO organizations (id, legal_name, ein, status, created_at, updated_at)
+         VALUES (?,?,?,'active',?,?)`,
+      ).bind(orgId, name, ein, now, now).run();
+      const userId = newId();
+      await db.prepare(
+        `INSERT INTO users (id, email, role, organization_id, is_active, created_at, updated_at)
+         VALUES (?,?, 'applicant', ?, 1, ?, ?)`,
+      ).bind(userId, `${name.toLowerCase().replace(/\W/g, '')}-${newId().slice(0, 6)}@example.org`, orgId, now, now).run();
+      const appId = newId();
+      await db.prepare(
+        `INSERT INTO applications (id, cycle_id, stage_id, organization_id, form_definition_id,
+           status, created_at, updated_at)
+         VALUES (?,?,?,?,?, 'draft', ?,?)`,
+      ).bind(appId, cycleId, stageId, orgId, formId, now, now).run();
+      return { userId, appId };
+    };
+
+    const mine = await make('Mine', String(880000010));
+    // Written second, so it is the most recent draft in the table.
+    const theirs = await make('Theirs', String(880000011));
+
+    expect(await signedInDestination(db, mine.userId)).toBe(`/apply/${mine.appId}`);
+    expect(await signedInDestination(db, theirs.userId)).toBe(`/apply/${theirs.appId}`);
+  });
+
+  it('tells a grantee what they are signing in to, in their words', async () => {
+    // It said "Inspire Change application" to everybody -- including a grantee
+    // whose only business here is a grant they already hold, and including an
+    // applicant to any other program this platform runs.
+    const g = await applicant({ role: 'grantee' });
+    await call('/api/auth/request-link', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ email: g.email }),
+    });
+    const row = await db.prepare(
+      `SELECT subject FROM email_messages WHERE to_email = ? ORDER BY created_at DESC LIMIT 1`,
+    ).bind(g.email).first<{ subject: string }>();
+    expect(row!.subject).toBe('Sign in to your grant reporting');
+
+    const a = await applicant();
+    await call('/api/auth/request-link', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ email: a.email }),
+    });
+    const other = await db.prepare(
+      `SELECT subject FROM email_messages WHERE to_email = ? ORDER BY created_at DESC LIMIT 1`,
+    ).bind(a.email).first<{ subject: string }>();
+    expect(other!.subject).toBe('Sign in to your grant application');
   });
 });

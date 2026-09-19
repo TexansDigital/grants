@@ -144,6 +144,6 @@ describe('login CSRF on the route that mints a session', () => {
     const a = await applicantWithLink();
     const res = await verify(a.token, { 'sec-fetch-site': 'same-origin' });
     expect(res.status).toBe(303);
-    expect(res.headers.get('location')).toBe('/');
+    expect(res.headers.get('location')).toBe('/reports');
   });
 });
