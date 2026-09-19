@@ -34,6 +34,12 @@ terminal tab and not another.
   `--remote` and `--local` reach different databases and one of them is not
   preview. That is the specific way non-negotiable #2 gets broken by accident.
 - **That no production id is committed.**
+- **That your token carries the D1 and R2 scopes.** The scopes an OAuth token
+  holds are fixed when it is minted, so a token from an older wrangler reports
+  a perfectly healthy login and then fails on the first
+  `d1 migrations apply --remote` or `r2 bucket create` — with a permissions
+  error that reads as though the resource is missing rather than as though the
+  token is. `npx wrangler logout && npx wrangler login` mints a new one.
 
 ## The four targets
 

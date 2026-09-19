@@ -57,7 +57,25 @@ fi
 if [ -n "${CLOUDFLARE_ACCOUNT_ID:-}" ]; then
   echo "  CLOUDFLARE_ACCOUNT_ID=${CLOUDFLARE_ACCOUNT_ID}"
 fi
-npx wrangler whoami 2>&1 | sed 's/^/  /' | head -20
+WHOAMI="$(npx wrangler whoami 2>&1)"
+echo "$WHOAMI" | sed 's/^/  /' | head -20
+
+# The scopes an OAuth token carries are fixed when it is minted. A token from an
+# older wrangler predates the D1 and R2 scopes, so it reports a healthy login
+# and then fails on the first `d1 migrations apply --remote` or
+# `r2 bucket create` -- with a permissions error that reads like the resource
+# is missing rather than like the token is.
+if echo "$WHOAMI" | grep -q 'Token Permissions'; then
+  echo
+  for scope in d1 r2; do
+    if echo "$WHOAMI" | grep -qE "^\s*-\s*${scope}(:| |$)"; then
+      ok "token can reach ${scope}"
+    else
+      warn "token has NO ${scope} scope. Commands touching ${scope} will fail with a"
+      warn "permissions error. Fix: npx wrangler logout && npx wrangler login"
+    fi
+  done
+fi
 
 echo
 bold "What the DEFAULT commands would touch"
