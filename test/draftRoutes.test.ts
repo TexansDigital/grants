@@ -349,7 +349,7 @@ describe('the draft survives changing device', () => {
 
 // ---------------------------------------------------------------------------
 describe('scoping: another organization does not exist', () => {
-  it('404s a read of another organization’s draft', async () => {
+  it('404s a read of a draft belonging to another organization', async () => {
     const mine = await signedInApplicant();
     const theirs = await signedInApplicant();
     const created = await call('/api/applications', {
@@ -362,7 +362,7 @@ describe('scoping: another organization does not exist', () => {
     expect(res.status).toBe(404);
   });
 
-  it('404s an autosave into another organization’s draft, and writes nothing', async () => {
+  it('404s an autosave into a draft belonging to another organization, and writes nothing', async () => {
     const mine = await signedInApplicant();
     const theirs = await signedInApplicant();
     const created = await call('/api/applications', {

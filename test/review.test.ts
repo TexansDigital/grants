@@ -456,7 +456,7 @@ describe('score integrity', () => {
     await expect(score(a, s.criterionIds[0]!, 4.5)).rejects.toThrow(/CHECK|constraint/i);
   });
 
-  it('refuses a criterion from a rubric that is not the cycle’s', async () => {
+  it('refuses a criterion from a rubric the cycle does not use', async () => {
     const s = await scene();
     const a = await assign(s.appA, s.reviewer);
     const now = nowIso();

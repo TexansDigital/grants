@@ -215,7 +215,7 @@ describe('what it refuses', () => {
 
 // ---------------------------------------------------------------------------
 describe('scoping and lifecycle', () => {
-  it('404s an upload into another organization’s application', async () => {
+  it('404s an upload into an application belonging to another organization', async () => {
     const mine = await applicantWithDraft();
     const theirs = await applicantWithDraft();
     const err = await presignUpload(

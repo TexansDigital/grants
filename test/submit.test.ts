@@ -236,7 +236,7 @@ describe('submit', () => {
 });
 
 describe('the EIN is not rewritable by an application', () => {
-  it('leaves an organization’s existing EIN alone, and records what was submitted', async () => {
+  it('leaves an existing organization EIN alone, and records what was submitted', async () => {
     /*
      * The EIN is the deduplication key AND the key findOrganizationByEin uses
      * to decide who belongs where, so a freely writable one let any applicant

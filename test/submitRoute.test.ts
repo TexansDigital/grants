@@ -197,7 +197,7 @@ describe('POST /api/applications/:id/submit', () => {
     expect(app!.status).toBe('draft');
   });
 
-  it('refuses without a session, and 404s another organization’s application', async () => {
+  it('refuses without a session, and 404s an application belonging to another organization', async () => {
     const mine = await setup();
     const theirs = await setup();
     expect((await post(mine.applicationId, { answers: payload(mine.atts) })).status).toBe(401);
@@ -238,7 +238,7 @@ describe('the confirmation the applicant keeps', () => {
     expect(msg!.status).toBe('suppressed');
   });
 
-  it('does not store the applicant’s answers on the message row', async () => {
+  it('does not store applicant answers on the message row', async () => {
     // email_messages is an operational log, read by more people than need an
     // organization's mission statement and budget.
     const s = await setup();
@@ -278,7 +278,7 @@ describe('the confirmation the applicant keeps', () => {
 
 // ---------------------------------------------------------------------------
 describe('the confirmation is scoped too', () => {
-  it('mails nothing when the application is not the session’s organization', async () => {
+  it('mails nothing when the application belongs to another organization', async () => {
     // Unreachable through the route today, because submitApplication has
     // already refused a cross-organization id by this point. The guard is
     // asserted anyway: it is the second half of "every query touching
@@ -295,7 +295,7 @@ describe('the confirmation is scoped too', () => {
     expect(msg!.n).toBe(0);
   });
 
-  it('mails the receipt for an application that IS the session’s', async () => {
+  it('mails the receipt for an application the session does own', async () => {
     // The control: without this, the test above passes for a function that
     // never sends anything at all.
     const mine = await setup();

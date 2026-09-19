@@ -338,7 +338,7 @@ describe('metrics', () => {
     )).toMatch(/UNIQUE/i);
   });
 
-  it('refuses a hard delete, because last year’s totals depend on it', async () => {
+  it('refuses a hard delete, because past totals depend on it', async () => {
     const m = await metric();
     expect(await fails(() =>
       db.prepare(`DELETE FROM metric_definitions WHERE id=?`).bind(m.metricId).run(),
@@ -400,7 +400,7 @@ describe('metrics', () => {
     expect(await fails(write)).toMatch(/UNIQUE/i);
   });
 
-  it('freezes a metric’s type once values have been reported against it', async () => {
+  it('freezes a metric type once values have been reported against it', async () => {
     const m = await metric();
     // Free to change while nothing depends on it.
     await expect(
