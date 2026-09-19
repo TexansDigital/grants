@@ -87,6 +87,9 @@ export function App(): ReactElement {
   const [loading, setLoading] = useState(true);
   const [themePref, setThemePref] = useState<ThemePreference>(loadPreference);
   const [systemIsLight, setSystemIsLight] = useState(systemPrefersLight);
+  // Bumped after a configuration write, so the screen reflects what just
+  // happened rather than what was true when it loaded.
+  const [reloadKey, setReloadKey] = useState(0);
 
   const [search, setSearch] = useState(() => window.location.search.replace(/^\?/, ''));
 
@@ -236,7 +239,7 @@ export function App(): ReactElement {
     })();
 
     return () => controller.abort();
-  }, [route]);
+  }, [route, reloadKey]);
 
   if (route === null) {
     return (
@@ -395,6 +398,8 @@ export function App(): ReactElement {
     <Home
       programs={home.programs}
       cycles={home.cycles}
+      isAdmin={home.user.role === 'admin'}
+      onChanged={() => setReloadKey((n) => n + 1)}
       forms={home.forms}
       onOpenForm={(id) => navigate(`/forms/${encodeURIComponent(id)}`)}
     />,

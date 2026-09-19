@@ -19,3 +19,4 @@ seeds/admins.sql
 # .assetsignore is the file that keeps it, and wrangler never uploads it.
 /public/*
 !/public/.assetsignore
+.metricsbuild.mjs

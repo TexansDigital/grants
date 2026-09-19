@@ -25,7 +25,9 @@
     "dev:staging": "wrangler dev --env staging",
     "e2e:applicant": "node scripts/e2e-applicant.mjs",
     "whoami": "bash scripts/preflight.sh",
-    "e2e:grantee": "node scripts/e2e-grantee.mjs"
+    "e2e:grantee": "node scripts/e2e-grantee.mjs",
+    "metrics:build": "esbuild src/import/metrics.ts --bundle --platform=node --format=esm --outfile=.metricsbuild.mjs --log-level=warning",
+    "metrics": "npm run metrics:build && node scripts/import-metrics.mjs"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.12.21",

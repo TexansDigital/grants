@@ -4,10 +4,12 @@ import { seedProgram } from '../src/seed/seedProgram';
 import { INSPIRE_CHANGE } from '../src/seed/inspireChange';
 import {
   buildReportForm, planReportForm, metricToField, loadMetricDefinitions,
-  DEFAULT_REPORT_NARRATIVE, FIELD_TYPE_BY_METRIC_TYPE, METRIC_FIELD_PREFIX,
+  DEFAULT_REPORT_NARRATIVE, FIELD_TYPE_BY_METRIC_TYPE, METRIC_FIELD_PREFIX, publishReportForm,
   SCAFFOLDED_TEXT_MAX_LENGTH, type MetricDefinition,
 } from '../src/lib/reportForm';
 import { loadFormDefinition } from '../src/lib/loadForm';
+import { generateReportPeriods } from '../src/lib/reportPeriods';
+import { submitReport } from '../src/lib/reportSubmit';
 import { allFields, validateSubmission } from '../src/lib/forms';
 import { newId } from '../src/lib/ids';
 import { nowIso } from '../src/lib/time';
@@ -511,3 +513,257 @@ async function legacyAward(programId: string): Promise<string> {
   ).bind(id, orgId, programId, 2_500_000, now, `RF-${id.slice(0, 8)}`, now, now).run();
   return id;
 }
+
+// ---------------------------------------------------------------------------
+describe('publishing it, and the obligations waiting for it', () => {
+  /** An award with periods already generated, before any form exists. */
+  async function awardWithWaitingPeriods(programId: string, ctx: ReturnType<typeof ctxFor>) {
+    const now = nowIso();
+    const orgId = newId();
+    await db.prepare(
+      `INSERT INTO organizations (id, legal_name, ein, status, created_at, updated_at)
+       VALUES (?,?,?,'active',?,?)`,
+    ).bind(orgId, `Waiting Org ${++seq}`, String(850000000 + seq), now, now).run();
+    const awardId = newId();
+    await db.prepare(
+      `INSERT INTO awards (id, organization_id, program_id, awarded_amount_cents, awarded_at,
+         status, source_system, source_reference, term_start, term_end, created_at, updated_at)
+       VALUES (?,?,?,?,?,'active','spreadsheet',?,?,?,?,?)`,
+    ).bind(awardId, orgId, programId, 2_500_000, now, `PW-${awardId.slice(0, 8)}`,
+           '2025-01-01T00:00:00.000Z', '2025-12-31T00:00:00.000Z', now, now).run();
+    await generateReportPeriods(db, ctx, awardId);
+    return { awardId, orgId };
+  }
+
+  it('attaches the form to every obligation that was waiting for one', async () => {
+    /*
+     * The defect this pins. Awards are imported before anybody writes the
+     * questions, so every period generated in that window pinned NULL -- and
+     * generateReportPeriods refuses to touch an award that already has
+     * periods, by design. Without this, the portal said "This report form is
+     * not ready yet" forever, for every grant imported before the metrics
+     * arrived. Which is all of them.
+     */
+    const p = await program([{ metric_key: 'individuals_served', is_required: 1 }]);
+    const a = await awardWithWaitingPeriods(p.programId, p.ctx);
+
+    const before = await db.prepare(
+      `SELECT form_definition_id FROM report_periods WHERE award_id=?`,
+    ).bind(a.awardId).first<{ form_definition_id: string | null }>();
+    expect(before!.form_definition_id).toBeNull();
+
+    const built = await buildReportForm(db, p.ctx, { programId: p.programId });
+    const out = await publishReportForm(db, p.ctx, built.formDefinitionId);
+    expect(out.periodsAttached).toBe(1);
+
+    const after = await db.prepare(
+      `SELECT form_definition_id, status FROM report_periods WHERE award_id=?`,
+    ).bind(a.awardId).first<{ form_definition_id: string; status: string }>();
+    expect(after!.form_definition_id).toBe(built.formDefinitionId);
+  });
+
+  it('never re-points a period that already names a form', async () => {
+    // The freeze: a form edited this March must not change the question a
+    // grantee answered last October. Publishing is not a back door through it.
+    const p = await program([{ metric_key: 'individuals_served' }]);
+    const first = await buildReportForm(db, p.ctx, { programId: p.programId });
+    await publishReportForm(db, p.ctx, first.formDefinitionId);
+    const a = await awardWithWaitingPeriods(p.programId, p.ctx);
+
+    const pinned = await db.prepare(
+      `SELECT form_definition_id FROM report_periods WHERE award_id=?`,
+    ).bind(a.awardId).first<{ form_definition_id: string }>();
+    expect(pinned!.form_definition_id).toBe(first.formDefinitionId);
+
+    const second = await buildReportForm(db, p.ctx, { programId: p.programId });
+    const out = await publishReportForm(db, p.ctx, second.formDefinitionId);
+    expect(out.periodsAttached).toBe(0);
+
+    const still = await db.prepare(
+      `SELECT form_definition_id FROM report_periods WHERE award_id=?`,
+    ).bind(a.awardId).first<{ form_definition_id: string }>();
+    expect(still!.form_definition_id).toBe(first.formDefinitionId);
+  });
+
+  it('leaves a finished obligation alone', async () => {
+    const p = await program([{ metric_key: 'individuals_served' }]);
+    const a = await awardWithWaitingPeriods(p.programId, p.ctx);
+    await db.prepare(
+      `UPDATE report_periods SET status='waived', waived_reason='Grant returned.' WHERE award_id=?`,
+    ).bind(a.awardId).run();
+
+    const built = await buildReportForm(db, p.ctx, { programId: p.programId });
+    const out = await publishReportForm(db, p.ctx, built.formDefinitionId);
+    expect(out.periodsAttached).toBe(0);
+    const row = await db.prepare(
+      `SELECT form_definition_id FROM report_periods WHERE award_id=?`,
+    ).bind(a.awardId).first<{ form_definition_id: string | null }>();
+    expect(row!.form_definition_id).toBeNull();
+  });
+
+  it('attaches only the waiting ones when a portfolio is in mixed states', async () => {
+    /*
+     * The real situation, and the one a single-period test cannot see.
+     *
+     * When nothing is waiting, the attach UPDATE is skipped entirely, so its
+     * own WHERE clause is never exercised -- three separate mutations to it
+     * survived a suite that only ever had one period at a time. A portfolio
+     * with one of each state runs the UPDATE for real.
+     */
+    const p = await program([{ metric_key: 'individuals_served' }]);
+
+    // Already pinned to the first published form.
+    const first = await buildReportForm(db, p.ctx, { programId: p.programId });
+    await publishReportForm(db, p.ctx, first.formDefinitionId);
+    const pinned = await awardWithWaitingPeriods(p.programId, p.ctx);
+
+    // Finished, and never to be touched again.
+    const waived = await awardWithWaitingPeriods(p.programId, p.ctx);
+    await db.prepare(
+      `UPDATE report_periods SET form_definition_id=NULL, status='waived',
+              waived_reason='Grant returned.' WHERE award_id=?`,
+    ).bind(waived.awardId).run();
+
+    // Genuinely waiting.
+    const waiting = await awardWithWaitingPeriods(p.programId, p.ctx);
+    await db.prepare(`UPDATE report_periods SET form_definition_id=NULL WHERE award_id=?`)
+      .bind(waiting.awardId).run();
+
+    const second = await buildReportForm(db, p.ctx, { programId: p.programId });
+    const out = await publishReportForm(db, p.ctx, second.formDefinitionId);
+    expect(out.periodsAttached).toBe(1);
+
+    const formOn = async (awardId: string) =>
+      (await db.prepare(`SELECT form_definition_id AS f FROM report_periods WHERE award_id=?`)
+        .bind(awardId).first<{ f: string | null }>())!.f;
+
+    // The pinned one keeps the wording its grantee was shown.
+    expect(await formOn(pinned.awardId)).toBe(first.formDefinitionId);
+    // The waived one stays finished and unpinned.
+    expect(await formOn(waived.awardId)).toBeNull();
+    // Only the waiting one opens.
+    expect(await formOn(waiting.awardId)).toBe(second.formDefinitionId);
+    const waivedStatus = await db.prepare(
+      `SELECT status FROM report_periods WHERE award_id=?`,
+    ).bind(waived.awardId).first<{ status: string }>();
+    expect(waivedStatus!.status).toBe('waived');
+  });
+
+  it('opens obligations in its own program and nowhere else', async () => {
+    const mine = await program([{ metric_key: 'individuals_served' }]);
+    const theirs = await program([{ metric_key: 'individuals_served' }]);
+    const a = await awardWithWaitingPeriods(mine.programId, mine.ctx);
+    const b = await awardWithWaitingPeriods(theirs.programId, theirs.ctx);
+
+    const built = await buildReportForm(db, mine.ctx, { programId: mine.programId });
+    const out = await publishReportForm(db, mine.ctx, built.formDefinitionId);
+    expect(out.periodsAttached).toBe(1);
+
+    const other = await db.prepare(
+      `SELECT form_definition_id FROM report_periods WHERE award_id=?`,
+    ).bind(b.awardId).first<{ form_definition_id: string | null }>();
+    // A form belongs to its program. Reaching across would ask one program's
+    // grantees another program's questions.
+    expect(other!.form_definition_id).toBeNull();
+    const ours = await db.prepare(
+      `SELECT form_definition_id FROM report_periods WHERE award_id=?`,
+    ).bind(a.awardId).first<{ form_definition_id: string }>();
+    expect(ours!.form_definition_id).toBe(built.formDefinitionId);
+  });
+
+  it('retires the version it supersedes, because only one may be published', async () => {
+    const p = await program([{ metric_key: 'individuals_served' }]);
+    const first = await buildReportForm(db, p.ctx, { programId: p.programId });
+    await publishReportForm(db, p.ctx, first.formDefinitionId);
+
+    const second = await buildReportForm(db, p.ctx, { programId: p.programId });
+    const out = await publishReportForm(db, p.ctx, second.formDefinitionId);
+    expect(out.retiredFormDefinitionId).toBe(first.formDefinitionId);
+
+    const statuses = await db.prepare(
+      `SELECT id, status FROM form_definitions WHERE program_id=? AND kind='report'
+        ORDER BY version`,
+    ).bind(p.programId).all<{ id: string; status: string }>();
+    expect(statuses.results.map((r) => r.status)).toEqual(['retired', 'published']);
+  });
+
+  it('refuses to publish a form with no questions in it', async () => {
+    // A failed earlier run can leave an empty definition behind, and a
+    // published one is immutable -- so an empty form published once is an
+    // empty form forever.
+    const p = await program([]);
+    const built = await buildReportForm(db, p.ctx, {
+      programId: p.programId,
+      narrative: [{ key: 'empty', title: 'Nothing here', fields: [] }],
+    });
+    await expect(publishReportForm(db, p.ctx, built.formDefinitionId))
+      .rejects.toMatchObject({ publicMessage: 'This form has no questions in it yet.' });
+  });
+
+  it('refuses to publish the same form twice', async () => {
+    const p = await program([{ metric_key: 'individuals_served' }]);
+    const built = await buildReportForm(db, p.ctx, { programId: p.programId });
+    await publishReportForm(db, p.ctx, built.formDefinitionId);
+    await expect(publishReportForm(db, p.ctx, built.formDefinitionId)).rejects.toMatchObject({
+      publicMessage: 'This form is already published.',
+    });
+  });
+
+  it('refuses to publish an application form through this path', async () => {
+    const p = await program([]);
+    const appForm = await db.prepare(
+      `SELECT id FROM form_definitions WHERE program_id=? AND kind='application' LIMIT 1`,
+    ).bind(p.programId).first<{ id: string }>();
+    await expect(publishReportForm(db, p.ctx, appForm!.id)).rejects.toMatchObject({
+      publicMessage: 'That is not a report form.',
+    });
+  });
+
+  it('audits the publish and says how many obligations it opened', async () => {
+    const p = await program([{ metric_key: 'individuals_served' }]);
+    await awardWithWaitingPeriods(p.programId, p.ctx);
+    await awardWithWaitingPeriods(p.programId, p.ctx);
+    const built = await buildReportForm(db, p.ctx, { programId: p.programId });
+    await publishReportForm(db, p.ctx, built.formDefinitionId);
+
+    const row = await db.prepare(
+      `SELECT after_json FROM audit_log
+        WHERE action='form_definition.published' AND entity_id=?`,
+    ).bind(built.formDefinitionId).first<{ after_json: string }>();
+    expect(JSON.parse(row!.after_json).report_periods_attached).toBe(2);
+  });
+
+  it('lets a grantee file a report that had been waiting on the form', async () => {
+    // End to end: the state every imported award is in, then the publish, then
+    // a filing that would have been refused ten seconds earlier.
+    const p = await program([{ metric_key: 'individuals_served', is_required: 1 }]);
+    const a = await awardWithWaitingPeriods(p.programId, p.ctx);
+    const period = await db.prepare(
+      `SELECT id FROM report_periods WHERE award_id=?`,
+    ).bind(a.awardId).first<{ id: string }>();
+
+    const now = nowIso();
+    const userId = newId();
+    await db.prepare(
+      `INSERT INTO users (id, email, role, organization_id, is_active, created_at, updated_at)
+       VALUES (?,?, 'grantee', ?, 1, ?, ?)`,
+    ).bind(userId, `pw-${newId().slice(0, 6)}@example.org`, a.orgId, now, now).run();
+    const session = {
+      userId, email: 'pw@example.org', role: 'grantee' as const, organizationId: a.orgId,
+    };
+
+    await expect(
+      submitReport(db, ctxFor(session), session, period!.id, {
+        narrative: 'We did the work.', metric_individuals_served: '412',
+      }),
+    ).rejects.toMatchObject({ publicMessage: /not ready yet/ });
+
+    const built = await buildReportForm(db, p.ctx, { programId: p.programId });
+    await publishReportForm(db, p.ctx, built.formDefinitionId);
+
+    const out = await submitReport(db, ctxFor(session), session, period!.id, {
+      narrative: 'We did the work.', metric_individuals_served: '412',
+    });
+    expect(out.metricsRecorded).toBe(1);
+  });
+});

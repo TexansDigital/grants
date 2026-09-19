@@ -43,6 +43,7 @@ import { searchApplications } from './lib/search';
 import {
   reportPortfolio, readReportForStaff, acceptReport, requestReportRevisions, waiveReport,
 } from './lib/reportAdmin';
+import { buildReportForm, publishReportForm } from './lib/reportForm';
 import {
   ADMIN_ONLY,
   STAFF_READ,
@@ -390,6 +391,29 @@ const routes: readonly Route[] = [
       await waiveReport(env.DB, ctx, session, params.id!, String(body.reason ?? ''));
       return json({ waived: true }, ctx);
     },
+  },
+
+  // ---- report forms, built from a program's metrics -------------------------
+  {
+    method: 'POST',
+    path: '/api/programs/:id/report-form',
+    roles: ADMIN_ONLY,
+    handler: async ({ request, env, ctx, params }) => {
+      const body = await readJsonBody(request).catch(() => ({}) as Record<string, unknown>);
+      const out = await buildReportForm(env.DB, ctx, {
+        programId: params.id!,
+        ...(typeof body.formKey === 'string' ? { formKey: body.formKey } : {}),
+        ...(typeof body.name === 'string' ? { name: body.name } : {}),
+      });
+      return json(out, ctx, 201);
+    },
+  },
+  {
+    method: 'POST',
+    path: '/api/forms/:id/publish',
+    roles: ADMIN_ONLY,
+    handler: async ({ env, ctx, params }) =>
+      json(await publishReportForm(env.DB, ctx, params.id!), ctx),
   },
 
   // ---- programs ------------------------------------------------------------

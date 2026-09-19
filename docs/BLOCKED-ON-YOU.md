@@ -156,10 +156,32 @@ metric_key,label,help_text,metric_type,unit,is_required,sort_order,promotes_to
   currency metric that answers "how much of the grant has been spent", if you
   ask that. At most one per program.
 
-Run it with the importer and it becomes the report form. Re-running it is the
-normal case — reword a question, add one, reorder them — and a metric missing
-from the file is REPORTED, never removed, because a column somebody forgot to
-paste is far more common than a decision to stop asking.
+**How to run it**, once the file exists:
+
+```
+npm run metrics -- --program=inspire-change --file=your-metrics.csv           # dry run
+npm run metrics -- --program=inspire-change --file=your-metrics.csv --apply
+```
+
+The dry run reads, plans and prints; it writes nothing. It runs against your
+LOCAL preview database by default — add `--preview` for the remote preview one.
+There is no production flag and there will not be one.
+
+Then, in Configuration: **Build a report form from this program's metrics**,
+read the generated wording, change anything you want, and **Publish**.
+
+**You do not need the metrics before the awards.** Publishing attaches the form
+to every report obligation that has been waiting for one, so the normal order
+— import two years of awards now, send the metrics later — works. What
+publishing will NOT do is re-point a report that already names a form: that
+freeze is what stops a form edited this March changing the question a grantee
+answered last October.
+
+Re-running the file is the normal case — reword a question, add one, reorder
+them — and a metric missing from the file is REPORTED, never removed, because a
+column somebody forgot to paste is far more common than a decision to stop
+asking. A reworded question reaches new reports only; reports already filed
+keep the wording they were filed under.
 
 ### 2.2 Decline letter wording
 

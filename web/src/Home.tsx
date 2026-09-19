@@ -7,17 +7,29 @@
  * later phases.
  */
 
+import { useCallback, useState } from 'react';
 import type { ReactElement } from 'react';
+import { ApiError, api } from './api';
 import type { CycleRow, FormSummary, ProgramRow } from './api';
 
 interface Props {
   programs: ProgramRow[];
   cycles: CycleRow[];
   forms: FormSummary[];
+  isAdmin: boolean;
   onOpenForm: (id: string) => void;
+  /** Reload the configuration after a form is built or published. */
+  onChanged: () => void;
 }
 
-export function Home({ programs, cycles, forms, onOpenForm }: Props): ReactElement {
+export function Home({
+  programs,
+  cycles,
+  forms,
+  isAdmin,
+  onOpenForm,
+  onChanged,
+}: Props): ReactElement {
   const cyclesByProgram = new Map<string, CycleRow[]>();
   for (const c of cycles) {
     const list = cyclesByProgram.get(c.program_id) ?? [];
@@ -94,6 +106,7 @@ export function Home({ programs, cycles, forms, onOpenForm }: Props): ReactEleme
               )}
 
               <h3>Form definitions</h3>
+              {isAdmin && <ReportFormControls programId={p.id} onChanged={onChanged} />}
               {programForms.length === 0 ? (
                 <p className="meta">No forms defined.</p>
               ) : (
@@ -122,9 +135,12 @@ export function Home({ programs, cycles, forms, onOpenForm }: Props): ReactEleme
                           <span className={`badge badge-${f.status}`}>{f.status}</span>
                         </td>
                         <td>
-                          <button type="button" className="btn small" onClick={() => onOpenForm(f.id)}>
+                          <button type="button" className="btn small secondary" onClick={() => onOpenForm(f.id)}>
                             Preview<span className="sr-only"> {f.name}</span>
                           </button>
+                          {isAdmin && f.kind === 'report' && f.status === 'draft' && (
+                            <PublishButton formId={f.id} name={f.name} onChanged={onChanged} />
+                          )}
                         </td>
                       </tr>
                     ))}
@@ -135,6 +151,124 @@ export function Home({ programs, cycles, forms, onOpenForm }: Props): ReactEleme
             </section>
           );
         })}
+    </>
+  );
+}
+
+/**
+ * Build a draft report form from this program's impact metrics.
+ *
+ * Always a DRAFT. Publishing is a second, separate press, because a published
+ * form can never be edited again -- and an admin who has not read the generated
+ * wording should not be one click from freezing it.
+ */
+function ReportFormControls({
+  programId,
+  onChanged,
+}: {
+  programId: string;
+  onChanged: () => void;
+}): ReactElement {
+  const [state, setState] = useState<
+    { kind: 'idle' } | { kind: 'working' } | { kind: 'error'; message: string }
+  >({ kind: 'idle' });
+
+  const build = useCallback(async () => {
+    setState({ kind: 'working' });
+    try {
+      await api.buildReportForm(programId);
+      setState({ kind: 'idle' });
+      onChanged();
+    } catch (e) {
+      setState({
+        kind: 'error',
+        message: e instanceof ApiError ? e.message : 'That did not work. Try again.',
+      });
+    }
+  }, [onChanged, programId]);
+
+  return (
+    <p className="meta">
+      <button
+        type="button"
+        className="btn small secondary"
+        disabled={state.kind === 'working'}
+        onClick={build}
+      >
+        {state.kind === 'working' ? 'Building…' : 'Build a report form from this program\u2019s metrics'}
+      </button>
+      {state.kind === 'error' && (
+        <span className="meta strong" role="alert" data-overdue="true">
+          {state.message}
+        </span>
+      )}
+    </p>
+  );
+}
+
+/**
+ * Publish a draft report form.
+ *
+ * The confirm is not decoration. Publishing freezes the wording for good AND
+ * opens every report obligation that has been waiting for a form -- which,
+ * after an awards import, is every grant in the program. Both of those are
+ * worth one deliberate pause.
+ */
+function PublishButton({
+  formId,
+  name,
+  onChanged,
+}: {
+  formId: string;
+  name: string;
+  onChanged: () => void;
+}): ReactElement {
+  const [state, setState] = useState<
+    { kind: 'idle' } | { kind: 'working' } | { kind: 'error'; message: string }
+  >({ kind: 'idle' });
+
+  const publish = useCallback(async () => {
+    const ok = window.confirm(
+      'Publishing freezes this wording permanently and opens every report that has been ' +
+        'waiting for a form. Continue?',
+    );
+    if (!ok) return;
+    setState({ kind: 'working' });
+    try {
+      const out = await api.publishForm(formId);
+      window.alert(
+        out.periodsAttached === 0
+          ? 'Published. No reports were waiting for a form.'
+          : `Published, and ${out.periodsAttached} report${
+              out.periodsAttached === 1 ? ' is' : 's are'
+            } now open to their grantees.`,
+      );
+      setState({ kind: 'idle' });
+      onChanged();
+    } catch (e) {
+      setState({
+        kind: 'error',
+        message: e instanceof ApiError ? e.message : 'That did not work. Try again.',
+      });
+    }
+  }, [formId, onChanged]);
+
+  return (
+    <>
+      <button
+        type="button"
+        className="btn small"
+        disabled={state.kind === 'working'}
+        onClick={publish}
+      >
+        {state.kind === 'working' ? 'Publishing…' : 'Publish'}
+        <span className="sr-only"> {name}</span>
+      </button>
+      {state.kind === 'error' && (
+        <span className="meta strong" role="alert" data-overdue="true">
+          {state.message}
+        </span>
+      )}
     </>
   );
 }

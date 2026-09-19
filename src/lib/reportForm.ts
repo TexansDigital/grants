@@ -36,6 +36,7 @@ import { newId } from './ids';
 import { nowIso } from './time';
 import { auditStatement } from './audit';
 import { AppError, notFound } from './errors';
+import { loadFormDefinition, assertPublishable } from './loadForm';
 
 /** A metric definition row, as the builder needs it. */
 export interface MetricDefinition {
@@ -406,4 +407,177 @@ export async function buildReportForm(
   await db.batch(statements);
 
   return { formDefinitionId, version, metricIds, fieldCount };
+}
+
+export interface PublishResult {
+  formDefinitionId: string;
+  version: number;
+  /** The previous published version, now retired. */
+  retiredFormDefinitionId: string | null;
+  /** Obligations that were waiting for a form and now have this one. */
+  periodsAttached: number;
+}
+
+/**
+ * Publish a draft report form, and attach it to the obligations waiting for it.
+ *
+ * THE SECOND HALF IS THE POINT, and its absence was a real defect. A report
+ * period pins its form at generation, and generation happens when awards are
+ * imported -- which is BEFORE anybody has written the questions. Every period
+ * generated in that window pinned NULL, and nothing in the system ever set it:
+ * `generateReportPeriods` refuses to touch an award that already has periods,
+ * by design, so the grantee's portal said "This report form is not ready yet"
+ * forever, for every grant imported before the metrics arrived. Which is all of
+ * them.
+ *
+ * So publishing is the moment that resolves it. An admin writing the questions
+ * and pressing publish means exactly "these are the questions, ask them" -- and
+ * the obligations that have been waiting are precisely what they should be
+ * asked on.
+ *
+ * WHAT IS DELIBERATELY NOT TOUCHED. A period that already names a form keeps
+ * it, always. That is the freeze that stops a form edited this March changing
+ * the question a grantee answered last October, and a publish must not be a
+ * back door through it. Accepted and waived periods are left alone for the same
+ * reason: they are finished.
+ */
+export async function publishReportForm(
+  db: D1Database,
+  ctx: RequestContext,
+  formDefinitionId: string,
+  opts: { now?: string } = {},
+): Promise<PublishResult> {
+  const now = opts.now ?? nowIso();
+
+  const def = await db
+    .prepare(
+      `SELECT id, program_id, form_key, kind, version, status
+         FROM form_definitions WHERE id = ? AND deleted_at IS NULL`,
+    )
+    .bind(formDefinitionId)
+    .first<{
+      id: string;
+      program_id: string;
+      form_key: string;
+      kind: string;
+      version: number;
+      status: string;
+    }>();
+  if (!def) throw notFound('form');
+
+  if (def.kind !== 'report') {
+    throw new AppError('VALIDATION_FAILED', 'That is not a report form.', {
+      internalMessage: `publishReportForm called on a ${def.kind} definition`,
+      severity: 'warn',
+    });
+  }
+  if (def.status !== 'draft') {
+    throw new AppError('FORM_PUBLISHED', `This form is already ${def.status}.`, {
+      internalMessage: `publish attempted on form ${formDefinitionId} in ${def.status}`,
+      severity: 'warn',
+    });
+  }
+
+  // The same gate an application form passes: a conditional pointing at a
+  // field that does not exist, a choice field with no options, a promotion
+  // whose type cannot hold it. Publishing is one way -- the mistakes have to
+  // be caught before it, not after.
+  const loaded = await loadFormDefinition(db, formDefinitionId);
+  if (loaded.sections.every((s) => s.fields.length === 0)) {
+    throw new AppError('VALIDATION_FAILED', 'This form has no questions in it yet.', {
+      internalMessage: `publish attempted on empty report form ${formDefinitionId}`,
+      severity: 'warn',
+    });
+  }
+  assertPublishable(loaded);
+
+  // Only one published form per (program, form_key) -- the database says so
+  // with a unique index, so the previous one is retired in the same batch
+  // rather than left to collide.
+  const prior = await db
+    .prepare(
+      `SELECT id FROM form_definitions
+        WHERE program_id = ? AND form_key = ? AND kind = 'report'
+          AND status = 'published' AND id <> ? AND deleted_at IS NULL`,
+    )
+    .bind(def.program_id, def.form_key, formDefinitionId)
+    .first<{ id: string }>();
+
+  const waiting = await db
+    .prepare(
+      `SELECT COUNT(*) AS n
+         FROM report_periods rp
+         JOIN awards a ON a.id = rp.award_id AND a.deleted_at IS NULL
+        WHERE a.program_id = ? AND rp.form_definition_id IS NULL
+          AND rp.status NOT IN ('accepted','waived') AND rp.deleted_at IS NULL`,
+    )
+    .bind(def.program_id)
+    .first<{ n: number }>();
+  const periodsAttached = waiting?.n ?? 0;
+
+  const statements: D1PreparedStatement[] = [];
+
+  if (prior) {
+    statements.push(
+      db
+        .prepare(`UPDATE form_definitions SET status = 'retired', updated_at = ? WHERE id = ?`)
+        .bind(now, prior.id),
+      auditStatement(db, ctx, {
+        action: 'form_definition.retired',
+        entityType: 'form_definition',
+        entityId: prior.id,
+        before: { status: 'published' },
+        after: { status: 'retired', superseded_by: formDefinitionId },
+      }),
+    );
+  }
+
+  statements.push(
+    db
+      .prepare(
+        `UPDATE form_definitions SET status = 'published', published_at = ?, updated_at = ?
+          WHERE id = ? AND status = 'draft'`,
+      )
+      .bind(now, now, formDefinitionId),
+  );
+
+  if (periodsAttached > 0) {
+    statements.push(
+      db
+        .prepare(
+          `UPDATE report_periods SET form_definition_id = ?, updated_at = ?
+            WHERE form_definition_id IS NULL
+              AND status NOT IN ('accepted','waived')
+              AND deleted_at IS NULL
+              AND award_id IN (SELECT id FROM awards
+                                WHERE program_id = ? AND deleted_at IS NULL)`,
+        )
+        .bind(formDefinitionId, now, def.program_id),
+    );
+  }
+
+  statements.push(
+    auditStatement(db, ctx, {
+      action: 'form_definition.published',
+      entityType: 'form_definition',
+      entityId: formDefinitionId,
+      before: { status: 'draft' },
+      after: {
+        status: 'published',
+        program_id: def.program_id,
+        form_key: def.form_key,
+        version: def.version,
+        report_periods_attached: periodsAttached,
+      },
+    }),
+  );
+
+  await db.batch(statements);
+
+  return {
+    formDefinitionId,
+    version: def.version,
+    retiredFormDefinitionId: prior?.id ?? null,
+    periodsAttached,
+  };
 }

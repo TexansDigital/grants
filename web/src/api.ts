@@ -179,6 +179,21 @@ export const api = {
       `/api/organizations/${encodeURIComponent(organizationId)}/history`,
       signal,
     ),
+  buildReportForm: (programId: string) =>
+    request<{ formDefinitionId: string; version: number; fieldCount: number }>(
+      `/api/programs/${encodeURIComponent(programId)}/report-form`,
+      { method: 'POST', body: {} },
+    ),
+  publishForm: (formDefinitionId: string) =>
+    request<{
+      formDefinitionId: string;
+      version: number;
+      retiredFormDefinitionId: string | null;
+      periodsAttached: number;
+    }>(`/api/forms/${encodeURIComponent(formDefinitionId)}/publish`, {
+      method: 'POST',
+      body: {},
+    }),
   reports: (query: string, signal?: AbortSignal) =>
     get<{ rows: PortfolioRow[]; total: number }>(
       `/api/reports${query ? `?${query}` : ''}`,
