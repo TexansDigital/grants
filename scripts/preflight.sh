@@ -60,21 +60,32 @@ fi
 WHOAMI="$(npx wrangler whoami 2>&1)"
 echo "$WHOAMI" | sed 's/^/  /' | head -20
 
-# The scopes an OAuth token carries are fixed when it is minted. A token from an
-# older wrangler predates the D1 and R2 scopes, so it reports a healthy login
-# and then fails on the first `d1 migrations apply --remote` or
-# `r2 bucket create` -- with a permissions error that reads like the resource
-# is missing rather than like the token is.
+# The scopes an OAuth token carries are fixed when it is minted, so a token from
+# an older wrangler reports a perfectly healthy login and then fails on the
+# first `d1 migrations apply --remote` -- with a permissions error that reads as
+# though the database is missing rather than as though the token is.
 if echo "$WHOAMI" | grep -q 'Token Permissions'; then
   echo
-  for scope in d1 r2; do
-    if echo "$WHOAMI" | grep -qE "^\s*-\s*${scope}(:| |$)"; then
-      ok "token can reach ${scope}"
-    else
-      warn "token has NO ${scope} scope. Commands touching ${scope} will fail with a"
-      warn "permissions error. Fix: npx wrangler logout && npx wrangler login"
-    fi
-  done
+  if echo "$WHOAMI" | grep -qE "^\s*-\s*d1(:| |$)"; then
+    ok "token can reach D1"
+  else
+    warn "token has NO d1 scope. Any --remote migration will fail with a permissions"
+    warn "error. Fix: npx wrangler logout && npx wrangler login"
+  fi
+
+  # R2 is NOT a mistake to fix by logging in again. wrangler's OAuth flow does
+  # not request an R2 scope at all -- checked against the consent URL wrangler
+  # 4.129 opens -- so no amount of re-authenticating will produce one. Bucket
+  # management is a dashboard action, or an API token if it ever needs
+  # scripting. Saying "log in again" here would send somebody round a loop that
+  # cannot terminate.
+  if echo "$WHOAMI" | grep -qE "^\s*-\s*r2(:| |$)"; then
+    ok "token can reach R2"
+  else
+    echo "  --  no r2 scope, which is normal: wrangler's login does not request one."
+    echo "      Create buckets in the Cloudflare dashboard (R2 > Create bucket)."
+    echo "      The Worker's own R2 bindings do not need it; they bind at deploy."
+  fi
 fi
 
 echo

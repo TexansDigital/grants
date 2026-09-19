@@ -71,12 +71,14 @@ bucket from the one holding applicant uploads, because one export contains
 every organization's data and concentrating that beside the files an applicant
 can reach through a presigned URL means one bucket-level mistake exposes both.
 
-**What I need.** Create it before the first deploy:
+**What I need.** Create two buckets, named `steward-preview-backups` and
+`steward-staging-backups`, in the Cloudflare dashboard under **R2 → Create
+bucket**.
 
-```
-npx wrangler r2 bucket create steward-preview-backups
-npx wrangler r2 bucket create steward-staging-backups
-```
+The dashboard rather than the CLI on purpose: wrangler's OAuth login does not
+request an R2 scope, so `wrangler r2 bucket create` fails with a permissions
+error no amount of re-authenticating fixes. The Worker's own R2 bindings are
+unaffected — they bind at deploy time from `wrangler.toml`.
 
 Production's name is a placeholder and gets filled in at deploy time.
 
