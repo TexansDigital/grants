@@ -23,6 +23,7 @@ export type FieldType =
   | 'checkbox_attestation'
   | 'currency'
   | 'integer'
+  | 'decimal'
   | 'url'
   | 'address_block'
   | 'file_upload'
@@ -100,6 +101,16 @@ export interface FieldValidation {
   max_files?: number;
   /** address_block: which sub-fields are required. */
   required_parts?: string[];
+  /**
+   * A unit shown beside a numeric input: "hours", "people", "meals".
+   *
+   * Display only, never parsed -- the same contract as metric_definitions.unit,
+   * which is where it comes from when a report form is scaffolded. It lives in
+   * validation_json because that is the field row's configuration blob; the
+   * interface is named after its first use rather than its scope, and renaming
+   * a column to fix that would be a migration in exchange for nothing.
+   */
+  unit_label?: string;
 }
 
 export interface FieldDef {
@@ -115,6 +126,14 @@ export interface FieldDef {
   conditional_on_field_id: string | null;
   conditional_value: string | null;
   maps_to: string | null;
+  /**
+   * The metric this field reports, on a report form. Null everywhere else.
+   *
+   * Identity only. The label, help text and required flag on this row are a
+   * COPY taken when the form was scaffolded and belong to the form; this is
+   * what the answer counts toward when it is promoted into metric_values.
+   */
+  metric_definition_id?: string | null;
   section_id: string;
 }
 
@@ -326,6 +345,36 @@ export function coerceAnswer(field: FieldDef, raw: unknown): CoerceResult {
         return { ok: false, message: `${label} must be no more than ${v.max}.` };
       }
       return { ok: true, stored: { ...EMPTY_VALUE, value_int: n }, empty: false };
+    }
+
+    case 'decimal': {
+      /*
+       * The only field type that writes value_real.
+       *
+       * It exists for metric_type 'decimal' -- a rate, an average, volunteer
+       * hours to one place -- and for nothing else. MONEY IS NEVER A DECIMAL
+       * FIELD: currency parses to integer cents above and lands in value_int,
+       * and the schema CHECK on application_answers refuses a currency answer
+       * that put anything in value_real. If a program tries to collect dollars
+       * here, that is a configuration bug, not a rounding preference.
+       */
+      const s = String(raw).trim().replace(/,/g, '');
+      // Deliberately no exponent form. "1e3" in a volunteer-hours box is a
+      // typo far more often than it is three thousand hours.
+      if (!/^-?(\d+(\.\d+)?|\.\d+)$/.test(s)) {
+        return { ok: false, message: `${label} must be a number, for example 12.5.` };
+      }
+      const n = Number(s);
+      if (!Number.isFinite(n)) {
+        return { ok: false, message: `${label} is too large.` };
+      }
+      if (v.min !== undefined && n < v.min) {
+        return { ok: false, message: `${label} must be at least ${v.min}.` };
+      }
+      if (v.max !== undefined && n > v.max) {
+        return { ok: false, message: `${label} must be no more than ${v.max}.` };
+      }
+      return { ok: true, stored: { ...EMPTY_VALUE, value_real: n }, empty: false };
     }
 
     case 'address_block': {

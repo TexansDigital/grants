@@ -29,6 +29,7 @@ interface FieldRow {
   conditional_on_field_id: string | null;
   conditional_value: string | null;
   maps_to: string | null;
+  metric_definition_id: string | null;
 }
 
 function parseJson<T>(raw: string | null, fallback: T): T {
@@ -86,7 +87,7 @@ export async function loadFormDefinition(
     .prepare(
       `SELECT id, form_section_id, field_key, label, help_text, field_type,
               is_required, sort_order, options_json, validation_json,
-              conditional_on_field_id, conditional_value, maps_to
+              conditional_on_field_id, conditional_value, maps_to, metric_definition_id
          FROM form_fields
         WHERE form_definition_id = ?
         ORDER BY sort_order, label`,
@@ -109,6 +110,7 @@ export async function loadFormDefinition(
       conditional_on_field_id: r.conditional_on_field_id,
       conditional_value: r.conditional_value,
       maps_to: r.maps_to,
+      metric_definition_id: r.metric_definition_id,
       section_id: r.form_section_id,
     };
     const list = fieldsBySection.get(r.form_section_id) ?? [];

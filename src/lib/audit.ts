@@ -51,6 +51,8 @@ export type AuditAction =
   | 'form_definition.published'
   | 'form_definition.retired'
   | 'form_definition.version_created'
+  // a draft report form written in one act from a program's metric definitions
+  | 'form_definition.scaffolded'
   // programs and cycles
   | 'program.created'
   | 'program_stage.created'

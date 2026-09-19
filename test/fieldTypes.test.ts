@@ -21,7 +21,7 @@ function field(over: Partial<FieldDef> & { field_type: FieldType }): FieldDef {
 
 const ALL_TYPES: FieldType[] = [
   'short_text', 'long_text', 'email', 'phone', 'select', 'multi_select',
-  'checkbox_attestation', 'currency', 'integer', 'url', 'address_block',
+  'checkbox_attestation', 'currency', 'integer', 'decimal', 'url', 'address_block',
   'file_upload', 'consent_checkbox', 'other_specify',
 ];
 
@@ -49,6 +49,7 @@ describe('field type registry', () => {
       checkbox_attestation: true,
       currency: '$1,234.56',
       integer: '42',
+      decimal: '12.5',
       url: 'example.org',
       address_block: { address_1: '1 Main', city: 'Houston', state: 'TX', postal_code: '77002' },
       file_upload: [{ attachment_id: 'att1', filename: 'f.pdf' }],
@@ -70,6 +71,53 @@ describe('field type registry', () => {
         expect(populated.length, `${t} stored nothing`).toBe(1);
       }
     }
+  });
+
+  it('decimal is the only type that writes value_real', () => {
+    const f = field({ field_type: 'decimal' });
+    const r = coerceAnswer(f, '12.5');
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.stored.value_real).toBe(12.5);
+      expect(r.stored.value_int).toBeNull();
+      expect(r.stored.value_text).toBeNull();
+    }
+  });
+
+  it('decimal accepts a whole number without turning it into an integer answer', () => {
+    // A grantee who reports 12 volunteer hours has answered a decimal
+    // question. Landing that in value_int would split one metric across two
+    // columns and make the SUM that reads it wrong.
+    const r = coerceAnswer(field({ field_type: 'decimal' }), '12');
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.stored.value_real).toBe(12);
+      expect(r.stored.value_int).toBeNull();
+    }
+  });
+
+  it('decimal refuses exponent notation, which is a typo far more often', () => {
+    const r = coerceAnswer(field({ field_type: 'decimal' }), '1e3');
+    expect(r.ok).toBe(false);
+  });
+
+  it('decimal refuses text and a bare minus sign', () => {
+    for (const bad of ['abc', '-', '.', '1.2.3', '12,5,0.']) {
+      expect(coerceAnswer(field({ field_type: 'decimal' }), bad).ok, bad).toBe(false);
+    }
+  });
+
+  it('decimal strips thousands separators like integer does', () => {
+    const r = coerceAnswer(field({ field_type: 'decimal' }), '1,234.5');
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.stored.value_real).toBe(1234.5);
+  });
+
+  it('decimal honours min and max', () => {
+    const f = field({ field_type: 'decimal', validation: { min: 0, max: 100 } });
+    expect(coerceAnswer(f, '-0.5').ok).toBe(false);
+    expect(coerceAnswer(f, '100.1').ok).toBe(false);
+    expect(coerceAnswer(f, '99.9').ok).toBe(true);
   });
 
   it('short_text enforces length and pattern', () => {

@@ -138,7 +138,17 @@ describe('running the export', () => {
     const { bucket } = fakeBucket();
     const manifest = await runBackup(envWith(bucket), ctx());
     // A restore into the wrong schema is the failure this prevents.
-    expect(manifest.schemaVersion).toMatch(/^0012_/);
+    //
+    // Compared against d1_migrations rather than against a migration name
+    // written here: pinning the name meant every new migration broke this
+    // test, which teaches whoever hits it to edit the assertion rather than
+    // read it. What matters is that the manifest names the LAST applied
+    // migration, whatever that is today.
+    const latest = await db.prepare(
+      `SELECT name FROM d1_migrations ORDER BY id DESC LIMIT 1`,
+    ).first<{ name: string }>();
+    expect(manifest.schemaVersion).toBe(latest!.name);
+    expect(manifest.schemaVersion).toMatch(/^\d{4}_.+\.sql$/);
   });
 
   it('writes a stable latest.json, so "did it run" is one read', async () => {

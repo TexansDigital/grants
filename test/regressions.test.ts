@@ -30,7 +30,7 @@ import {
  */
 const IMPLEMENTED_FIELD_TYPES: FieldType[] = [
   'short_text', 'long_text', 'email', 'phone', 'select', 'multi_select',
-  'checkbox_attestation', 'currency', 'integer', 'url', 'address_block',
+  'checkbox_attestation', 'currency', 'integer', 'decimal', 'url', 'address_block',
   'file_upload', 'consent_checkbox', 'other_specify',
 ];
 

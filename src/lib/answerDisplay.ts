@@ -128,6 +128,14 @@ export function displayValue(field: FieldDef, stored: StoredValue | undefined | 
     case 'integer':
       return v.value_int === null ? null : v.value_int.toLocaleString('en-US');
 
+    case 'decimal':
+      // No forced precision. A grantee who typed 12.5 reads back 12.5, and one
+      // who typed 12 reads back 12 -- padding it to "12.00" implies a
+      // measurement that was never made.
+      return v.value_real === null
+        ? null
+        : v.value_real.toLocaleString('en-US', { maximumFractionDigits: 6 });
+
     case 'address_block': {
       const addr = parseObject(v.value_json);
       const parts = ADDRESS_ORDER.map((k) => addr[k])

@@ -168,6 +168,10 @@ function scalarFor(field: FieldDef, stored: StoredValue): string | number | null
     case 'address_block':
     case 'file_upload':
       return stored.value_json;
+    case 'decimal':
+      // No promotion target accepts a real today; this is here so that adding
+      // one cannot silently promote a null.
+      return stored.value_real;
     default:
       return stored.value_text;
   }

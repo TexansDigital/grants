@@ -387,14 +387,46 @@ function renderControl(
 
     case 'integer':
       return (
-        <input
-          {...common}
-          type="text"
-          inputMode="numeric"
-          autoComplete="off"
-          value={str(value)}
-          onChange={(e) => onChange(e.target.value)}
-        />
+        <>
+          <input
+            {...common}
+            type="text"
+            inputMode="numeric"
+            autoComplete="off"
+            value={str(value)}
+            onChange={(e) => onChange(e.target.value)}
+          />
+          {/* aria-hidden because the unit is already part of the label a
+              screen reader reads ("Volunteer hours contributed"); announcing
+              "hours" again after the input is noise. */}
+          {v.unit_label && (
+            <span className="counter" aria-hidden="true">
+              {v.unit_label}
+            </span>
+          )}
+        </>
+      );
+
+    case 'decimal':
+      return (
+        <>
+          <input
+            {...common}
+            type="text"
+            // "decimal" rather than "numeric": on a phone, numeric gives a
+            // keypad with no decimal point, and this is the one field type
+            // that needs one.
+            inputMode="decimal"
+            autoComplete="off"
+            value={str(value)}
+            onChange={(e) => onChange(e.target.value)}
+          />
+          {v.unit_label && (
+            <span className="counter" aria-hidden="true">
+              {v.unit_label}
+            </span>
+          )}
+        </>
       );
 
     case 'address_block': {

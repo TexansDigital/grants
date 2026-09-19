@@ -29,7 +29,14 @@ export interface SectionDef {
 export interface FormDefinition {
   id: string;
   program_id: string;
-  stage_id: string;
+  /**
+   * Null on a report form.
+   *
+   * The schema has said so since 0003 ("an application form must belong to a
+   * stage; a report form must not") and this type said `string` anyway,
+   * because until report forms existed nothing had ever loaded one.
+   */
+  stage_id: string | null;
   kind: 'application' | 'report';
   name: string;
   version: number;
