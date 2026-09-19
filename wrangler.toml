@@ -115,6 +115,21 @@ binding = "FILES"
 bucket_name = "steward-preview-files"
 preview_bucket_name = "steward-preview-files"
 
+# The nightly D1 export. A SEPARATE bucket from FILES, deliberately: one export
+# contains every organization's data, and keeping it beside applicant uploads
+# means a single bucket-level mistake exposes both. Create it before deploying:
+#   npx wrangler r2 bucket create steward-preview-backups
+[[r2_buckets]]
+binding = "BACKUPS"
+bucket_name = "steward-preview-backups"
+preview_bucket_name = "steward-preview-backups"
+
+# 07:00 UTC is 1am Central in summer, 2am in winter -- after the latest a
+# deadline-day applicant is realistically still submitting, and long before
+# staff arrive.
+[triggers]
+crons = ["0 7 * * *"]
+
 # --- PREVIEW KV (sessions + magic-link tokens) --------------------------------
 [[kv_namespaces]]
 binding = "SESSIONS"
@@ -178,6 +193,13 @@ migrations_dir = "migrations"
 binding = "FILES"
 bucket_name = "steward-staging-files"
 
+[[env.staging.r2_buckets]]
+binding = "BACKUPS"
+bucket_name = "steward-staging-backups"
+
+[env.staging.triggers]
+crons = ["0 7 * * *"]
+
 [[env.staging.kv_namespaces]]
 binding = "SESSIONS"
 id = "a7b016bfcca94300be98cf3f992ba9c8"
@@ -218,6 +240,13 @@ migrations_dir = "migrations"
 [[env.production.r2_buckets]]
 binding = "FILES"
 bucket_name = "FILL_IN_AT_DEPLOY_TIME_DO_NOT_COMMIT"
+
+[[env.production.r2_buckets]]
+binding = "BACKUPS"
+bucket_name = "FILL_IN_AT_DEPLOY_TIME_DO_NOT_COMMIT"
+
+[env.production.triggers]
+crons = ["0 7 * * *"]
 
 [[env.production.kv_namespaces]]
 binding = "SESSIONS"

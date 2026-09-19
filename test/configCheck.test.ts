@@ -127,7 +127,41 @@ describe('production stays un-deployable from a checkout', () => {
     failsWith(
       edit('database_id = "FILL_IN_AT_DEPLOY_TIME_DO_NOT_COMMIT"',
            'database_id = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"'),
-      /placeholder/i,
+      /not the placeholder/i,
     );
+  });
+
+  it('catches ANY production binding filled in, not a fixed number of them', () => {
+    /*
+     * This check used to count placeholders and require at least three. A
+     * count is not an invariant: adding a fourth production binding (the
+     * backups bucket) let the file pass with one real id committed, because
+     * three placeholders still remained. It weakened the moment the config
+     * grew, which is how every "at least N" guard fails.
+     */
+    const src = real;
+    const bindings = [...src.matchAll(/(id|bucket_name)\s*=\s*"FILL_IN_AT_DEPLOY_TIME_DO_NOT_COMMIT"/g)];
+    expect(bindings.length, 'production has several bindings to protect').toBeGreaterThan(2);
+
+    // Every one of them, individually.
+    for (let i = 0; i < bindings.length; i += 1) {
+      let seen = -1;
+      const mutated = src.replace(
+        /(id|bucket_name)(\s*=\s*)"FILL_IN_AT_DEPLOY_TIME_DO_NOT_COMMIT"/g,
+        (whole, key: string, eq: string) => {
+          seen += 1;
+          return seen === i ? `${key}${eq}"real-value-committed-by-mistake"` : whole;
+        },
+      );
+      failsWith(mutated, /not the placeholder/i);
+    }
+  });
+
+  it('leaves database_name alone, which is a label rather than a binding', () => {
+    // A D1 binding resolves by database_id. "steward-production" committed in
+    // plain sight names nothing anybody can deploy against, and flagging it
+    // would train people to ignore this check.
+    expect(real).toContain('database_name = "steward-production"');
+    expect(configProblems(real)).toEqual([]);
   });
 });

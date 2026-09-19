@@ -19,6 +19,7 @@ import type { Env, RequestContext, Session } from './types';
 import { newRequestId } from './lib/ids';
 import { AppError, logError, notFound, toErrorResponse, validationFailed } from './lib/errors';
 import { nowIso, formatInZone } from './lib/time';
+import { scheduledBackup } from './lib/backup';
 import { securityHeaders, htmlHeaders } from './lib/httpHeaders';
 import { readSessionCookie, resolveSession } from './lib/sessions';
 import {
@@ -598,6 +599,10 @@ export default {
       method: 'SCHEDULED',
     };
     try {
+      // One job today. When there is a second, this becomes a switch on
+      // event.cron rather than a sequence -- a failing export must not stop
+      // whatever runs after it, and a shared try block would do exactly that.
+      await scheduledBackup(env, ctx);
       return;
     } catch (err) {
       await logError(env, ctx, {

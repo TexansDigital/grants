@@ -45,7 +45,30 @@ email has ever actually been delivered by this system.
 **What I need.** The Resend domain verified (it depends on 1.1) and the API key
 set as a Wrangler secret. Never in the repo, never in `wrangler.toml`.
 
-### 1.3 R2 storage credentials
+### 1.3 A backups bucket
+
+**Status: named in `wrangler.toml`, not created.** The nightly D1 export is
+built and writes to an R2 bucket bound as `BACKUPS` — deliberately a *different*
+bucket from the one holding applicant uploads, because one export contains
+every organization's data and concentrating that beside the files an applicant
+can reach through a presigned URL means one bucket-level mistake exposes both.
+
+**What I need.** Create it before the first deploy:
+
+```
+npx wrangler r2 bucket create steward-preview-backups
+npx wrangler r2 bucket create steward-staging-backups
+```
+
+Production's name is a placeholder and gets filled in at deploy time.
+
+**And one thing only a human can do.** The export has never been restored. A
+backup nobody has restored is a hypothesis — the manifest says so in the file
+itself. Before the first real cycle, take one export and load it into an empty
+database, then check the row counts against the manifest. That test is the
+difference between having backups and believing you do.
+
+### 1.4 R2 storage credentials
 
 **Status: placeholders.** `wrangler.toml` carries
 `R2_ACCOUNT_ID = "FILL_IN_ONCE_KNOWN"`, and there is no R2 access key or
@@ -58,7 +81,7 @@ without these.
 - An R2 access key id and secret, as Wrangler secrets.
 - CORS on the preview bucket allowing the app origin, once 1.1 exists.
 
-### 1.4 A security review by somebody who did not write this
+### 1.5 A security review by somebody who did not write this
 
 **Status: not started, and I cannot do it.** I can write scoped queries, hashed
 single-use tokens and authorization tests, and I have. I cannot certify the

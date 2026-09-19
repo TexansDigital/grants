@@ -88,6 +88,8 @@ export type AuditAction =
   | 'attachment.uploaded'
   | 'attachment.deleted'
   | 'attachment.download_url_issued'
+  // the nightly D1 export
+  | 'data.exported'
   | 'user.created'
   | 'user.deactivated'
   | 'auth.magic_link_requested'

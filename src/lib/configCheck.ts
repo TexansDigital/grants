@@ -163,13 +163,47 @@ export function configProblems(src: string): string[] {
     }
   }
 
-  // NON-NEGOTIABLE: the default bindings must never point at production.
-  const prodPlaceholders = (src.match(/FILL_IN_AT_DEPLOY_TIME_DO_NOT_COMMIT/g) ?? []).length;
-  if (prodPlaceholders < 3) {
-    problems.push(
-      `expected 3 production placeholders, found ${prodPlaceholders}. ` +
-        `Production ids must never be committed; a deliberate deploy fills them in.`,
-    );
+  /*
+   * NON-NEGOTIABLE: no production id is ever committed.
+   *
+   * This used to COUNT placeholders and require at least three. A count is not
+   * an invariant: adding a fourth production binding (the backups bucket) made
+   * the file pass with one real id committed, because three placeholders still
+   * remained. The guard weakened the moment the config grew, which is the
+   * failure mode of every "at least N" check.
+   *
+   * Structural instead: find every value in the production sections that
+   * NAMES something -- an id, a database, a bucket -- and require each one to
+   * be the placeholder. A new production binding is covered the day it is
+   * added, by nobody remembering anything.
+   */
+  /*
+   * The keys that actually BIND to a resource. `database_name` is deliberately
+   * absent: a D1 binding resolves by `database_id`, so the name is
+   * informational and "steward-production" committed in plain sight is a label
+   * rather than a credential. R2 has no separate id, so there `bucket_name` is
+   * the binding and is covered.
+   */
+  const BINDS_A_RESOURCE =
+    /^\s*(id|database_id|preview_id|bucket_name|preview_bucket_name)\s*=\s*"([^"]*)"/;
+  {
+    const lines = src.split(/\r?\n/);
+    let inProduction = false;
+    lines.forEach((line, i) => {
+      const header = /^\s*\[+\s*env\.([A-Za-z0-9_-]+)/.exec(line);
+      if (header) inProduction = header[1] === 'production';
+      else if (/^\s*\[/.test(line) && !/^\s*\[+\s*env\./.test(line)) inProduction = false;
+      if (!inProduction) return;
+
+      const m = BINDS_A_RESOURCE.exec(line);
+      if (!m) return;
+      if (m[2] !== 'FILL_IN_AT_DEPLOY_TIME_DO_NOT_COMMIT') {
+        problems.push(
+          `line ${i + 1}: [env.production] ${m[1]} is "${m[2]}", not the placeholder. ` +
+            `Production ids must never be committed; a deliberate deploy fills them in.`,
+        );
+      }
+    });
   }
 
   // -----------------------------------------------------------------------------

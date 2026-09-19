@@ -5,6 +5,12 @@
 export interface Env {
   DB: D1Database;
   FILES: R2Bucket;
+  /**
+   * Where the nightly D1 export goes. A SEPARATE bucket from FILES on purpose:
+   * one export contains every organization's data, and concentrating that
+   * beside applicant uploads means one bucket-level mistake exposes both.
+   */
+  BACKUPS?: R2Bucket;
   SESSIONS: KVNamespace;
   ENVIRONMENT: string;
   DISPLAY_TIMEZONE: string;
