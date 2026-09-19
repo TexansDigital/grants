@@ -1,0 +1,19 @@
+# PHASE A SPIKE -- THROWAWAY. Delete this file with spike/ once the question is
+# answered.
+#
+# DELIBERATELY BINDS NOTHING. No d1_databases, no r2_buckets, no kv_namespaces.
+# This Worker physically cannot read or write any Steward data, which is what
+# makes it safe to run a diagnostic that echoes upstream error bodies verbatim.
+#
+# It also has no `routes` and no env blocks, so `wrangler deploy` against it
+# would have nowhere to go. It is meant for `wrangler dev` and nothing else.
+
+name = "steward-drive-spike"
+main = "spike/worker.ts"
+compatibility_date = "2025-01-15"
+workers_dev = false
+
+[vars]
+# Not a secret: a folder id is a name, not a key. The credential that opens it
+# is GOOGLE_SERVICE_ACCOUNT_B64, which lives in .dev.vars and is gitignored.
+GOOGLE_DRIVE_FOLDER_ID = "15Klrtq0W4T0yHRkLogoVyxopDzHJ2M7l"

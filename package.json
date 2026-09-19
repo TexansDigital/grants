@@ -29,7 +29,8 @@
     "metrics:build": "esbuild src/import/metrics.ts --bundle --platform=node --format=esm --outfile=.metricsbuild.mjs --log-level=warning",
     "metrics": "npm run metrics:build && node scripts/import-metrics.mjs",
     "e2e:apply": "node scripts/e2e-apply.mjs",
-    "e2e:staff": "node scripts/e2e-staff-ui.mjs"
+    "e2e:staff": "node scripts/e2e-staff-ui.mjs",
+    "spike": "wrangler dev --config wrangler.spike.toml --port 8788"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.12.21",
