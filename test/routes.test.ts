@@ -653,3 +653,105 @@ describe('the report compliance desk, over HTTP', () => {
     expect(res.status).toBe(404);
   });
 });
+
+// ---------------------------------------------------------------------------
+describe('merging duplicate organizations, over HTTP', () => {
+  async function twoRecordsOfOneNonprofit() {
+    const now = nowIso();
+    const ein = String(760000000 + (n += 1));
+    const ids: string[] = [];
+    for (const name of ['Harbor Trust', 'Harbor Trust Houston']) {
+      const id = newId();
+      await db.prepare(
+        `INSERT INTO organizations (id, legal_name, ein, status, created_at, updated_at)
+         VALUES (?,?,?,'active',?,?)`,
+      ).bind(id, name, ein, now, now).run();
+      ids.push(id);
+    }
+    return { survivor: ids[0]!, duplicate: ids[1]!, ein };
+  }
+
+  let n = 0;
+
+  it('lists candidates for staff and refuses them to everyone else', async () => {
+    const pair = await twoRecordsOfOneNonprofit();
+    await makeUser('merge-reviewer@texans.com', 'reviewer');
+
+    const res = await call('/api/organizations/duplicates', await mint('merge-reviewer@texans.com'));
+    expect(res.status).toBe(200);
+    const body = await res.json<{ groups: { key: string; organizations: { id: string }[] }[] }>();
+    const found = body.groups.find((g) => g.key === pair.ein);
+    expect(found!.organizations.map((o) => o.id).sort())
+      .toEqual([pair.survivor, pair.duplicate].sort());
+
+    expect((await call('/api/organizations/duplicates')).status).toBe(401);
+  });
+
+  it('previews a merge without doing it', async () => {
+    const pair = await twoRecordsOfOneNonprofit();
+    await makeUser('merge-preview@texans.com', 'reviewer');
+    const res = await call(
+      `/api/organizations/${pair.duplicate}/merge-preview?into=${pair.survivor}`,
+      await mint('merge-preview@texans.com'),
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json<{ ok: boolean; survivor: { id: string }; merged: { id: string } }>();
+    expect(body.ok).toBe(true);
+    expect(body.survivor.id).toBe(pair.survivor);
+    expect(body.merged.id).toBe(pair.duplicate);
+
+    // Nothing moved.
+    const row = await db.prepare(`SELECT status FROM organizations WHERE id=?`)
+      .bind(pair.duplicate).first<{ status: string }>();
+    expect(row!.status).toBe('active');
+  });
+
+  it('refuses a preview that does not name a survivor', async () => {
+    const pair = await twoRecordsOfOneNonprofit();
+    await makeUser('merge-nosurv@texans.com', 'reviewer');
+    const res = await call(
+      `/api/organizations/${pair.duplicate}/merge-preview`,
+      await mint('merge-nosurv@texans.com'),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it('lets an admin merge, and refuses a reviewer', async () => {
+    const pair = await twoRecordsOfOneNonprofit();
+    await makeUser('merge-admin@texans.com', 'admin');
+    await makeUser('merge-rev2@texans.com', 'reviewer');
+
+    const refused = await post(
+      `/api/organizations/${pair.duplicate}/merge`,
+      await mint('merge-rev2@texans.com'),
+      { into: pair.survivor },
+    );
+    expect(refused.status).toBe(403);
+
+    const ok = await post(
+      `/api/organizations/${pair.duplicate}/merge`,
+      await mint('merge-admin@texans.com'),
+      { into: pair.survivor },
+    );
+    expect(ok.status).toBe(200);
+
+    const row = await db.prepare(
+      `SELECT status, merged_into_id FROM organizations WHERE id=?`,
+    ).bind(pair.duplicate).first<Record<string, unknown>>();
+    expect(row).toMatchObject({ status: 'merged', merged_into_id: pair.survivor });
+  });
+
+  it('refuses a merge that does not name a survivor', async () => {
+    const pair = await twoRecordsOfOneNonprofit();
+    await makeUser('merge-admin2@texans.com', 'admin');
+    const res = await post(
+      `/api/organizations/${pair.duplicate}/merge`,
+      await mint('merge-admin2@texans.com'),
+      {},
+    );
+    expect(res.status).toBe(400);
+    const row = await db.prepare(`SELECT status FROM organizations WHERE id=?`)
+      .bind(pair.duplicate).first<{ status: string }>();
+    expect(row!.status).toBe('active');
+  });
+});

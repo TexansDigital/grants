@@ -45,6 +45,7 @@ import {
   reportPortfolio, readReportForStaff, acceptReport, requestReportRevisions, waiveReport,
 } from './lib/reportAdmin';
 import { buildReportForm, publishReportForm } from './lib/reportForm';
+import { findDuplicateCandidates, planMerge, applyMerge } from './lib/merge';
 import {
   ADMIN_ONLY,
   STAFF_READ,
@@ -415,6 +416,51 @@ const routes: readonly Route[] = [
       const body = await readJsonBody(request);
       await waiveReport(env.DB, ctx, session, params.id!, String(body.reason ?? ''));
       return json({ waived: true }, ctx);
+    },
+  },
+
+  // ---- duplicate organizations ----------------------------------------------
+  //
+  // `organizations` deliberately has no unique index on EIN, because duplicates
+  // are an expected state -- two contacts from one nonprofit, an EIN typed with
+  // a dash one year and without it the next. These are what puts them back
+  // together. Looking is staff; merging is admin, because it is not reversible.
+  {
+    method: 'GET',
+    path: '/api/organizations/duplicates',
+    roles: STAFF_READ,
+    handler: async ({ env, ctx, url, session }) =>
+      json(
+        {
+          groups: await findDuplicateCandidates(env.DB, session, {
+            limit: Number(url.searchParams.get('limit') ?? '50'),
+          }),
+        },
+        ctx,
+      ),
+  },
+  {
+    method: 'GET',
+    path: '/api/organizations/:id/merge-preview',
+    roles: STAFF_READ,
+    handler: async ({ env, ctx, url, params, session }) => {
+      const into = url.searchParams.get('into');
+      if (!into) throw validationFailed([{ field: 'into', message: 'Name the surviving record.' }]);
+      // :id is the DUPLICATE, `into` is the survivor -- the same order the
+      // merge route uses, so a preview and the act it previews cannot be
+      // transposed by a caller reading one and calling the other.
+      return json(await planMerge(env.DB, session, into, params.id!), ctx);
+    },
+  },
+  {
+    method: 'POST',
+    path: '/api/organizations/:id/merge',
+    roles: ADMIN_ONLY,
+    handler: async ({ request, env, ctx, params, session }) => {
+      const body = await readJsonBody(request);
+      const into = typeof body.into === 'string' ? body.into : '';
+      if (!into) throw validationFailed([{ field: 'into', message: 'Name the surviving record.' }]);
+      return json(await applyMerge(env.DB, ctx, session, into, params.id!), ctx);
     },
   },
 
