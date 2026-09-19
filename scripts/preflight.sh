@@ -16,6 +16,17 @@
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 1
 
+# Reached by path from outside a checkout, or by `npm run whoami` from the
+# wrong place. Say which, rather than failing on a missing file three lines
+# later -- "you are not in a project" is the whole answer.
+if [ ! -f package.json ] || [ ! -f wrangler.toml ]; then
+  printf '\033[33m%s\033[0m\n' "This is not a Steward checkout: $(pwd)"
+  echo "Run it from inside the project, or by path:"
+  echo "    cd ~/grants && npm run whoami"
+  echo "    bash ~/grants/scripts/preflight.sh"
+  exit 1
+fi
+
 bold() { printf '\033[1m%s\033[0m\n' "$1"; }
 warn() { printf '\033[33m  !  %s\033[0m\n' "$1"; }
 ok()   { printf '\033[32m  ok\033[0m %s\n' "$1"; }
