@@ -6,6 +6,21 @@ myself, decide on your behalf, or work around.
 
 Last updated: 19 September 2026.
 
+**The short version, in the order it unblocks things:**
+
+| | What | Blocks |
+|---|---|---|
+| 1 | `apply.` DNS record, and Resend's DNS records | Everything public. Nobody can receive a sign-in link. |
+| 2 | Resend API key, as a Wrangler secret | Same |
+| 3 | Cloudflare account id, R2 key + secret, two backup buckets, bucket CORS | Every file upload, and the nightly export |
+| 4 | Your impact metrics, as a CSV | What grantee reports ASK. The machinery is finished. |
+| 5 | The scoring rubric, as a CSV or XLSX | The entire review and scoring module |
+| 6 | Decline letter wording | Decision communication |
+| 7 | A security review by somebody who did not write this | Going live. A gate, not a task. |
+| 8 | Six policy decisions (§3) | Various. I have a recommendation for each. |
+
+Eloqua has its own document: `docs/ELOQUA-SETUP.md`.
+
 ---
 
 ## 1. Blocking the public form going live
@@ -221,7 +236,7 @@ decided by whichever behaviour I happened to build first.
 
 ## 4. Things you will need to do, but not yet
 
-- Apply the eleven migrations to staging: `npm run migrate:staging`.
+- Apply the fourteen migrations to staging: `npm run migrate:staging`.
 - Confirm the presigned upload actually works against a real R2 bucket. I can
   test everything up to the signature; the PUT itself needs real credentials
   and a real bucket, and this is exactly the step that historically fails in a
