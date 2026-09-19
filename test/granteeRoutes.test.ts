@@ -6,11 +6,14 @@ import { seedProgram } from '../src/seed/seedProgram';
 import { INSPIRE_CHANGE } from '../src/seed/inspireChange';
 import { buildReportForm } from '../src/lib/reportForm';
 import { generateReportPeriods } from '../src/lib/reportPeriods';
-import { reportState, isOutstanding, type ReportState } from '../src/lib/granteeRoutes';
+import {
+  reportState, isOutstanding, sendReportConfirmation, type ReportState,
+} from '../src/lib/granteeRoutes';
+import { submitReport } from '../src/lib/reportSubmit';
 import { createSession, SESSION_COOKIE } from '../src/lib/sessions';
 import { newId } from '../src/lib/ids';
 import { nowIso } from '../src/lib/time';
-import type { Env } from '../src/types';
+import type { Env, Session } from '../src/types';
 
 const ORIGIN = 'https://applications.example.org';
 /** Invented R2 credentials; nothing in this file reaches Cloudflare. */
@@ -28,7 +31,7 @@ let n = 0;
 
 async function call(
   path: string,
-  init: { method?: string; cookie?: string; body?: unknown } = {},
+  init: { method?: string; cookie?: string; body?: unknown; env?: Env } = {},
 ): Promise<Response> {
   const headers: Record<string, string> = { 'cf-connecting-ip': '203.0.113.10' };
   if (init.cookie) headers.cookie = init.cookie;
@@ -39,7 +42,7 @@ async function call(
       headers,
       body: init.body === undefined ? undefined : JSON.stringify(init.body),
     }),
-    env(),
+    init.env ?? env(),
     {} as ExecutionContext,
   );
 }
@@ -98,8 +101,9 @@ async function grantee(opts: { termEnd?: string; awards?: number } = {}) {
     `SELECT id FROM report_periods WHERE award_id=? LIMIT 1`,
   ).bind(awardIds[0]!).first<{ id: string }>();
 
+  const session: Session = { userId, email, role: 'grantee', organizationId: orgId };
   return {
-    orgId, awardIds, programId: p.programId, email, userId,
+    orgId, awardIds, programId: p.programId, email, userId, session,
     cookie: `${SESSION_COOKIE}=${sessionToken}`,
     periodId: period!.id,
   };
@@ -403,6 +407,145 @@ describe('filing through the portal', () => {
       `SELECT answers_json FROM report_drafts WHERE report_period_id=?`,
     ).bind(g.periodId).first<{ answers_json: string }>();
     expect(JSON.parse(stored!.answers_json)).toEqual({});
+  });
+});
+
+// ---------------------------------------------------------------------------
+describe('the receipt', () => {
+  it('sends a copy of the report back to whoever filed it', async () => {
+    const g = await grantee();
+    await call(`/api/grantee/reports/${g.periodId}/submit`, {
+      method: 'POST', cookie: g.cookie, body: { answers: ANSWERS },
+    });
+    const row = await db.prepare(
+      `SELECT subject, template_key, status FROM email_messages WHERE to_email=?`,
+    ).bind(g.email).first<Record<string, string>>();
+    expect(row).toMatchObject({
+      template_key: 'report_received',
+      subject: 'We received your final report',
+    });
+  });
+
+  it('keeps the report content off the message row', async () => {
+    // email_messages is an operational log, read by more people than need a
+    // nonprofit's narrative and spend figures.
+    const g = await grantee();
+    await call(`/api/grantee/reports/${g.periodId}/submit`, {
+      method: 'POST', cookie: g.cookie, body: { answers: ANSWERS },
+    });
+    const row = await db.prepare(
+      `SELECT subject, context_json FROM email_messages WHERE to_email=?`,
+    ).bind(g.email).first<{ subject: string; context_json: string | null }>();
+    const serialized = JSON.stringify(row);
+    expect(serialized).not.toContain('summer reading');
+    expect(serialized).not.toContain('18,750');
+  });
+
+  it('never lets a mail failure undo a filing', async () => {
+    /*
+     * The report is committed before the receipt is attempted. A grantee shown
+     * a 500 after a successful filing files again.
+     *
+     * The break is an unusable DISPLAY_TIMEZONE, which is not a contrived
+     * choice: formatInZone throws on one, it is a single misconfigured
+     * variable away, and it sits inside the receipt where a naive
+     * implementation would let it escape.
+     */
+    const g = await grantee();
+    const res = await call(`/api/grantee/reports/${g.periodId}/submit`, {
+      method: 'POST',
+      cookie: g.cookie,
+      body: { answers: ANSWERS },
+      env: { ...env(), DISPLAY_TIMEZONE: 'Not/AZone' },
+    });
+    expect(res.status).toBe(201);
+
+    // Nothing was sent, and the failure is in the error log rather than in
+    // the grantee's face.
+    const mail = await db.prepare(
+      `SELECT COUNT(*) AS n FROM email_messages WHERE to_email=?`,
+    ).bind(g.email).first<{ n: number }>();
+    expect(mail!.n).toBe(0);
+    const logged = await db.prepare(
+      `SELECT COUNT(*) AS n FROM error_log WHERE code='REPORT_CONFIRMATION_EMAIL_FAILED'`,
+    ).first<{ n: number }>();
+    expect(logged!.n).toBe(1);
+    const n = await db.prepare(
+      `SELECT COUNT(*) AS n FROM report_submissions WHERE report_period_id=?`,
+    ).bind(g.periodId).first<{ n: number }>();
+    expect(n!.n).toBe(1);
+  });
+
+  it('puts the whole report, and the money in dollars, in the message itself', async () => {
+    // The recorded row keeps only a subject, so this reads the rendered
+    // message through a stand-in transport. Without it, a receipt with an
+    // empty body and an amount of "2500000" passes every other assertion.
+    const g = await grantee();
+    const sent: { subject: string; text: string; html: string; to: string }[] = [];
+    const transport = {
+      async send(msg: { subject: string; text: string; html: string; to: string }) {
+        sent.push(msg);
+        return { ok: true as const, providerMessageId: 'stub-1' };
+      },
+    };
+
+    const out = await submitReport(db, ctxFor(g.session), g.session, g.periodId, ANSWERS);
+    await sendReportConfirmation(
+      env(), ctxFor(g.session), g.session, g.periodId,
+      out.reportSubmissionId, out.submittedAt,
+      { transport: transport as never },
+    );
+
+    expect(sent).toHaveLength(1);
+    const msg = sent[0]!;
+    expect(msg.to).toBe(g.email);
+    // The read-back: everything they sent, so they hold a record without
+    // signing back in.
+    expect(msg.text).toContain('We ran a summer reading programme');
+    expect(msg.text).toContain('412');
+    expect(msg.html).toContain('summer reading');
+    // Cents became dollars exactly once, at this edge.
+    expect(msg.text).toContain('$25,000');
+    expect(msg.text).not.toContain('2500000');
+  });
+
+  it('will not build a receipt for a report the session does not hold', async () => {
+    const mine = await grantee();
+    const theirs = await grantee();
+    const out = await submitReport(
+      db, ctxFor(theirs.session), theirs.session, theirs.periodId, ANSWERS);
+
+    const sent: unknown[] = [];
+    await sendReportConfirmation(
+      env(), ctxFor(mine.session), mine.session, theirs.periodId,
+      out.reportSubmissionId, out.submittedAt,
+      {
+        transport: {
+          async send(msg: unknown) {
+            sent.push(msg);
+            return { ok: true as const, providerMessageId: 'stub-2' };
+          },
+        } as never,
+      },
+    );
+    // Nothing rendered, nothing sent: the lookup is scoped and simply misses.
+    expect(sent).toEqual([]);
+  });
+
+  it('gives a revision its own receipt, because it is a new submission', async () => {
+    const g = await grantee();
+    await call(`/api/grantee/reports/${g.periodId}/submit`, {
+      method: 'POST', cookie: g.cookie, body: { answers: ANSWERS },
+    });
+    await db.prepare(`UPDATE report_periods SET status='revisions_requested' WHERE id=?`)
+      .bind(g.periodId).run();
+    await call(`/api/grantee/reports/${g.periodId}/submit`, {
+      method: 'POST', cookie: g.cookie, body: { answers: ANSWERS },
+    });
+    const n = await db.prepare(
+      `SELECT COUNT(*) AS n FROM email_messages WHERE to_email=? AND template_key='report_received'`,
+    ).bind(g.email).first<{ n: number }>();
+    expect(n!.n).toBe(2);
   });
 });
 

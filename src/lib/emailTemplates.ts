@@ -454,6 +454,115 @@ export const APPLICATION_RECEIVED: EmailTemplate<ApplicationReceivedVars> = {
   },
 };
 
+export interface ReportReceivedVars {
+  organizationName: string;
+  programName: string;
+  /** "Final report", "Year 2 report". The grantee's own words for it. */
+  reportLabel: string;
+  /** Formatted at the display edge by the caller. Cents never reach a template. */
+  awardAmount: string;
+  submittedAtDisplay: string;
+  /** The full read-back, so they hold a record without signing back in. */
+  answers: AnswerLine[];
+}
+
+/**
+ * The receipt for a filed grant report.
+ *
+ * Same contract as the application confirmation and for the same reason: the
+ * grantee gets a copy of everything they sent, in the email, without signing
+ * back in. A nonprofit asked six months later "what did we tell them we
+ * served" should be able to find it in their own inbox.
+ *
+ * DELIBERATELY NOT A DECISION. It says we have it and we will be in touch --
+ * never that it is accepted. Acceptance is a staff act with its own record,
+ * and a receipt that reads like approval is one somebody will quote back.
+ */
+export const REPORT_RECEIVED: EmailTemplate<ReportReceivedVars> = {
+  key: 'report_received',
+  render(v) {
+    const facts: Array<[string, string]> = [
+      ['Organization', v.organizationName],
+      ['Program', v.programName],
+      ['Grant', v.awardAmount],
+      ['Report', v.reportLabel],
+      ['Filed', v.submittedAtDisplay],
+    ];
+
+    const sections: Array<{ title: string; lines: AnswerLine[] }> = [];
+    for (const line of v.answers) {
+      const last = sections[sections.length - 1];
+      if (last && last.title === line.section) last.lines.push(line);
+      else sections.push({ title: line.section, lines: [line] });
+    }
+
+    const text = textBlock([
+      `Thank you — we have your ${v.reportLabel.toLowerCase()}.`,
+      '',
+      ...facts.map(([k, val]) => `${k}: ${val}`),
+      '',
+      'A copy of everything you sent follows, so you have a record',
+      'without signing back in.',
+      '',
+      ...sections.flatMap((sec) => [
+        `--- ${sec.title} ---`,
+        ...sec.lines.flatMap((l) => [`${l.label}:`, l.value === '' ? '(not answered)' : l.value, '']),
+      ]),
+      'Nothing else is needed from you on this report. If we have questions',
+      'we will email this address.',
+      'Replying to this message reaches a real person.',
+    ]);
+
+    const answersHtml = sections
+      .map(
+        (sec) => `
+          <p style="margin:18px 0 8px 0;font-size:13px;font-weight:700;
+                    text-transform:uppercase;letter-spacing:0.04em;color:${INK_SOFT};">${escapeHtml(sec.title)}</p>
+          ${sec.lines
+            .map(
+              (l) => `<p style="margin:0 0 10px 0;font-size:14px;line-height:1.5;">
+                <span style="color:${INK_SOFT};">${escapeHtml(l.label)}</span><br>
+                ${
+                  l.value === ''
+                    ? `<span style="color:${INK_SOFT};">Not answered</span>`
+                    : escapeHtml(l.value).replace(/\n/g, '<br>')
+                }
+              </p>`,
+            )
+            .join('\n          ')}`,
+      )
+      .join('\n');
+
+    return {
+      subject: `We received your ${v.reportLabel.toLowerCase()}`,
+      text,
+      html: layout({
+        preview: `Filed ${v.submittedAtDisplay}. A copy of your report is below.`,
+        heading: 'Thank you — we have your report',
+        blocks: [
+          `Your ${escapeHtml(v.reportLabel.toLowerCase())} for the ${escapeHtml(v.programName)} grant is filed.`,
+          `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%"
+                  style="border:1px solid ${RULE};border-radius:6px;">
+             ${facts
+               .map(
+                 ([k, val]) => `<tr>
+                   <td style="padding:8px 12px;font-size:14px;color:${INK_SOFT};width:42%;">${escapeHtml(k)}</td>
+                   <td style="padding:8px 12px;font-size:14px;color:${INK};">${escapeHtml(val)}</td>
+                 </tr>`,
+               )
+               .join('\n             ')}
+           </table>`,
+          `<span style="color:${INK_SOFT};">A copy of everything you sent is below, so you have a record without signing back in.</span>`,
+          answersHtml,
+        ],
+        footer:
+          'Nothing else is needed from you on this report. If we have questions we will ' +
+          'email this address. Replying to this message reaches a real person.',
+      }),
+    };
+  },
+};
+
 /**
  * Every template the system can send.
  *
@@ -465,4 +574,5 @@ export const TEMPLATES = {
   [SIGN_IN_PROBLEM.key]: SIGN_IN_PROBLEM,
   [SIGN_IN_LINK.key]: SIGN_IN_LINK,
   [APPLICATION_RECEIVED.key]: APPLICATION_RECEIVED,
+  [REPORT_RECEIVED.key]: REPORT_RECEIVED,
 } as const;

@@ -28,7 +28,13 @@ import {
   loadGranteePeriod, loadOpenDraft, draftAnswers, isPeriodFileable,
   saveReportDraft, submitReport,
 } from './reportSubmit';
-import { nowIso } from './time';
+import { nowIso, formatInZone } from './time';
+import { sendEmail, transportFor, type EmailTransport } from './email';
+import { REPORT_RECEIVED } from './emailTemplates';
+import { readBackLines } from './answerDisplay';
+import { formatCents } from './money';
+import { logError } from './errors';
+import type { StoredValue } from './fieldTypes';
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -308,6 +314,14 @@ export async function fileReport(
       : {};
 
   const result = await submitReport(env.DB, ctx, session, reportPeriodId, answers);
+
+  // After the write, and never awaited for a value that could change the
+  // response. The report is committed; the receipt is a courtesy that must not
+  // be able to turn a successful filing into a 500.
+  await sendReportConfirmation(
+    env, ctx, session, reportPeriodId, result.reportSubmissionId, result.submittedAt,
+  );
+
   return json(
     {
       reportSubmissionId: result.reportSubmissionId,
@@ -331,4 +345,120 @@ export async function granteeMe(env: Env, session: Session): Promise<Response> {
     user: { email: session.email, role: session.role },
     organization: { name: organization.legal_name },
   });
+}
+
+/**
+ * The receipt for a filed report.
+ *
+ * NEVER BLOCKS THE FILING. The report is already committed by the time this
+ * runs; a mail failure that propagated would turn a successful filing into a
+ * 500, and a grantee who sees a 500 files again. So every path here swallows
+ * into the error log, and the caller does not await a result it could act on.
+ *
+ * Also deliberately not a decision. It says we have it -- never that it is
+ * accepted -- because acceptance is a staff act with its own record and a
+ * receipt that reads like approval is one somebody will quote back.
+ */
+export async function sendReportConfirmation(
+  env: Env,
+  ctx: RequestContext,
+  session: Session,
+  reportPeriodId: string,
+  reportSubmissionId: string,
+  submittedAt: string,
+  /**
+   * A stand-in transport, for tests that need to read what was actually
+   * rendered. The recorded message row keeps only a subject -- deliberately,
+   * since it is an operational log -- so without this seam nothing can assert
+   * that the read-back or the formatted amount reached the recipient, and
+   * mutants that emptied both survived.
+   */
+  opts: { transport?: EmailTransport | null } = {},
+): Promise<void> {
+  try {
+    const row = await env.DB.prepare(
+      `SELECT rp.label, rp.form_definition_id,
+              p.name AS program_name, o.legal_name AS organization_name,
+              a.awarded_amount_cents
+         FROM report_periods rp
+         JOIN awards a ON a.id = rp.award_id
+         JOIN organizations o ON o.id = a.organization_id
+         JOIN programs p ON p.id = a.program_id
+        WHERE rp.id = ? AND a.organization_id = ?`,
+    )
+      .bind(reportPeriodId, sessionOrgId(session))
+      .first<{
+        label: string;
+        form_definition_id: string | null;
+        program_name: string;
+        organization_name: string;
+        awarded_amount_cents: number;
+      }>();
+    if (!row || !row.form_definition_id) return;
+
+    const definition = await loadFormDefinition(env.DB, row.form_definition_id);
+    const byId = new Map(allFields(definition).map((f) => [f.id, f]));
+
+    // Re-read what was PERSISTED, not what the request intended to persist. A
+    // receipt built from the request body is a receipt for the request, and
+    // the two are only the same when nothing went wrong.
+    const { results } = await env.DB.prepare(
+      `SELECT form_field_id, value_text, value_int, value_real, value_json
+         FROM report_answers WHERE report_submission_id = ?`,
+    )
+      .bind(reportSubmissionId)
+      .all<{ form_field_id: string } & StoredValue>();
+
+    const stored = new Map<string, StoredValue>();
+    for (const r of results ?? []) {
+      if (!byId.has(r.form_field_id)) continue;
+      stored.set(r.form_field_id, {
+        value_text: r.value_text,
+        value_int: r.value_int,
+        value_real: r.value_real,
+        value_json: r.value_json,
+      });
+    }
+
+    await sendEmail(
+      env,
+      ctx,
+      {
+        template: REPORT_RECEIVED,
+        to: session.email,
+        // One receipt per submission, forever. A retry cannot produce a second
+        // copy in the grantee's inbox -- and a REVISION is a new submission,
+        // so it correctly gets its own.
+        idempotencyKey: `report_received:${reportSubmissionId}`,
+        vars: {
+          organizationName: row.organization_name,
+          programName: row.program_name,
+          reportLabel: row.label,
+          // The display edge. Cents become dollars here and nowhere earlier.
+          awardAmount: formatCents(row.awarded_amount_cents),
+          submittedAtDisplay: formatInZone(submittedAt, env.DISPLAY_TIMEZONE),
+          answers: readBackLines(definition, stored),
+        },
+        // Entity ids only. The read-back is never stored on the message row --
+        // it is the grantee's own detail and email_messages is an operational
+        // log read by more people than need it.
+        context: {
+          report_period_id: reportPeriodId,
+          report_submission_id: reportSubmissionId,
+        },
+      },
+      opts.transport === undefined ? transportFor(env) : opts.transport,
+    );
+  } catch (err) {
+    await logError(env, ctx, {
+      code: 'REPORT_CONFIRMATION_EMAIL_FAILED',
+      severity: 'error',
+      message:
+        err instanceof Error
+          ? `report receipt failed after a successful filing: ${err.message}`
+          : 'report receipt failed after a successful filing',
+      stack: err instanceof Error ? (err.stack ?? null) : null,
+      context: { report_period_id: reportPeriodId },
+    });
+  }
 }

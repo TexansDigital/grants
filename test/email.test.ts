@@ -749,9 +749,26 @@ describe('templates', () => {
    * plain-text body, no doctype and an emoji in it passed. This map has no
    * else branch: a new template with no fixture fails outright.
    */
+  const REPORT_VARS = {
+    organizationName: 'Bayou Reach Collective',
+    programName: 'Inspire Change',
+    reportLabel: 'Final report',
+    awardAmount: '$25,000',
+    submittedAtDisplay: 'March 3, 2026 at 4:12 PM CST',
+    answers: [
+      { section: 'What happened', label: 'What did this grant make possible?',
+        value: 'We ran a summer reading programme across three branch libraries.' },
+      { section: 'The numbers', label: 'How many individuals did this grant serve?',
+        value: '412' },
+      { section: 'The numbers', label: 'How much of the grant has been spent?',
+        value: '$18,750.25' },
+    ],
+  };
+
   const FIXTURES: Record<string, unknown> = {
     sign_in_link: SIGN_IN_VARS,
     application_received: RECEIVED_VARS,
+    report_received: REPORT_VARS,
     sign_in_problem: {
       reason: 'ambiguous_organization',
       supportEmail: 'grants@example.org',
