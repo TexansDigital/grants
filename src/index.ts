@@ -56,6 +56,7 @@ import {
   authorizeRoute,
   methodNotAllowed,
   resolve,
+  surfaceOf,
   type Route,
   type RouteContext,
 } from './lib/router';
@@ -111,6 +112,54 @@ function json(body: unknown, ctx: RequestContext, status = 200): Response {
  * still worked -- the kind of breakage nobody notices until an applicant follows
  * a link from an email.
  */
+/**
+ * Is this request arriving on the APPLICANT hostname?
+ *
+ * Derived from APPLICANT_BASE_URL, which is already the configured, non-
+ * inferred answer to "where do applicants live" -- the same value magic links
+ * are built from, and deliberately not taken from the request's Host header,
+ * which an attacker controls.
+ *
+ * FALSE when APPLICANT_BASE_URL is empty, which is the case for local dev and
+ * for staging. Those run one surface on one hostname, and splitting them there
+ * would mean `wrangler dev` could not reach the staff app at all. The split
+ * exists because production has two hostnames; where it has one, there is
+ * nothing to separate.
+ */
+function isApplicantHost(request: Request, env: Env): boolean {
+  const base = (env.APPLICANT_BASE_URL ?? '').trim();
+  if (!base) return false;
+  try {
+    return new URL(request.url).host === new URL(base).host;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The root path, which means something different on each hostname.
+ *
+ * On `grants.` it is the staff app. On `apply.` it was ALSO the staff app,
+ * because the client router maps '/' to the pipeline and had no idea which
+ * host served it -- so a nonprofit typing the address got the staff shell,
+ * which called /api/session, correctly got 401, and offered a "reload and
+ * sign in" button that returned them to the staff shell. An infinite loop
+ * with no way out, reached by typing the address we were about to print on a
+ * grant application.
+ *
+ * A redirect rather than serving the sign-in shell directly, so the address
+ * bar says what page this is and a reload cannot land back here.
+ */
+async function serveRoot(rc: RouteContext): Promise<Response> {
+  if (isApplicantHost(rc.request, rc.env)) {
+    return new Response(null, {
+      status: 302,
+      headers: { location: '/sign-in', 'cache-control': 'no-store' },
+    });
+  }
+  return serveAppShell(rc);
+}
+
 async function serveAppShell({ request, env, ctx }: RouteContext): Promise<Response> {
   if (!env.ASSETS) throw notFound('page');
   for (const path of ['/index.html', '/']) {
@@ -151,7 +200,10 @@ const routes: readonly Route[] = [
   // The single-page app's own paths. Listed explicitly rather than matched by a
   // catch-all, so a mistyped URL still 404s and a real 404 stays visible in the
   // logs.
-  { method: 'GET', path: '/', roles: [], public: true, handler: serveAppShell },
+  { method: 'GET', path: '/', roles: [], public: true, handler: serveRoot },
+  // The external front door. Reachable on BOTH hostnames on purpose: the
+  // sign-in email links here, and a grantee who follows that link from a
+  // phone should not be punished for which address they arrive at.
   { method: 'GET', path: '/sign-in', roles: [], public: true, handler: serveAppShell },
 
   // --- The public front door -------------------------------------------------
@@ -350,7 +402,18 @@ const routes: readonly Route[] = [
   { method: 'GET', path: '/reports', roles: [], public: true, handler: serveAppShell },
   { method: 'GET', path: '/reports/:id', roles: [], public: true, handler: serveAppShell },
 
-  { method: 'GET', path: '/forms/:id', roles: [], public: true, handler: serveAppShell },
+  // The staff form PREVIEW. The shell is public but every call it makes is
+  // staff-only, so on the applicant hostname it would render a staff-looking
+  // page that then failed. Marked explicitly because derivation cannot tell a
+  // public staff shell from a public applicant one.
+  {
+    method: 'GET',
+    path: '/forms/:id',
+    roles: [],
+    public: true,
+    surface: 'staff',
+    handler: serveAppShell,
+  },
   // The applicant's own application. The shell is public; every API call it
   // makes is scoped by the session behind it, and a signed-out applicant gets
   // a 401 from the draft endpoint rather than a blank page.
@@ -827,6 +890,22 @@ async function dispatch(request: Request, env: Env, ctx: RequestContext): Promis
   if (resolution.kind === 'method_not_allowed') throw methodNotAllowed(resolution.allow ?? []);
 
   const { route, params } = resolution.match!;
+
+  /*
+   * THE HOSTNAME SPLIT, enforced here rather than in a dashboard.
+   *
+   * 404 and not 403: a staff route should not exist as far as the applicant
+   * hostname is concerned, and a 403 would confirm to anyone poking at
+   * apply.<domain>/api/applications that such a route exists elsewhere.
+   *
+   * Checked BEFORE the public branch and before authentication, so it applies
+   * to app shells as well as APIs and so the answer never depends on who is
+   * asking. One direction only -- the applicant surface stays reachable on the
+   * staff hostname, which costs nothing and keeps `wrangler dev` usable.
+   */
+  if (isApplicantHost(request, env) && surfaceOf(route) === 'staff') {
+    throw notFound('page');
+  }
 
   if (route.public) {
     return route.handler({ request, env, ctx, url, params, session: NO_SESSION });

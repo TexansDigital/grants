@@ -65,6 +65,26 @@ export interface Route {
    * Ignored when `public` is set.
    */
   auth?: 'staff' | 'applicant';
+  /**
+   * WHICH HOSTNAME may serve this route. Usually derived; set only to override.
+   *
+   * Steward answers on two hostnames -- `grants.` for staff behind Cloudflare
+   * Access, and `apply.` for nonprofits who must never touch Access. Until
+   * now the only thing separating them was the Access application's list of
+   * destinations, a dashboard setting. That setting silently widened itself
+   * the day a second custom domain was added to the same Worker, and every
+   * applicant would have consumed one of fifty Access seats.
+   *
+   * A dashboard setting is not a place to keep a security boundary. This one
+   * is in code, in version control, with a test.
+   *
+   * Derivation covers almost everything (see surfaceOf): a route carrying
+   * staff roles is staff, a route with auth 'applicant' is applicant, and a
+   * public route is assumed to serve both. Set this only where derivation
+   * cannot know -- a PUBLIC route that nevertheless belongs to one surface,
+   * such as an app shell whose data endpoints are all staff-only.
+   */
+  surface?: 'staff' | 'applicant';
 }
 
 /** External roles that hold a magic-link session. */
@@ -87,6 +107,25 @@ export const ADMIN_ONLY: readonly Role[] = ['admin'];
  * The constitution wins. Renamed so the name stops inviting the mistake.
  */
 export const STAFF_READ: readonly Role[] = ['admin', 'reviewer'];
+
+/**
+ * Which hostname may serve a route.
+ *
+ * 'both' is the honest answer for the genuinely public routes -- /health, the
+ * open-cycles list, the sign-in endpoints -- which belong to no one surface.
+ *
+ * The important case is the default for a NON-public route: 'staff'. Every
+ * route carrying staff roles is refused on the applicant hostname without
+ * anybody having to remember to mark it, so adding a staff route later cannot
+ * quietly widen the applicant surface. That is the opposite of how the Access
+ * application behaved, and deliberately so.
+ */
+export function surfaceOf(route: Route): 'staff' | 'applicant' | 'both' {
+  if (route.surface) return route.surface;
+  if (route.auth === 'applicant') return 'applicant';
+  if (!route.public) return 'staff';
+  return 'both';
+}
 
 interface Match {
   route: Route;

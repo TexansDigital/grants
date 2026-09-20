@@ -691,3 +691,109 @@ who may ask for them.
 **Cost of the delay.** If the Shared Drive arrives after the first real cycle,
 moving live files is a migration rather than a config change. Worth doing
 before Phase 2's friendly-organization test if IT turns it around in time.
+
+---
+
+## §28 — Cloudflare Access is scoped to a HOSTNAME, never to the Worker
+
+**Decided 20 September 2026, after finding the wrong thing live.**
+
+`docs/ACCESS-SETUP.md` told you to create the Access application against the
+**Worker**, on the "Self-hosted and private → Workers" tab, with the reasoning
+that no custom domain was needed to get started. That was true and harmless
+while `grants.` was the only hostname on the Worker.
+
+The day `apply.houstontexansfoundation.org` was added as a second custom domain
+on the same Worker, **Access silently began covering it too.** Nothing failed.
+Nothing logged. No deploy warned. The Worker's own code was correct throughout —
+it verifies the Access assertion and would have refused anyway — but Access sits
+at the edge, in front of the Worker, so a nonprofit opening the application form
+got a Cloudflare Access login page instead.
+
+That is not a cosmetic problem. **Access free tier is 50 seats, a seat is
+consumed by any authentication event, and user 51 is blocked rather than
+billed.** Every applicant would have burned a seat, and the fifty-first
+nonprofit would have been locked out of their own grant application with no
+error anybody could act on.
+
+**The decision.** The Access application's destination is
+`grants.houstontexansfoundation.org`, a hostname. It is never the Worker. If a
+third hostname is ever added to this Worker, it is unprotected by default, which
+is the correct direction for a mistake to point.
+
+**How it was found, and the only way it could have been.** One HTTP request:
+
+```
+curl -sSI https://apply.houstontexansfoundation.org/ | head -5
+```
+
+A `location:` header pointing at `texansdigital.cloudflareaccess.com` is the
+failure. This cannot be reasoned about from the repository — `wrangler.toml`
+says nothing about Access — and it cannot be seen in a deploy log. Re-run it
+after adding any hostname.
+
+**What else changed because of this.** The split no longer depends on a
+dashboard setting at all. `surfaceOf()` in `src/lib/router.ts` derives which
+hostname may serve each route, defaulting a non-public route to `staff`, and the
+dispatcher 404s a staff route arriving on the applicant hostname before it
+authenticates anything. Tests in `test/surface.test.ts` and
+`test/authRoutes.test.ts`; seven mutants, all killed.
+
+---
+
+## §29 — The applicant hostname receives mail by forwarding, and sends none
+
+**Decided 20 September 2026.**
+
+`houstontexansfoundation.org` had **no MX record at all**, which meant
+`grants@houstontexansfoundation.org` — the reply-to on every letter this system
+sends a nonprofit — could not receive anything. A grantee hitting reply on a
+decline letter was writing into a void, with no bounce to tell either party.
+
+**The decision.** Cloudflare Email Routing, forwarding only. Two named addresses
+— `grants@` and `dmarc@` — both forwarding to a monitored mailbox. No catch-all:
+this domain goes on a public grant application, and a catch-all turns every
+guessed address into somebody's inbox.
+
+**Nobody sends from this domain's mailboxes.** Asked and answered explicitly.
+That rules out a Workspace or 365 seat, and it means a reply to a nonprofit
+arrives from a `@houstontexans.com` address. Accepted deliberately: the
+alternative is a paid seat or an SMTP send-as identity, and neither is worth it
+until somebody is actually assigned to answer grantee mail.
+
+**Why it mattered beyond replies.** DMARC's `rua` address must be able to
+receive. With a mailbox on the same domain as the policy, no cross-domain
+authorization record is needed; pointing `rua` at `@houstontexans.com` would
+have required a TXT record on a domain another team controls, and until it
+existed the reports would have been discarded silently.
+
+**Current posture:** SPF (Email Routing's, the only one on the root), DKIM via
+Resend's `resend._domainkey`, DMARC at `p=none` reporting to
+`dmarc@houstontexansfoundation.org`. Tighten past `p=none` only after weeks of
+real sends confirm alignment — publishing `p=reject` early means the first thing
+rejected is your own decline letters.
+
+---
+
+## §30 — The root path is served by the Worker, not the asset router
+
+**Decided 20 September 2026, while fixing §28's sibling bug.**
+
+Cloudflare's asset router answers anything matching a file in `./public` before
+the Worker runs, and `/` matches `index.html`. So the `{ path: '/' }` entry in
+the route table was **dead code**: the client router maps `/` to the staff
+pipeline and cannot see which hostname served it, so on `apply.` a nonprofit got
+the staff shell, which called `/api/session`, correctly received 401, and
+offered a "Reload and sign in" button that returned them to the staff shell.
+
+An infinite loop, at the address about to be printed on a grant application,
+reachable by typing the hostname and nothing else.
+
+**The decision.** `run_worker_first = ["/"]` in `wrangler.toml`. Exactly one
+path. Everything else — the hashed JS and CSS especially — still bypasses the
+Worker, which is what keeps this inside the run-cost target.
+
+**The generalisation worth remembering.** A route in the table is not evidence
+that the route runs. Between the request and the handler sit the asset router,
+Access, and the edge, and each of them can answer first. The test suite cannot
+see any of them.

@@ -57,13 +57,42 @@ hostname until it exists.
 
 Zero Trust → Access → Applications → Add an application → Self-hosted.
 
-- **Application type:** "Self-hosted and private", then the **Workers**
-  sub-tab. Access protects a Worker directly, so no custom domain is needed to
-  get started -- the destination is the `workers.dev` hostname. "Public DNS"
-  is the wrong tab here: it wants a hostname in a zone on your account.
+- **Destination: the HOSTNAME `grants.houstontexansfoundation.org`. Never the
+  Worker.** This is the single most important line in this document, and an
+  earlier version of it said the opposite.
+
+  Protecting the Worker protects *every hostname routed to that Worker*. This
+  Worker also answers on `apply.houstontexansfoundation.org`, which nonprofits
+  use and which **must never be behind Access** -- the free tier is 50 seats, a
+  seat is consumed by any authentication event, and user 51 is blocked rather
+  than billed. A Worker-scoped application silently swallowed the applicant
+  hostname the day it was added, with no warning in any deploy log. See
+  `DECISIONS.md` §28.
+
+  If the dashboard offers a "Workers" sub-tab, that is the wrong one. Use the
+  public hostname.
 - **Session duration:** see the note on identity providers below. 30 days is
   the right answer if you are using One-time PIN.
 - **Policy:** Allow → Emails, listing the people who will hold admin accounts.
+
+### Check it, every time a hostname is added
+
+This cannot be reasoned about from the repository and does not appear in a
+deploy log. It is one request:
+
+```
+curl -sSI https://apply.houstontexansfoundation.org/ | head -5
+curl -sSI https://grants.houstontexansfoundation.org/ | head -5
+```
+
+The applicant hostname must **not** carry a `location:` header pointing at
+`<team>.cloudflareaccess.com`. The staff hostname must. Anything else and stop:
+either applicants are consuming Access seats, or the staff application is
+unprotected.
+
+`-sS`, not `-s`. Plain `-s` silences errors as well as progress, so a hostname
+that does not resolve prints nothing at all and looks identical to a command
+that did not run.
 
 ## 2. Find the two values
 

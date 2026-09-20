@@ -4,15 +4,15 @@ One list, kept current. Everything here blocks work that is otherwise ready to
 start, or blocks the platform going live. Nothing here is something I can do
 myself, decide on your behalf, or work around.
 
-Last updated: 19 September 2026.
+Last updated: 20 September 2026.
 
 **The short version, in the order it unblocks things:**
 
 | | What | Blocks |
 |---|---|---|
-| 1 | `apply.` DNS record, and Resend's DNS records | Everything public. Nobody can receive a sign-in link. |
-| 2 | Resend API key, as a Wrangler secret | Same |
-| 3 | Cloudflare account id, R2 key + secret, two backup buckets, bucket CORS | Every file upload, and the nightly export |
+| 1 | ~~`apply.` DNS record, and Resend's DNS records~~ | **DONE 20 Sep.** Both hostnames live, domain verified, SPF/DKIM/DMARC published. |
+| 2 | ~~Resend API key, as a Wrangler secret~~ | **DONE 20 Sep.** A sign-in link was sent, delivered, and used to reach the grantee portal. |
+| 3 | R2 key + secret, `steward-staging-backups`, bucket CORS | Every file upload. (Account id and `steward-preview-backups` are done.) |
 | 3a | A Google Shared Drive, from IT | Nothing today. Uploads stay on R2 until it exists — see §1.4a |
 | 4 | Your impact metrics, as a CSV | What grantee reports ASK. The machinery is finished. |
 | 5 | The scoring rubric, as a CSV or XLSX | The entire review and scoring module |
@@ -26,58 +26,47 @@ Eloqua has its own document: `docs/ELOQUA-SETUP.md`.
 
 ## 1. Blocking the public form going live
 
-### 1.1 DNS records on a domain that already exists
+### 1.1 DNS records — DONE, 20 September 2026
 
-**Status: better than I previously reported, and I should correct that.** I
-earlier said the domain "does not resolve" and implied it might not be
-registered. That was an overreach from an incomplete check — I looked at the
-apex and at `applications.`, found nothing, and drew a conclusion the evidence
-did not support.
-
-**What is actually true**, re-checked properly:
+**Status: done and verified by request, not by assumption.**
 
 | | State |
 |---|---|
-| Zone on Cloudflare | Live. Nameservers `crystal.ns.cloudflare.com`, `jay.ns.cloudflare.com`, valid SOA. |
-| `grants.` — staff | Resolving, proxied through Cloudflare. |
-| `apply.` — applicants and grantees | **Nothing published.** This is the one the portal needs. |
-| SPF, DKIM, DMARC | **No TXT records at all.** |
-| MX | None. |
+| `grants.` — staff | Live, behind Cloudflare Access. |
+| `apply.` — applicants and grantees | Live, **not** behind Access. Verified by `curl`. |
+| SPF | One record, Cloudflare Email Routing's. |
+| DKIM | `resend._domainkey`, verified in Resend. |
+| DMARC | `p=none`, reporting to `dmarc@houstontexansfoundation.org`. |
+| MX | Cloudflare Email Routing, forwarding only. See `DECISIONS.md` §29. |
 
-The apex having no A record is normal for a zone used only through subdomains.
-It is not evidence of anything.
+Both hostnames are declared in `wrangler.toml` with `custom_domain = true`, so
+wrangler creates the DNS records at deploy; there is no record to hand-write.
 
-**The hostname is `apply.`, not `applications.`** — `docs/DECISIONS.md` §15
-settled that, and earlier versions of this file had it wrong.
-
-**What I need.** An `apply.` record pointing at the Worker, and the Resend DNS
-records below. Both are dashboard work, not registration lead time.
-
-**How to check it yourself** (I cannot — the sandbox blocks outbound to your
-domain):
+**The check that must be re-run whenever a hostname is added**, because it
+cannot be seen from the repository or from a deploy log:
 
 ```
-dig +short NS  houstontexansfoundation.org
-dig +short A   grants.houstontexansfoundation.org   # answers today
-dig +short A   apply.houstontexansfoundation.org    # empty today
-dig +short TXT houstontexansfoundation.org          # SPF goes here
-dig +short TXT _dmarc.houstontexansfoundation.org
-curl -sS https://grants.houstontexansfoundation.org/health
+curl -sSI https://apply.houstontexansfoundation.org/ | head -5
+curl -sSI https://grants.houstontexansfoundation.org/ | head -5
 ```
 
-That last one is the real test. `{"status":"ok"…}` means the Worker is live
-behind Access. A Cloudflare Access login page also passes — it means Access is
-doing its job and you are not signed in.
+`apply.` must NOT redirect to `<team>.cloudflareaccess.com`; `grants.` must.
+This found a live fault on 20 September: the Access application was scoped to
+the Worker rather than to a hostname, so it had silently taken the applicant
+hostname too, and every nonprofit would have consumed one of 50 free Access
+seats. `DECISIONS.md` §28.
 
-### 1.2 Resend: domain verification and an API key
+### 1.2 Resend — DONE, 20 September 2026
 
-**Status: not done.** There is no `RESEND_API_KEY`, so every email the system
-produces is recorded and deliberately suppressed. That is the correct state for
-preview — a development run cannot mail a real applicant — but it means no
-email has ever actually been delivered by this system.
+**Status: done, and proven end to end rather than assumed.** The domain is
+verified, `RESEND_API_KEY` is set as a Wrangler secret on the `steward` Worker,
+and a sign-in link was sent, delivered, opened, and used to reach the grantee
+portal. `email_messages` recorded it as `sent` with no error.
 
-**What I need.** The Resend domain verified (it depends on 1.1) and the API key
-set as a Wrangler secret. Never in the repo, never in `wrangler.toml`.
+Preview and staging still have no key of their own, so a test run cannot mail a
+real applicant. Note that the Worker serving both live hostnames is the
+preview-bound one, so **that safety property no longer holds for it** — a
+deliberate trade, taken with no real applicants in the database yet.
 
 ### 1.3 A backups bucket
 
@@ -87,14 +76,14 @@ bucket from the one holding applicant uploads, because one export contains
 every organization's data and concentrating that beside the files an applicant
 can reach through a presigned URL means one bucket-level mistake exposes both.
 
-**What I need.** Create two buckets, named `steward-preview-backups` and
-`steward-staging-backups`, in the Cloudflare dashboard under **R2 → Create
-bucket**.
+**`steward-preview-backups` now exists.** Wrangler provisioned it during
+`npm run deploy:preview`, because it is a declared binding — a path that does
+NOT need the R2 scope. An earlier version of this document said bucket creation
+was dashboard-only; that is true of `wrangler r2 bucket create`, whose failure
+under wrangler's OAuth login has no R2 scope to fix, and not of a binding
+provisioned at deploy.
 
-The dashboard rather than the CLI on purpose: wrangler's OAuth login does not
-request an R2 scope, so `wrangler r2 bucket create` fails with a permissions
-error no amount of re-authenticating fixes. The Worker's own R2 bindings are
-unaffected — they bind at deploy time from `wrangler.toml`.
+**Still needed:** `steward-staging-backups`. Nothing is waiting on it.
 
 Production's name is a placeholder and gets filled in at deploy time.
 
@@ -106,16 +95,25 @@ difference between having backups and believing you do.
 
 ### 1.4 R2 storage credentials
 
-**Status: placeholders.** `wrangler.toml` carries
-`R2_ACCOUNT_ID = "FILL_IN_ONCE_KNOWN"`, and there is no R2 access key or
-secret. Uploads are built and tested, and cannot work against a real bucket
-without these.
+**Status: partly done. This is now the single largest blocker left.**
+
+`R2_ACCOUNT_ID` is filled in. There is still no R2 access key or secret, so
+every presigned upload refuses rather than half-working — which blocks an
+Inspire Change application outright, since it requires three file uploads.
 
 **What I need.**
 
-- The Cloudflare account id, into `wrangler.toml`.
-- An R2 access key id and secret, as Wrangler secrets.
-- CORS on the preview bucket allowing the app origin, once 1.1 exists.
+- An R2 access key id and secret (R2 → Manage API tokens), as Wrangler secrets:
+  `npx wrangler secret put R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY`.
+- CORS on `steward-preview-files`, from the rules already written in
+  `config/r2-cors.json`:
+  `npx wrangler r2 bucket cors set steward-preview-files --file=config/r2-cors.json`
+
+**And the thing that has never been tested.** The presigned PUT has never run
+against a real bucket. Everything up to the signature is tested; the PUT itself
+needs real credentials, and `CLAUDE.md` records this as the step that
+historically fails in a way that does not reproduce from the command line.
+Budget a round trip.
 
 ### 1.4a A Google Shared Drive, not a My Drive folder
 

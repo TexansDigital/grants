@@ -326,12 +326,118 @@ describe('the applicant door is separate from the staff door', () => {
   it('does not accept an applicant session on a staff route', async () => {
     const { userId } = await applicant();
     const { sessionToken } = await createSession(testEnv as unknown as Env, userId);
+    // On the STAFF hostname, where the route exists at all. Staff routes demand
+    // a Cloudflare Access assertion; a magic-link cookie is not one, and must
+    // not be tried as a fallback.
+    const res = await worker.fetch(
+      new Request('https://staff.example.org/api/programs', {
+        headers: { cookie: `${SESSION_COOKIE}=${sessionToken}` },
+      }),
+      env(),
+      {} as ExecutionContext,
+    );
+    expect(res.status).toBe(401);
+  });
+
+  it('does not serve a staff route on the applicant hostname at all', async () => {
+    const { userId } = await applicant();
+    const { sessionToken } = await createSession(testEnv as unknown as Env, userId);
+    // 404, not 401 and not 403: on the hostname nonprofits use, a staff route
+    // does not exist. A 403 would confirm it exists somewhere to anyone poking
+    // at apply.<domain>/api/applications.
+    //
+    // This is the boundary that used to live ONLY in the Cloudflare Access
+    // application's destination list -- a dashboard setting that silently
+    // widened to cover the applicant hostname the day a second custom domain
+    // was added to the same Worker.
     const res = await call('/api/programs', {
       headers: { cookie: `${SESSION_COOKIE}=${sessionToken}` },
     });
-    // Staff routes demand a Cloudflare Access assertion; a magic-link cookie
-    // is not one, and must not be tried as a fallback.
+    expect(res.status).toBe(404);
+  });
+
+  it('answers the same on the applicant hostname whatever credentials arrive', async () => {
+    // The guard runs BEFORE authentication, so the answer cannot depend on who
+    // is asking. An Access assertion that would otherwise be REJECTED -- and
+    // therefore produce 401 -- still produces 404 here, which is only possible
+    // if the hostname check ran first.
+    const bare = await call('/api/programs');
+    const withAssertion = await call('/api/programs', {
+      headers: { 'cf-access-jwt-assertion': 'not.a.jwt' },
+    });
+    expect(bare.status).toBe(404);
+    expect(withAssertion.status).toBe(404);
+  });
+
+  it('does not serve a PUBLIC staff shell on the applicant hostname', async () => {
+    /*
+     * The form preview is public -- no roles, no session -- but every call it
+     * makes is staff-only, so on the applicant hostname it would render a
+     * staff-looking page that then failed. Derivation cannot tell a public
+     * staff shell from a public applicant one, so the route carries an
+     * explicit marker, and this is what stops the marker being ignored.
+     *
+     * A stub asset binding, because without one serveAppShell 404s on BOTH
+     * hostnames and the assertion would pass while proving nothing. A mutant
+     * that skipped the guard for public routes survived until this existed.
+     */
+    const withAssets = {
+      ...env(),
+      ASSETS: { fetch: async () => new Response('<!doctype html>', { status: 200 }) },
+    } as unknown as Env;
+    const onStaff = await worker.fetch(
+      new Request('https://staff.example.org/forms/abc'),
+      withAssets,
+      {} as ExecutionContext,
+    );
+    const onApplicant = await worker.fetch(
+      new Request(`${ORIGIN}/forms/abc`),
+      withAssets,
+      {} as ExecutionContext,
+    );
+    expect(onStaff.status).toBe(200);
+    expect(onApplicant.status).toBe(404);
+  });
+
+  it("sends '/' to the sign-in page on the applicant hostname", async () => {
+    // The loop this replaces: '/' served the staff shell, which called
+    // /api/session, correctly got 401, and offered a "reload and sign in"
+    // button that returned to the staff shell. Forever.
+    const res = await call('/');
+    expect(res.status).toBe(302);
+    expect(res.headers.get('location')).toBe('/sign-in');
+  });
+
+  it("does not redirect '/' on the staff hostname", async () => {
+    const res = await worker.fetch(
+      new Request('https://staff.example.org/'),
+      env(),
+      {} as ExecutionContext,
+    );
+    expect(res.status).not.toBe(302);
+  });
+
+  it('does not split surfaces when APPLICANT_BASE_URL is unset', async () => {
+    // Local dev and staging run ONE surface on one hostname. Splitting there
+    // would make `wrangler dev` unable to reach the staff app at all.
+    //
+    // 401 rather than 404 is the whole assertion: the route ran and asked for
+    // an Access assertion, which means the hostname guard did not fire.
+    const single = { ...(testEnv as unknown as Env), APPLICANT_BASE_URL: '' } as Env;
+    const res = await worker.fetch(
+      new Request(`${ORIGIN}/api/programs`),
+      single,
+      {} as ExecutionContext,
+    );
     expect(res.status).toBe(401);
+  });
+
+  it('still serves the applicant surface on the applicant hostname', async () => {
+    // One direction only. The guard must not have closed the door it exists to
+    // protect -- /api/me answering 401 means the route ran and asked for a
+    // session, where 404 would mean the guard swallowed it.
+    expect((await call('/api/me')).status).toBe(401);
+    expect((await call('/sign-in')).status).not.toBe(404);
   });
 
   it('signs out everywhere and clears the cookie', async () => {

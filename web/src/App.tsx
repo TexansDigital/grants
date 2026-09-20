@@ -19,6 +19,7 @@ import type { CycleRow, FormSummary, ProgramRow, SessionUser } from './api';
 import type { FormDefinition } from '../../src/lib/forms';
 import { publicApi, type OpenCycle } from './publicApi';
 import { OpenCycles } from './OpenCycles';
+import { SignIn } from './SignIn';
 import { EligibilityForm } from './EligibilityForm';
 import { granteeApi, type GranteeHomeResponse, type ReportResponse } from './granteeApi';
 import { GranteeHome } from './GranteeHome';
@@ -48,13 +49,21 @@ type Route =
   | { name: 'reporting' }
   | { name: 'dataHealth' }
   | { name: 'openCycles' }
+  | { name: 'signIn' }
   | { name: 'eligibility'; cycleId: string }
   | { name: 'portal' }
   | { name: 'report'; id: string };
 
 function parseRoute(pathname: string): Route | null {
   const parts = pathname.split('/').filter((s) => s.length > 0);
+  // '/' is the STAFF pipeline, and only ever reached on the staff hostname:
+  // the Worker redirects '/' to '/sign-in' on the applicant hostname, because
+  // this router cannot see which host served it and mapping '/' to the staff
+  // app on apply.<domain> produced a sign-in loop with no way out.
   if (parts.length === 0) return { name: 'pipeline' };
+  // The external front door. Served on BOTH hostnames -- the sign-in email
+  // links here, and which address a grantee arrives at is not their problem.
+  if (parts.length === 1 && parts[0] === 'sign-in') return { name: 'signIn' };
   if (parts.length === 1 && parts[0] === 'configuration') return { name: 'home' };
   if (parts.length === 1 && parts[0] === 'pipeline') return { name: 'pipeline' };
   // The staff compliance desk. NOT /reports, which is the grantee portal --
@@ -82,6 +91,20 @@ function parseRoute(pathname: string): Route | null {
   }
   return null;
 }
+
+/**
+ * Routes whose data belongs to an EXTERNAL user holding a magic-link session.
+ *
+ * A 401 on one of these means a nonprofit's sign-in ran out, and the answer is
+ * the sign-in page. A 401 anywhere else means a staff member's Cloudflare
+ * Access session ran out, and the answer is to reload so Access can
+ * re-authenticate. Telling an applicant to "reload and sign in" sends them
+ * somewhere that will never sign them in.
+ *
+ * 'form' is deliberately absent: it is the staff form preview, rendered light
+ * but fed by a staff-only endpoint.
+ */
+const EXTERNAL_SESSION_ROUTES: ReadonlySet<string> = new Set(['portal', 'report', 'apply']);
 
 interface HomeData {
   user: SessionUser;
@@ -178,6 +201,7 @@ export function App(): ReactElement {
       route?.name === 'form' ||
       route?.name === 'apply' ||
       route?.name === 'openCycles' ||
+      route?.name === 'signIn' ||
       route?.name === 'eligibility' ||
       route?.name === 'portal' ||
       route?.name === 'report';
@@ -203,6 +227,7 @@ export function App(): ReactElement {
       reporting: 'Grant reports · Steward',
       dataHealth: 'Data health · Steward',
       openCycles: 'Apply for a grant · Houston Texans Foundation',
+      signIn: 'Sign in · Houston Texans Foundation',
       eligibility: 'Before you start · Houston Texans Foundation',
       form: 'Form preview · Steward',
       apply: 'Your application · Steward',
@@ -254,7 +279,15 @@ export function App(): ReactElement {
         } else if (route?.name === 'apply') {
           const d = await applicantApi.draft(route.id, signal);
           setDraft(d);
-        } else if (route?.name === 'openCycles') {
+        } else if (route?.name === 'openCycles' || route?.name === 'signIn') {
+          /*
+           * The sign-in page reads the same public list as the grants page.
+           *
+           * It needs the Turnstile site key, which this endpoint already
+           * returns, and the cycle count tells it whether offering "See open
+           * grants" would lead anywhere. One public read rather than a second
+           * endpoint carrying one field.
+           */
           setOpen(await publicApi.cycles(signal));
         } else if (route?.name === 'eligibility') {
           const list = await publicApi.cycles(signal);
@@ -279,6 +312,24 @@ export function App(): ReactElement {
         }
       } catch (e) {
         if (e instanceof DOMException && e.name === 'AbortError') return;
+        /*
+         * An expired magic-link session is not an error page.
+         *
+         * Send them to the front door instead, with a real URL they can
+         * reload. Rendering the sign-in form in place would mean rendering it
+         * without the Turnstile site key -- which this route never loaded --
+         * and a challenge-less form fails closed in production, locking out
+         * exactly the person trying to get back in.
+         */
+        if (
+          e instanceof ApiError &&
+          e.isSignedOut &&
+          route !== null &&
+          EXTERNAL_SESSION_ROUTES.has(route.name)
+        ) {
+          navigate('/sign-in?expired=1');
+          return;
+        }
         setError(e instanceof ApiError ? e : new ApiError(0, 'INTERNAL', String(e), null));
       } finally {
         if (!signal.aborted) setLoading(false);
@@ -286,7 +337,7 @@ export function App(): ReactElement {
     })();
 
     return () => controller.abort();
-  }, [route, reloadKey]);
+  }, [route, reloadKey, navigate]);
 
   if (route === null) {
     return (
@@ -338,6 +389,19 @@ export function App(): ReactElement {
       <Message title="Loading">
         <p aria-live="polite">Loading…</p>
       </Message>
+    );
+  }
+
+  if (route.name === 'signIn') {
+    const hasOpenCycles = (open?.cycles.length ?? 0) > 0;
+    return (
+      <PortalShell organization={null} heading="Sign in">
+        <SignIn
+          turnstileSiteKey={open?.turnstileSiteKey ?? null}
+          reason={new URLSearchParams(search).has('expired') ? 'expired' : null}
+          onSeeOpenGrants={hasOpenCycles ? () => navigate('/apply') : undefined}
+        />
+      </PortalShell>
     );
   }
 

@@ -927,3 +927,20 @@
   margin: var(--space-5) 0 var(--space-4);
   min-height: 65px;
 }
+
+/* ---- sign in --------------------------------------------------------------
+   The external front door. Narrower than a form card on purpose: it holds one
+   field, and a single input stretched across a desktop card reads as an
+   unfinished page rather than a deliberate one.
+
+   .help is defined here as well as under .field, because this card carries
+   help text that belongs to the card and not to any input. */
+.sign-in {
+  max-width: 34rem;
+}
+
+.sign-in .help {
+  color: var(--ink-2);
+  font-size: var(--step--1);
+  margin: var(--space-3) 0 0;
+}
