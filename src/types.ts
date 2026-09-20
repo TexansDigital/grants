@@ -45,6 +45,15 @@ export interface Env {
    */
   TURNSTILE_SECRET_KEY?: string;
   /**
+   * "1" means this environment is NOT public, so a missing Turnstile secret
+   * may be skipped instead of failing closed.
+   *
+   * A var, not a secret, and deliberately so: it must be reviewable in a diff.
+   * checkConfig refuses to find it in the default or production var blocks,
+   * because those are what serve apply.<domain> to real nonprofits.
+   */
+  TURNSTILE_OPTIONAL?: string;
+  /**
    * The Turnstile SITE key, which is public by design.
    *
    * A plain var rather than a secret, and handed to the browser in the public

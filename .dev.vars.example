@@ -1,0 +1,19 @@
+# Local-only values. Copy to .dev.vars, which is gitignored.
+#
+# Everything here is INVENTED. Never copy a real secret into a local file.
+
+# Signs an upload URL pointing at a hostname that does not exist. The browser
+# harnesses intercept the PUT rather than sending it anywhere.
+R2_ACCESS_KEY_ID = "demo-local-access-key-id"
+R2_SECRET_ACCESS_KEY = "demo-local-secret-access-key"
+R2_ACCOUNT_ID = "demolocalaccount"
+
+# Local development is not a public surface, so a missing Turnstile secret is
+# allowed to skip verification instead of failing closed.
+#
+# WITHOUT THIS, the public endpoints refuse every request locally and the
+# applicant harnesses fail with FORBIDDEN. That is the correct default: the
+# deployment serving apply.<domain> must fail closed when Turnstile is not
+# configured, and it used to fail OPEN because the rule keyed on
+# ENVIRONMENT === 'production' while that deployment says "preview".
+TURNSTILE_OPTIONAL = "1"

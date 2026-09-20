@@ -119,6 +119,16 @@ EMAIL_REPLY_TO = "grants@houstontexansfoundation.org"
 # built from one would send an applicant to an address of the attacker's
 # choosing carrying a live token.
 APPLICANT_BASE_URL = "https://apply.houstontexansfoundation.org"
+# Turnstile's SITE key is public by design -- it is in the HTML of every site
+# that uses Turnstile -- and is handed to the browser so the widget can render.
+# Empty until a human creates the widget in the Cloudflare dashboard. The
+# SECRET that verifies a token is a Wrangler secret and appears nowhere here.
+#
+# LEAVING THIS EMPTY NOW FAILS CLOSED rather than quietly admitting everyone:
+# with no TURNSTILE_SECRET_KEY and no TURNSTILE_OPTIONAL, every public endpoint
+# refuses. That is the correct posture for a form anybody on the internet can
+# reach, and it is the opposite of what this did before.
+TURNSTILE_SITE_KEY = ""
 # R2, for presigned uploads. Neither is a credential: the bucket name is the
 # same one bound below, and the account id is visible in any Cloudflare URL.
 # The key and secret that make them usable are Wrangler secrets.
@@ -210,6 +220,11 @@ DISPLAY_TIMEZONE = "America/Chicago"
 # needs to authenticate against it.
 ACCESS_TEAM_DOMAIN = ""
 ACCESS_AUD = ""
+# Staging has no public hostname, so a missing Turnstile secret is allowed to
+# skip rather than fail closed. The default and production blocks deliberately
+# do NOT carry this, and check:config fails the build if they ever do --
+# because those are what serve apply.<domain> to real nonprofits.
+TURNSTILE_OPTIONAL = "1"
 # Staging must never mail anyone: the friendly-organization fixtures in this
 # database carry addresses that reach real people. No key is set, and an empty
 # EMAIL_FROM makes a send throw rather than silently pick a default.

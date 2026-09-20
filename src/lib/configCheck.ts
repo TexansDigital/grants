@@ -314,6 +314,49 @@ export function configProblems(src: string): string[] {
     }
   }
 
+  /*
+   * TURNSTILE_OPTIONAL is the switch that lets a missing Turnstile secret skip
+   * verification instead of failing closed. It belongs to environments nobody
+   * can reach -- local dev and staging -- and must never appear in the default
+   * or production var blocks, which are what serve apply.<domain>.
+   *
+   * This guard exists because the ORIGINAL rule keyed on ENVIRONMENT ===
+   * 'production', and the deployment serving real nonprofits sets ENVIRONMENT
+   * = "preview". The public form therefore had no bot protection at all, and
+   * nothing said so. A label is not a safety property; a build that fails is.
+   */
+  {
+    /*
+     * Walked line by line, with the section tracked, rather than matched
+     * against the whole file. `[env.staging.vars]` is where this var BELONGS,
+     * so a plain search would flag the correct usage and a negative lookahead
+     * would be a regex nobody can re-read in a year.
+     */
+    const lines = src.split(/\r?\n/);
+    let section: 'default' | 'staging' | 'production' | 'other' = 'default';
+    lines.forEach((line, i) => {
+      const envHeader = /^\s*\[+\s*env\.([A-Za-z0-9_-]+)/.exec(line);
+      if (envHeader) {
+        section =
+          envHeader[1] === 'production'
+            ? 'production'
+            : envHeader[1] === 'staging'
+              ? 'staging'
+              : 'other';
+      }
+      if (!/^\s*TURNSTILE_OPTIONAL\s*=/.test(line)) return;
+      if (section === 'default' || section === 'production') {
+        problems.push(
+          `line ${i + 1}: TURNSTILE_OPTIONAL is set in the ` +
+            `${section === 'default' ? 'DEFAULT' : '[env.production]'} var block. ` +
+            'That block serves apply.<domain> to the public, where a missing ' +
+            'Turnstile secret must fail CLOSED. It belongs in ' +
+            '[env.staging.vars] and .dev.vars only.',
+        );
+      }
+    });
+  }
+
   // Staging holds the friendly-organization fixtures, whose addresses reach real
   // people. An EMAIL_FROM there is one secret away from mailing them.
   //
