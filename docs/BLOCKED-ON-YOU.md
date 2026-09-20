@@ -13,7 +13,7 @@ Last updated: 19 September 2026.
 | 1 | `apply.` DNS record, and Resend's DNS records | Everything public. Nobody can receive a sign-in link. |
 | 2 | Resend API key, as a Wrangler secret | Same |
 | 3 | Cloudflare account id, R2 key + secret, two backup buckets, bucket CORS | Every file upload, and the nightly export |
-| 3a | **A Google Shared Drive** for applicant uploads | Every file upload. Proven blocker, not a preference — see §1.4a |
+| 3a | A Google Shared Drive, from IT | Nothing today. Uploads stay on R2 until it exists — see §1.4a |
 | 4 | Your impact metrics, as a CSV | What grantee reports ASK. The machinery is finished. |
 | 5 | The scoring rubric, as a CSV or XLSX | The entire review and scoring module |
 | 6 | Decline letter wording | Decision communication |
@@ -119,8 +119,9 @@ without these.
 
 ### 1.4a A Google Shared Drive, not a My Drive folder
 
-**Status: blocking, and now proven rather than argued.** Applicant uploads are
-moving to Google Drive at your direction. The Phase A spike ran against the real
+**Status: wanted, not blocking.** Uploads stay on R2 until this exists, so
+nothing is waiting on it — see `docs/DECISIONS.md` §27. Applicant uploads were
+to move to Google Drive at your direction. The Phase A spike ran against the real
 service account and the real `houstontexansfoundation` folder, and Google
 refused the write:
 

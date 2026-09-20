@@ -1,9 +1,16 @@
 # Phase A spike — can a browser upload straight to Google Drive?
 
-**This is throwaway code.** It exists to answer one question before anything is
-built on top of the answer. When it has answered it, delete `spike/`,
-`wrangler.spike.toml`, the `spike` line in `package.json` and the
-`spike/**/*.ts` entry in `tsconfig.json`.
+> **PARKED, NOT DEAD — 20 September 2026.** The question below is answered
+> **yes**, and the answer is kept. Uploads stay on R2 until the Foundation has a
+> Shared Drive to write into; see `docs/DECISIONS.md` §27. Do not delete this
+> folder — the JWT signing, the resumable-session mint and the CORS probe are
+> what Phase B is built from, and re-deriving the `Origin` finding would cost
+> another day.
+
+**This was written as throwaway code**, to answer one question before anything
+was built on top of the answer. It earned a stay of execution. When Phase B
+absorbs it, delete `spike/`, `wrangler.spike.toml`, the `spike` line in
+`package.json` and the `spike/**/*.ts` entry in `tsconfig.json`.
 
 ## The question
 

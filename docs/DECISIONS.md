@@ -639,3 +639,55 @@ a handle rebuilt on every render, which made the autosave effect re-run, save,
 re-render, and loop until React killed the page. Neither was visible to any
 unit test. Both were found by driving it in a browser, which is why that step
 is not optional.
+
+## §27 — Applicant uploads stay on R2; the Drive path is proven and parked
+
+Files continue to go to R2 by presigned PUT. The Google Drive work is finished,
+verified, and not deployed.
+
+**Why, as a chain of facts rather than a preference.** The Foundation asked for
+uploads to live in an organization-owned Drive folder. The case for that was
+governance: retention labels, DLP, tenant audit log, malware scanning. Two of
+those premises then failed.
+
+There is no Google Vault, which removed retention — the largest prize, and the
+only one that would have answered `BLOCKED-ON-YOU` §3.3 without code. Then
+Shared Drive creation turned out to be blocked at the tenant: "You don't have
+permission to create shared drives" is an admin-console setting on the
+organizational unit, not something the account can route around.
+
+That leaves malware scanning and humans being able to browse the folder. Both
+real. Neither worth the two things still on offer: files owned by a service
+account (which Google refuses outright) or files owned by one employee, which
+is the ownership problem this platform already avoids everywhere else.
+
+**What Phase A proved, and what is kept.** A browser CAN upload straight to
+Drive. Preflight 200, `allow-origin` echoed, `allow-methods: PUT`, 334,282
+bytes sent direct, real HTTP response back, file body never through the Worker.
+The narrow `drive.file` scope was sufficient. `spike/` holds the working
+service-account JWT signing, the resumable-session mint and the CORS probe.
+
+One trap is recorded there because it nearly ended the investigation: the
+upload endpoint answers `vary: origin`, and a session opened with no `Origin`
+header produces a URI bound to no browser origin. The browser then fails with
+`TypeError: Failed to fetch` and no response — indistinguishable, from the
+page, from Google forbidding browser uploads outright. One header. The
+server-side preflight probe exists so that failure can never again be mistaken
+for a verdict.
+
+**What reopens this.** A Shared Drive, with
+`steward-uploads@steward-grants.iam.gserviceaccount.com` as a Content manager.
+The upload URL already carries `supportsAllDrives=true`, so the change is a
+folder id, the migration adding `storage_provider`, and wiring `presignForField`
+to the session mint instead of the aws4fetch signer.
+
+**What this decision does NOT claim.** It does not say R2 is the better place
+for other organizations' audited financial statements. It says the Drive move
+cannot be completed today, that nothing else is waiting on it, and that the
+retention job was always going to be mine to write. The outside security review
+recommendation is unaffected either way: this is about where bytes rest, not
+who may ask for them.
+
+**Cost of the delay.** If the Shared Drive arrives after the first real cycle,
+moving live files is a migration rather than a config change. Worth doing
+before Phase 2's friendly-organization test if IT turns it around in time.
