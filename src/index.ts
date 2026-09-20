@@ -46,6 +46,7 @@ import {
 } from './lib/reportAdmin';
 import { buildReportForm, publishReportForm } from './lib/reportForm';
 import { findDuplicateCandidates, planMerge, applyMerge } from './lib/merge';
+import { dataHealth } from './lib/dataHealth';
 import {
   ADMIN_ONLY,
   STAFF_READ,
@@ -417,6 +418,18 @@ const routes: readonly Route[] = [
       await waiveReport(env.DB, ctx, session, params.id!, String(body.reason ?? ''));
       return json({ waived: true }, ctx);
     },
+  },
+
+  // ---- data health ----------------------------------------------------------
+  //
+  // ADMIN_ONLY, and the reason is the aggregate rather than any single row: a
+  // reviewer is scoped to the applications assigned to them, and this is every
+  // organization's award compliance and EIN state across every program.
+  {
+    method: 'GET',
+    path: '/api/data-health',
+    roles: ADMIN_ONLY,
+    handler: async ({ env, ctx, session }) => json(await dataHealth(env.DB, session), ctx),
   },
 
   // ---- duplicate organizations ----------------------------------------------
