@@ -169,13 +169,48 @@ describe('the route table', () => {
     expect(resolve(routes, 'GET', '/api/forms/abc/def').kind).toBe('not_found');
   });
 
+  /*
+   * The named exceptions, and why each one is not a loosening.
+   *
+   * A reviewer must be able to declare a conflict on THEIR OWN assignment and
+   * to step away from it. Routing that through an admin would mean a reviewer
+   * who discovers a conflict at 9pm cannot record it until somebody else is at
+   * a desk, and the recorded time is what an auditor reads.
+   *
+   * The scoping is in the library, not in the roles: declareConflict and recuse
+   * both answer 404 for an assignment belonging to somebody else, so a reviewer
+   * can reach exactly their own. An admin is admitted as well because recording
+   * a conflict somebody phoned in is ordinary work.
+   *
+   * Listed by exact path, so a new reviewer-writable route has to be added here
+   * deliberately rather than inheriting the exemption.
+   */
+  const REVIEWER_WRITABLE = new Set([
+    'POST /api/review/assignments/:id/conflict',
+    'POST /api/review/assignments/:id/recuse',
+  ]);
+
   it('STAFF writes are admin-only in the table itself, not only at runtime', () => {
     const writes = routes.filter(
       (r) => r.method !== 'GET' && !r.public && (r.auth ?? 'staff') === 'staff',
     );
     expect(writes.length).toBeGreaterThan(0);
     for (const w of writes) {
+      if (REVIEWER_WRITABLE.has(`${w.method} ${w.path}`)) {
+        expect(w.roles, `${w.method} ${w.path}`).toEqual(['admin', 'reviewer']);
+        continue;
+      }
       expect(w.roles, `${w.method} ${w.path} is not admin-only`).toEqual(ADMIN_ONLY);
+    }
+  });
+
+  it('the reviewer-writable exceptions all exist, so the list cannot rot', () => {
+    // A path renamed or removed leaves a dead entry silently widening nothing
+    // -- but it also means the next reader trusts a list that no longer
+    // describes the table.
+    const paths = new Set(routes.map((r) => `${r.method} ${r.path}`));
+    for (const exception of REVIEWER_WRITABLE) {
+      expect(paths.has(exception), `${exception} is exempted but does not exist`).toBe(true);
     }
   });
 

@@ -46,6 +46,10 @@ import {
 } from './lib/reportAdmin';
 import { buildReportForm, publishReportForm } from './lib/reportForm';
 import { findDuplicateCandidates, planMerge, applyMerge } from './lib/merge';
+import {
+  assignReviewer, unassignReviewer, declareConflict, recuse,
+  reviewCoverage, distributeReviewers, DEFAULT_REVIEWERS_PER_APPLICATION,
+} from './lib/reviewAssign';
 import { dataHealth } from './lib/dataHealth';
 import { generateReportPeriods, generateMissingReportPeriods } from './lib/reportPeriods';
 import { previewAwardImport, runAwardImport } from './lib/awardsImportRoutes';
@@ -863,6 +867,99 @@ const routes: readonly Route[] = [
   },
 
   // ---- review --------------------------------------------------------------
+  // ---- review assignment ----------------------------------------------------
+  //
+  // Everything that can exist before a rubric does: who reviews what, who
+  // declared a conflict, who stepped away, and whether every application has
+  // enough eyes on it. Scoring waits for the Foundation's criteria.
+  {
+    method: 'POST',
+    path: '/api/applications/:id/reviewers',
+    roles: ADMIN_ONLY,
+    handler: async ({ request, env, ctx, session, params }) => {
+      const body = (await request.json().catch(() => ({}))) as { reviewerUserId?: unknown };
+      const reviewerUserId = typeof body.reviewerUserId === 'string' ? body.reviewerUserId : '';
+      if (!reviewerUserId) {
+        throw validationFailed([{ field: 'reviewerUserId', message: 'Choose a reviewer.' }]);
+      }
+      return json(
+        { assignment: await assignReviewer(env.DB, ctx, session, params.id!, reviewerUserId) },
+        ctx,
+        201,
+      );
+    },
+  },
+  {
+    method: 'DELETE',
+    path: '/api/review/assignments/:id',
+    roles: ADMIN_ONLY,
+    handler: async ({ env, ctx, session, params }) => {
+      await unassignReviewer(env.DB, ctx, session, params.id!);
+      return json({ ok: true }, ctx);
+    },
+  },
+  {
+    // A reviewer declares their OWN conflict; an admin may record one they were
+    // told about. Both go through this route, and the library decides which.
+    method: 'POST',
+    path: '/api/review/assignments/:id/conflict',
+    roles: ['admin', 'reviewer'],
+    handler: async ({ request, env, ctx, session, params }) => {
+      const body = (await request.json().catch(() => ({}))) as { note?: unknown };
+      await declareConflict(
+        env.DB, ctx, session, params.id!,
+        typeof body.note === 'string' ? body.note : '',
+      );
+      return json({ ok: true }, ctx);
+    },
+  },
+  {
+    method: 'POST',
+    path: '/api/review/assignments/:id/recuse',
+    roles: ['admin', 'reviewer'],
+    handler: async ({ request, env, ctx, session, params }) => {
+      const body = (await request.json().catch(() => ({}))) as { reason?: unknown };
+      await recuse(
+        env.DB, ctx, session, params.id!,
+        typeof body.reason === 'string' ? body.reason : '',
+      );
+      return json({ ok: true }, ctx);
+    },
+  },
+  {
+    // The admin's coverage grid. A separate view rather than a filter on the
+    // reviewer's own list, because the question it answers -- which
+    // applications are short of reviewers -- is invisible from any one
+    // reviewer's worklist, and finding out at the deadline is too late.
+    method: 'GET',
+    path: '/api/cycles/:id/review-coverage',
+    roles: STAFF_READ,
+    handler: async ({ env, ctx, params, url }) => {
+      const asked = Number(url.searchParams.get('target') ?? DEFAULT_REVIEWERS_PER_APPLICATION);
+      const target =
+        Number.isFinite(asked) && asked > 0
+          ? Math.floor(asked)
+          : DEFAULT_REVIEWERS_PER_APPLICATION;
+      return json(await reviewCoverage(env.DB, params.id!, target), ctx);
+    },
+  },
+  {
+    method: 'POST',
+    path: '/api/cycles/:id/distribute-reviewers',
+    roles: ADMIN_ONLY,
+    handler: async ({ request, env, ctx, session, params }) => {
+      const body = (await request.json().catch(() => ({}))) as {
+        reviewerUserIds?: unknown;
+        target?: unknown;
+      };
+      const pool = Array.isArray(body.reviewerUserIds)
+        ? body.reviewerUserIds.filter((v): v is string => typeof v === 'string')
+        : [];
+      const target =
+        typeof body.target === 'number' ? body.target : DEFAULT_REVIEWERS_PER_APPLICATION;
+      return json(await distributeReviewers(env.DB, ctx, session, params.id!, pool, target), ctx);
+    },
+  },
   {
     // A reviewer's own queue. Scoped in scope.ts beside the detail view, so the
     // two cannot disagree about what this reviewer may see.
