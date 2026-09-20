@@ -28,7 +28,7 @@ import {
 import { submitEligibility } from './lib/eligibility';
 import { listOpenCycles, readPublicForm } from './lib/publicRoutes';
 import { createApplication, readDraft, autosaveDraft, submitDraft } from './lib/applicantRoutes';
-import { presignUpload, presignReportUpload } from './lib/uploads';
+import { presignUpload, presignReportUpload, r2UploadOrigin } from './lib/uploads';
 import {
   granteeHome, granteeMe, readReport, autosaveReport, fileReport,
 } from './lib/granteeRoutes';
@@ -165,7 +165,13 @@ async function serveAppShell({ request, env, ctx }: RouteContext): Promise<Respo
   for (const path of ['/index.html', '/']) {
     const res = await env.ASSETS.fetch(new Request(new URL(path, request.url), { method: 'GET' }));
     if (res.ok) {
-      return new Response(res.body, { status: 200, headers: htmlHeaders(ctx.requestId) });
+      // The upload origin goes in THIS response's policy, not the API's: a
+      // CSP governs only the document it arrives with, and the shell is the
+      // document that has to reach R2.
+      return new Response(res.body, {
+        status: 200,
+        headers: htmlHeaders(ctx.requestId, r2UploadOrigin(env)),
+      });
     }
   }
   throw notFound('page');

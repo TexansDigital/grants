@@ -95,6 +95,38 @@ export function objectKey(organizationId: string, attachmentId: string): string 
  * upload credential is not a thing to have two versions of. The CALLERS decide
  * what may be uploaded to and when -- that is the part that genuinely differs.
  */
+/**
+ * The origin every presigned upload is sent to.
+ *
+ * ONE definition, because two places must agree about it: the signer below,
+ * and the page's Content-Security-Policy. They did not agree. The CSP said
+ * `connect-src 'self'` and nothing more, so the browser refused the
+ * cross-origin PUT before making it -- no request, no R2 error, no Worker log,
+ * just a console line on a page nobody was watching. Uploads could not have
+ * worked in production for any applicant or grantee.
+ *
+ * It was invisible to the test suite because the applicant browser harness
+ * drives Vite's dev server, which serves no CSP at all. The policy exists only
+ * on responses this Worker writes.
+ */
+export function r2Origin(bucket: string, accountId: string): string {
+  return `https://${bucket}.${accountId}.r2.cloudflarestorage.com`;
+}
+
+/**
+ * That origin for the CSP, or null when uploads are not configured.
+ *
+ * Null rather than a guess: with no bucket or account id there is nothing to
+ * allow, and a policy naming a half-built origin is worse than one that allows
+ * nothing, because it looks deliberate.
+ */
+export function r2UploadOrigin(env: Env): string | null {
+  const bucket = (env.R2_BUCKET_NAME ?? '').trim();
+  const accountId = (env.R2_ACCOUNT_ID ?? '').trim();
+  if (!bucket || !accountId) return null;
+  return r2Origin(bucket, accountId);
+}
+
 async function presignForField(
   env: Env,
   ctx: RequestContext,
@@ -148,7 +180,7 @@ async function presignForField(
   const now = nowIso();
 
   const client = r2Client(env);
-  const endpoint = `https://${bucket}.${accountId}.r2.cloudflarestorage.com/${key}`;
+  const endpoint = `${r2Origin(bucket, accountId)}/${key}`;
   const signed = await client.sign(
     new Request(`${endpoint}?X-Amz-Expires=${PRESIGN_TTL_SECONDS}`, { method: 'PUT' }),
     {

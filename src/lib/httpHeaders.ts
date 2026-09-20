@@ -12,20 +12,48 @@
  * policy being loosened later to fit the UI.
  */
 
-const CSP = [
-  "default-src 'self'",
-  "script-src 'self'",
-  "style-src 'self'",
-  "img-src 'self' data:",
-  "connect-src 'self'",
-  "font-src 'self'",
-  "object-src 'none'",
-  "base-uri 'none'",
-  "form-action 'self'",
-  "frame-ancestors 'none'",
-].join('; ');
+/**
+ * Build the policy.
+ *
+ * `uploadOrigin` is the ONE exception to "nothing cross-origin", and it exists
+ * because a file upload must go direct from the browser to R2: the Worker only
+ * authorizes it, and streaming a 15 MB file through the Worker hits the edge
+ * request-body limit before the handler runs. So the page has to be allowed to
+ * connect to exactly one other origin.
+ *
+ * IT WAS NOT ALLOWED, and that was a live fault rather than a design choice.
+ * `connect-src 'self'` meant the browser refused every presigned PUT before
+ * making it -- no request, no R2 error, nothing in any Worker log. No applicant
+ * or grantee could have uploaded a file.
+ *
+ * The exact bucket origin, never a wildcard. `https://*.r2.cloudflarestorage.com`
+ * would admit every R2 bucket on every Cloudflare account, which is a much
+ * larger permission than "this application may write to its own bucket", and
+ * the tighter form costs nothing because the origin is already config.
+ *
+ * Null when uploads are unconfigured: the policy then allows nothing extra,
+ * which is correct, because there is nowhere to upload to.
+ */
+export function contentSecurityPolicy(uploadOrigin: string | null = null): string {
+  const connect = uploadOrigin ? `connect-src 'self' ${uploadOrigin}` : "connect-src 'self'";
+  return [
+    "default-src 'self'",
+    "script-src 'self'",
+    "style-src 'self'",
+    "img-src 'self' data:",
+    connect,
+    "font-src 'self'",
+    "object-src 'none'",
+    "base-uri 'none'",
+    "form-action 'self'",
+    "frame-ancestors 'none'",
+  ].join('; ');
+}
 
-export function securityHeaders(requestId: string): Record<string, string> {
+export function securityHeaders(
+  requestId: string,
+  uploadOrigin: string | null = null,
+): Record<string, string> {
   return {
     'content-type': 'application/json; charset=utf-8',
     'x-request-id': requestId,
@@ -35,22 +63,28 @@ export function securityHeaders(requestId: string): Record<string, string> {
     'x-content-type-options': 'nosniff',
     'referrer-policy': 'strict-origin-when-cross-origin',
     'x-frame-options': 'DENY',
-    'content-security-policy': CSP,
+    'content-security-policy': contentSecurityPolicy(uploadOrigin),
   };
 }
 
 /**
  * Headers for the HTML shell of the single-page app.
  *
- * Identical policy to every other response -- same CSP, same nosniff, same
- * DENY -- differing only in content type. The shell is served with no-store
+ * Same policy as every other response, and this is the one that MATTERS: a
+ * CSP only governs the document it is served with, so the shell's policy is
+ * what decides whether the page may reach R2. The identical header on a JSON
+ * response governs nothing, and is kept the same only so the two cannot drift
+ * into disagreeing about anything else. The shell is served with no-store
  * because it is delivered from behind Cloudflare Access and names the hashed
  * asset files for the current deployment; a cached shell pointing at assets
  * from a previous deployment is a blank page for whoever kept the tab open.
  */
-export function htmlHeaders(requestId: string): Record<string, string> {
+export function htmlHeaders(
+  requestId: string,
+  uploadOrigin: string | null = null,
+): Record<string, string> {
   return {
-    ...securityHeaders(requestId),
+    ...securityHeaders(requestId, uploadOrigin),
     'content-type': 'text/html; charset=utf-8',
   };
 }

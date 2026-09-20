@@ -109,6 +109,13 @@ Inspire Change application outright, since it requires three file uploads.
   `config/r2-cors.json`:
   `npx wrangler r2 bucket cors set steward-preview-files --file=config/r2-cors.json`
 
+**One fault already found and fixed, before you spend an afternoon on it.** The
+page's Content-Security-Policy said `connect-src 'self'`, so the browser refused
+every presigned PUT before making it — silently, with no request, no R2 error
+and nothing in any log. No upload could ever have succeeded. Fixed and tested;
+`DECISIONS.md` §31. **Redeploy before testing an upload**, or you will be
+testing the broken version.
+
 **And the thing that has never been tested.** The presigned PUT has never run
 against a real bucket. Everything up to the signature is tested; the PUT itself
 needs real credentials, and `CLAUDE.md` records this as the step that

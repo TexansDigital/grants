@@ -12,7 +12,11 @@
  *
  * WHAT IT DOES NOT PROVE, and must not be reported as proving:
  *   - No email is delivered; preview has no RESEND_API_KEY.
- *   - No file reaches R2. Uploads are not exercised here at all.
+ *   - No file reaches R2. The upload IS driven and its request inspected --
+ *     PUT, and no Content-Type, which is the rule R2 punishes with a 403 that
+ *     does not reproduce in curl -- but the PUT is intercepted and answered
+ *     locally. Whether R2 accepts it needs real credentials and a real bucket,
+ *     and no test in this repository can tell you.
  *   - It is not a security review and not an accessibility test. It checks
  *     that the page renders, saves, survives a reload on another "device",
  *     refuses an incomplete report and files a complete one.
@@ -154,20 +158,44 @@ for (const [key, label, type, unit, required, order, promotes] of metrics) {
  * the metrics: the scaffolder has its own tests and 29 mutants behind it. What
  * this script needs is a form on the other end of an HTTP request.
  */
+/**
+ * Every field this harness drives. The reuse check below requires ALL of them.
+ */
+const DRIVEN_FIELDS = [
+  'narrative',
+  'challenges',
+  'metric_individuals_served',
+  'metric_funds_spent',
+  'metric_volunteer_hours',
+  'supporting_files',
+];
+
 /*
- * A published report form WITH FIELDS IN IT.
+ * A published report form THAT HAS THE FIELDS THIS SCRIPT DRIVES.
  *
- * The `EXISTS` is not defensive padding. A published definition is immutable by
- * trigger, so a run that published one before writing its fields leaves an
- * empty form behind that every later run would happily reuse -- rendering a
- * report with no questions and failing somewhere far from the cause. Ask for
- * what is actually needed.
+ * Two different ways this has gone wrong, both silent:
+ *
+ *   A published definition is immutable by trigger, so a run that published one
+ *   before writing its fields leaves an empty form behind -- and a check for
+ *   "has any fields" is what that trap needs.
+ *
+ *   Then a check for "has any fields" turned out to be its own trap. When this
+ *   script grew an attachments section, every existing database already held a
+ *   published form from the OLDER revision, which satisfied "any fields" and so
+ *   was reused forever. The new section was never built and the new assertion
+ *   failed thirty seconds away from the cause.
+ *
+ * So: require exactly the set this script actually drives. Adding a field above
+ * now forces a fresh form instead of quietly reusing a stale one.
  */
 let formId = sql(
   `SELECT fd.id FROM form_definitions fd
     WHERE fd.program_id='${programId}' AND fd.kind='report' AND fd.status='published'
       AND fd.deleted_at IS NULL
-      AND EXISTS (SELECT 1 FROM form_fields ff WHERE ff.form_definition_id = fd.id)
+      AND (SELECT COUNT(*) FROM form_fields ff
+            WHERE ff.form_definition_id = fd.id
+              AND ff.field_key IN (${DRIVEN_FIELDS.map((f) => `'${f}'`).join(',')})
+          ) = ${DRIVEN_FIELDS.length}
     LIMIT 1`)[0]?.id;
 
 if (!formId) {
@@ -192,6 +220,9 @@ if (!formId) {
   const sections = [
     ['progress', 'What happened', 'In your own words. Short and specific beats long and general.', 0],
     ['metrics', 'The numbers', 'Your best available figures.', 1],
+    // Mirrors what reportForm.ts generates for every program. Optional on the
+    // form and, until this section existed here, driven by nothing at all.
+    ['attachments', 'Anything to show us', 'Optional. Photos, a flyer, a financial summary.', 2],
   ];
   const sectionIds = {};
   for (const [key, title, description, order] of sections) {
@@ -210,6 +241,8 @@ if (!formId) {
      'currency', 1, 1, 'NULL', `'${metricIds.funds_spent}'`],
     ['metrics', 'metric_volunteer_hours', 'Volunteer hours contributed',
      'decimal', 0, 2, `'{"min":0,"unit_label":"hours"}'`, `'${metricIds.volunteer_hours}'`],
+    ['attachments', 'supporting_files', 'Attach up to three files',
+     'file_upload', 0, 0, `'{"max_files":3}'`, 'NULL'],
   ];
   for (const [section, key, label, type, required, order, validation, metricId] of fields) {
     sql(`INSERT INTO form_fields
@@ -263,6 +296,38 @@ await context.addCookies([{
   name: '__Host-steward_session', value: token,
   domain: '127.0.0.1', path: '/', secure: true, httpOnly: true, sameSite: 'Lax',
 }]);
+/*
+ * THE UPLOAD, intercepted.
+ *
+ * Nothing leaves this machine: the presigned URL points at a bucket these
+ * invented credentials cannot reach, and sending bytes is not what is being
+ * checked. What IS being checked is the SHAPE of the request the browser makes,
+ * because that is where this has failed before and where the failure does not
+ * reproduce from curl:
+ *
+ *   signQuery signs only the host header. Any Content-Type the browser adds is
+ *   outside the signature, and R2 answers 403 -- while the identical request
+ *   made by hand, without that header, succeeds. CLAUDE.md records this as
+ *   "learned the hard way, do not deviate".
+ *
+ * So the assertions below are: PUT, and no content-type. Everything else about
+ * R2's answer needs real credentials and a real bucket, and is not provable
+ * here. See the header of this file.
+ */
+const puts = [];
+// A PREDICATE, not a glob. The glob spelling used elsewhere in this repo
+// silently matched nothing here, so the upload went out un-inspected and the
+// assertions below reported "no upload" while the file uploaded fine. A
+// predicate says exactly what it means and cannot be read two ways.
+await context.route(
+  (url) => url.hostname.endsWith('.r2.cloudflarestorage.com'),
+  async (route) => {
+    const r = route.request();
+    puts.push({ method: r.method(), headers: r.headers() });
+    await route.fulfill({ status: 200, body: '' });
+  },
+);
+
 const page = await context.newPage();
 
 const consoleErrors = [];
@@ -318,8 +383,20 @@ await page.fill('#field-narrative textarea',
 await page.locator('#field-metric_individuals_served input').fill('412');
 await page.locator('#field-metric_individuals_served input').blur();
 
+/*
+ * "Saved" is not the same as "nothing pending".
+ *
+ * The indicator reads "Saved just now — new changes not yet saved" while an
+ * edit is still in flight, and a predicate of startsWith('Saved') matches that
+ * happily. The run then read the draft out of D1 before the metric had been
+ * written and reported that autosave had lost it -- a false failure, and on a
+ * faster machine it would have been a false PASS instead, which is worse.
+ */
 await page.waitForFunction(
-  () => document.querySelector('.actions .counter')?.textContent?.startsWith('Saved'),
+  () => {
+    const t = document.querySelector('.actions .counter')?.textContent ?? '';
+    return t.startsWith('Saved') && !t.includes('not yet saved');
+  },
   { timeout: 15_000 },
 );
 note('indicator', await page.locator('.actions .counter').innerText());
@@ -337,6 +414,77 @@ await second.waitForSelector('#field-narrative', { timeout: 10_000 });
 check('a second device sees the same answers',
   await second.locator('#field-metric_individuals_served input').inputValue(), '412');
 await second.close();
+
+// ---- an attachment -----------------------------------------------------------
+// Optional on every generated report form ("Anything to show us"), and until
+// now driven by nothing. A grantee attaching a photo or a financial summary is
+// the ordinary case, not an edge one.
+const attachPath = join(mkdtempSync(join(tmpdir(), 'steward-e2e-')), 'summer-reading-summary.pdf');
+writeFileSync(attachPath, `%PDF-1.4\n% invented fixture ${stamp}\n`);
+
+const fileInput = page.locator('#field-supporting_files input[type="file"]');
+truthy('the report form offers somewhere to attach a file', await fileInput.count() > 0);
+
+/*
+ * ATTACH AND VERIFY, not attach and hope.
+ *
+ * setInputFiles can silently fail to stick when a re-render replaces the input
+ * node between the call and the event: no error is thrown and the rest of the
+ * harness then tests nothing. Found the hard way on the staff import screen.
+ *
+ * But the thing to verify is NOT input.files.length. UploadField clears the
+ * input on purpose -- `inputRef.current.value = ''` -- so that picking the same
+ * file twice fires a change event at all. Polling files.length therefore reads
+ * a value the component resets by design, and reports failure while the upload
+ * is working perfectly. Wait for the UPLOAD to appear instead, which is both
+ * the real effect and what the grantee actually sees.
+ */
+let shown = false;
+for (let attempt = 0; attempt < 3 && !shown; attempt += 1) {
+  await fileInput.setInputFiles(attachPath);
+  shown = await page
+    .waitForSelector('#field-supporting_files .upload-name', { timeout: 10_000 })
+    .then(() => true)
+    .catch(() => false);
+}
+if (!shown) {
+  // Say WHY. An upload that failed puts its reason on the page, and a harness
+  // that reports only "timed out" throws that reason away.
+  const errs = await page.locator('#field-supporting_files .upload-errors').allInnerTexts();
+  note('upload errors on the page', errs.length ? errs.join(' | ') : '(none shown)');
+}
+truthy('the attached file is shown back to the grantee', shown);
+
+/*
+ * WAIT FOR DONE, not for a name.
+ *
+ * .upload-name renders for an IN-FLIGHT upload as well as a finished one, so
+ * seeing it means "the browser has started", not "the bytes went". The
+ * assertions below then ran while the upload was still authorizing and
+ * reported that no PUT had been made -- of a PUT that was made a moment later
+ * and worked. A finished upload is the one with a Remove control beside it.
+ */
+await page.waitForSelector('#field-supporting_files button:has-text("Remove")', { timeout: 15_000 });
+
+check('the grantee is shown what they attached',
+  await page.locator('#field-supporting_files .upload-name').first().innerText(),
+  'summer-reading-summary.pdf');
+
+truthy('the browser did issue an upload', puts.length > 0);
+check('every upload was a PUT', [...new Set(puts.map((p) => p.method))], ['PUT']);
+// The rule from CLAUDE.md. A content-type here is a 403 from R2 that does not
+// reproduce in curl, and it is the single most expensive way to get this wrong.
+check('the browser sent no content-type on the upload',
+  puts.map((p) => p.headers['content-type'] ?? null).filter(Boolean), []);
+
+const attached = sql(
+  `SELECT parent_type, parent_id, filename, size_bytes, r2_key FROM attachments
+    WHERE uploaded_by='${ids.user}' AND deleted_at IS NULL`);
+check('one attachment was recorded', attached.length, 1);
+check('it belongs to a report, not an application', attached[0].parent_type, 'report_submission');
+check('and is UNCLAIMED until the report is sent', attached[0].parent_id, null);
+truthy('the object key is scoped to the organization',
+  String(attached[0].r2_key).includes(ids.org));
 
 // ---- file it ----------------------------------------------------------------
 await page.locator('#field-metric_funds_spent input').fill('18,750.25');
@@ -369,6 +517,11 @@ check('the period is marked submitted', one(
 check('the draft is closed', sql(
   `SELECT COUNT(*) AS n FROM report_drafts
     WHERE report_period_id='${periodId}' AND submitted_at IS NULL`)[0].n, 0);
+const claimed = sql(
+  `SELECT parent_id FROM attachments WHERE uploaded_by='${ids.user}' AND deleted_at IS NULL`);
+check('the attachment is claimed by the submission it was filed with',
+  claimed[0].parent_id, submission[0].id);
+
 check('it is audited', sql(
   `SELECT COUNT(*) AS n FROM audit_log
     WHERE action='report.submitted' AND entity_id='${submission[0].id}'`)[0].n, 1);

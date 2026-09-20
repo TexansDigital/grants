@@ -797,3 +797,53 @@ Worker, which is what keeps this inside the run-cost target.
 that the route runs. Between the request and the handler sit the asset router,
 Access, and the edge, and each of them can answer first. The test suite cannot
 see any of them.
+
+---
+
+## §31 — The page's CSP names the upload bucket, and only that bucket
+
+**Decided 20 September 2026, after finding uploads could never have worked.**
+
+`Content-Security-Policy` carried `connect-src 'self'` and nothing else. A file
+upload goes **direct from the browser to R2** — the Worker only authorizes it,
+because streaming a 15 MB file through the Worker hits the edge request-body
+limit before the handler runs — so the presigned PUT is a cross-origin request
+from the page. The policy refused it.
+
+**The failure was completely silent.** The browser refuses such a request
+*before making it*: no request reaches R2, so there is no 403; the Worker was
+never involved, so there is nothing in any log; the only trace is a console
+line on a page nobody is watching. Every applicant and every grantee upload
+would have failed this way, and three uploads are required to submit an Inspire
+Change application.
+
+**Nothing in this repository could see it.** The unit tests never asserted on
+the policy. `scripts/e2e-applicant.mjs` drives **Vite's dev server**, which
+serves no CSP at all — so its upload assertions passed for years against a page
+with no policy on it. The fault existed only in headers the Worker writes, and
+only the Worker's own responses carry them.
+
+**The decision.** The policy is built, not constant. The HTML shell — and only
+the shell, because a CSP governs only the document it arrives with — carries
+`connect-src 'self' https://<bucket>.<account>.r2.cloudflarestorage.com`, built
+from the same helper the presigner uses so the two cannot drift.
+
+**The exact origin, never a wildcard.** `https://*.r2.cloudflarestorage.com`
+would work and would admit every R2 bucket on every Cloudflare account. That is
+a much larger permission than "this application may write to its own bucket",
+and the tight form costs nothing because the origin is already configuration.
+When uploads are unconfigured the policy allows nothing extra, rather than
+naming a half-built origin that looks deliberate.
+
+**What is now tested.** `test/csp.test.ts` asserts the signer's origin and the
+policy's origin are the same string, that no wildcard appears, and that
+widening this directive widened no other. `test/routes.test.ts` used to assert
+the shell and an API response carried byte-identical policies — which would
+force this fault straight back — and now asserts they differ in exactly one
+directive. Five mutants, all killed.
+
+**Still not proven, and cannot be from here.** The PUT is intercepted in the
+browser harness, so what is verified is the request's *shape* — a PUT, carrying
+no `Content-Type`, which is the rule R2 punishes with a 403 that does not
+reproduce in curl. Whether R2 accepts it needs real credentials and a real
+bucket. That test has a human in it.

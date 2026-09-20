@@ -421,18 +421,36 @@ describe('serving the single-page app', () => {
     expect(await res.text()).toContain('id="root"');
   });
 
-  it('gives the shell the SAME security policy as an API response', async () => {
+  it('gives the shell the same security policy as an API response, bar the upload origin', async () => {
     const shell = await call('/forms/anything', undefined, envWithAssets());
     const apiRes = await call('/health', undefined, envWithAssets());
-    for (const h of [
-      'content-security-policy',
-      'x-content-type-options',
-      'x-frame-options',
-      'referrer-policy',
-      'cache-control',
-    ]) {
+    for (const h of ['x-content-type-options', 'x-frame-options', 'referrer-policy', 'cache-control']) {
       expect(shell.headers.get(h), `shell is missing ${h}`).toBe(apiRes.headers.get(h));
     }
+
+    /*
+     * The CSP differs in ONE directive, deliberately.
+     *
+     * A file upload goes direct from the browser to R2 -- the Worker only
+     * authorizes it -- so the DOCUMENT has to be allowed to connect to the
+     * bucket. It previously was not, and every presigned PUT was refused by
+     * the browser before it was made: no request, no R2 error, nothing in any
+     * log. See test/csp.test.ts.
+     *
+     * The API response needs no such permission, because a CSP governs only
+     * the document it arrives with. Asserting the two byte-identical is what
+     * this test used to do, and it would now force the fault back.
+     */
+    const directives = (csp: string | null) => new Set((csp ?? '').split('; '));
+    const shellCsp = directives(shell.headers.get('content-security-policy'));
+    const apiCsp = directives(apiRes.headers.get('content-security-policy'));
+
+    const onlyInShell = [...shellCsp].filter((d) => !apiCsp.has(d));
+    const onlyInApi = [...apiCsp].filter((d) => !shellCsp.has(d));
+
+    expect(onlyInApi).toEqual(["connect-src 'self'"]);
+    expect(onlyInShell).toHaveLength(1);
+    expect(onlyInShell[0]).toMatch(/^connect-src 'self' https:\/\/[^ ]+\.r2\.cloudflarestorage\.com$/);
   });
 
   it('does NOT serve the shell for a path the app does not own', async () => {
