@@ -314,6 +314,59 @@ export const api = {
       method: 'POST',
       body: {},
     }),
+  /*
+   * Configuration writes.
+   *
+   * Every one of these routes already existed and nothing called them, so a
+   * program, a stage or a cycle could only be created by applying a seed file
+   * or by hand with curl -- which meant no real application round could be
+   * started from the app at all.
+   *
+   * All admin-only on the server. The screen hides them from a reviewer as
+   * well, so nobody is offered a control that answers FORBIDDEN.
+   */
+  createProgram: (body: {
+    name: string;
+    description?: string;
+    fiscal_year?: number;
+    compliance_policy?: 'block' | 'warn' | 'ignore';
+    total_budget_cents?: number;
+  }) => request<{ program: ProgramRow }>('/api/programs', { method: 'POST', body }),
+
+  createCycle: (
+    programId: string,
+    body: {
+      name: string;
+      /** UTC instants. The form converts from Central before calling. */
+      opens_at: string;
+      closes_at: string;
+      draft_grace_hours?: number;
+    },
+  ) =>
+    request<{ cycle: CycleRow }>(`/api/programs/${encodeURIComponent(programId)}/cycles`, {
+      method: 'POST',
+      body,
+    }),
+
+  updateCycle: (
+    id: string,
+    body: Partial<{ name: string; opens_at: string; closes_at: string; draft_grace_hours: number }>,
+  ) => request<{ cycle: CycleRow }>(`/api/cycles/${encodeURIComponent(id)}`, { method: 'PATCH', body }),
+
+  /**
+   * Open or close a cycle.
+   *
+   * OPENING MAKES A PUBLIC FORM LIVE and starts a deadline. The server refuses
+   * an illegal transition (a closed cycle cannot be closed again), so the UI
+   * does not have to model the state machine -- only to make the press
+   * deliberate.
+   */
+  setCycleStatus: (id: string, next: 'open' | 'closed') =>
+    request<{ cycle: CycleRow }>(`/api/cycles/${encodeURIComponent(id)}/${next}`, {
+      method: 'POST',
+      body: {},
+    }),
+
   previewAwardImport: (csv: string) =>
     request<ImportPreview>('/api/awards/import/preview', { method: 'POST', body: { csv } }),
   runAwardImport: (csv: string) =>

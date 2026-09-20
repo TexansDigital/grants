@@ -12,6 +12,7 @@ import type { ReactElement } from 'react';
 import { ApiError, api } from './api';
 import type { CycleRow, FormSummary, ProgramRow } from './api';
 import { AwardsImport } from './AwardsImport';
+import { NewProgram, NewCycle, CycleStatusButton } from './Configure';
 
 interface Props {
   programs: ProgramRow[];
@@ -46,12 +47,14 @@ export function Home({
 
   return (
     <>
+        {isAdmin && <NewProgram onChanged={onChanged} />}
+
         {programs.length === 0 && (
           <div className="state">
             <h1>No programs yet</h1>
             <p>
-              Nothing has been seeded into this database. Run <code>npm run seed:preview</code>{' '}
-              to load the Inspire Change program and its form definition.
+              A program is the container for stages, cycles, forms and metrics. Create one here,
+              or load the Inspire Change seed with <code>npm run seed:preview</code>.
             </p>
           </div>
         )}
@@ -71,8 +74,14 @@ export function Home({
               </div>
 
               <h3>Cycles</h3>
+              {isAdmin && (
+                <NewCycle programId={p.id} programName={p.name} onChanged={onChanged} />
+              )}
               {programCycles.length === 0 ? (
-                <p className="meta">No cycles defined.</p>
+                <p className="meta">
+                  No cycles defined. Nothing about this program is public until a cycle exists and
+                  is opened.
+                </p>
               ) : (
                 <div className="table-scroll">
                 <table>
@@ -83,6 +92,9 @@ export function Home({
                       <th scope="col">Closes</th>
                       <th scope="col">Status</th>
                       <th scope="col">Draft grace</th>
+                      <th scope="col">
+                        <span className="sr-only">Open or close</span>
+                      </th>
                     </tr>
                   </thead>
                   <tbody>
@@ -99,6 +111,7 @@ export function Home({
                         <td className="num">
                           {c.draft_grace_hours === null ? '—' : `${c.draft_grace_hours} h`}
                         </td>
+                        <td>{isAdmin && <CycleStatusButton cycle={c} onChanged={onChanged} />}</td>
                       </tr>
                     ))}
                   </tbody>

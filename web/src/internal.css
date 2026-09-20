@@ -709,3 +709,58 @@ th.num {
 }
 .health-summary .bignum[data-severity='blocking'] { color: var(--danger-ink); }
 .health-summary .bignum[data-severity='clear'] { color: var(--ok-ink); }
+
+/* ---- configuration forms ---------------------------------------------------
+   Creating a program or a cycle. Same control metrics as .filter above --
+   16px type so iOS does not zoom on focus, 40px minimum height -- because
+   these sit on the same screen and two input styles on one page reads as an
+   accident.
+
+   Deliberately NOT reusing .field from form.css. That stylesheet is the light
+   applicant surface; borrowing across the two has already produced near-white
+   text on a near-white ground in this project. */
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  gap: var(--space-4);
+  margin-bottom: var(--space-4);
+}
+
+.stack {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.stack > span {
+  font-size: var(--step--1);
+  font-weight: 600;
+  color: var(--ink-2);
+}
+
+.stack input,
+.stack select {
+  font: inherit;
+  font-size: var(--step-0);
+  padding: var(--space-2) var(--space-3);
+  min-height: 40px;
+  width: 100%;
+  max-width: 100%;
+  border: 1px solid var(--line-control);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.stack input:hover,
+.stack select:hover {
+  border-color: var(--line-control-hover, var(--line-control));
+}
+
+/* A date field on the dark surface renders its calendar glyph black-on-black
+   in Chromium without this, so the control looks broken until clicked. */
+.stack input[type='datetime-local']::-webkit-calendar-picker-indicator {
+  filter: invert(1);
+  opacity: 0.7;
+  cursor: pointer;
+}

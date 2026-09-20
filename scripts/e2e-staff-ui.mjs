@@ -300,6 +300,24 @@ function serveAssets(root) {
 const json = (route, body) =>
   route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
 
+/*
+ * Configuration writes, recorded.
+ *
+ * Stateful on purpose: the list starts empty and gains the created row, so
+ * "the screen re-read itself after writing" is observable rather than assumed.
+ */
+let programsState = [];
+let cyclesState = [];
+const configCalls = { programs: [], cycles: [], status: [] };
+
+function resetConfigState() {
+  programsState = [];
+  cyclesState = [];
+  configCalls.programs.length = 0;
+  configCalls.cycles.length = 0;
+  configCalls.status.length = 0;
+}
+
 async function stubApi(page, { role }) {
   await page.route('**/api/**', async (route) => {
     const url = new URL(route.request().url());
@@ -308,8 +326,51 @@ async function stubApi(page, { role }) {
     if (p === '/api/session') {
       return json(route, { user: { id: 'u1', email: 'staff@example.org', role } });
     }
-    if (p === '/api/programs') return json(route, { programs: [] });
-    if (p === '/api/cycles') return json(route, { cycles: [] });
+    if (p === '/api/programs' && route.request().method() === 'POST') {
+      const body = JSON.parse(route.request().postData() ?? '{}');
+      configCalls.programs.push(body);
+      programsState = [
+        {
+          id: 'p1',
+          name: body.name,
+          slug: 'created-program',
+          status: 'draft',
+          fiscal_year: body.fiscal_year ?? null,
+          compliance_policy: body.compliance_policy ?? 'warn',
+        },
+      ];
+      return json(route, { program: programsState[0] });
+    }
+    if (p === '/api/programs') return json(route, { programs: programsState });
+
+    const newCycle = p.match(/^\/api\/programs\/([^/]+)\/cycles$/);
+    if (newCycle && route.request().method() === 'POST') {
+      const body = JSON.parse(route.request().postData() ?? '{}');
+      configCalls.cycles.push({ programId: decodeURIComponent(newCycle[1]), ...body });
+      cyclesState = [
+        {
+          id: 'c1',
+          program_id: 'p1',
+          name: body.name,
+          opens_at: body.opens_at,
+          closes_at: body.closes_at,
+          status: 'draft',
+          draft_grace_hours: body.draft_grace_hours ?? 0,
+          opens_at_display: '5 Jan 2027, 8:00 AM CST',
+          closes_at_display: '1 Mar 2027, 11:59 PM CST',
+        },
+      ];
+      return json(route, { cycle: cyclesState[0] });
+    }
+
+    const status = p.match(/^\/api\/cycles\/([^/]+)\/(open|closed)$/);
+    if (status && route.request().method() === 'POST') {
+      configCalls.status.push({ id: decodeURIComponent(status[1]), next: status[2] });
+      cyclesState = cyclesState.map((c) => ({ ...c, status: status[2] === 'open' ? 'open' : 'closed' }));
+      return json(route, { cycle: cyclesState[0] });
+    }
+
+    if (p === '/api/cycles') return json(route, { cycles: cyclesState });
     if (p === '/api/forms') return json(route, { forms: [] });
     // The health screen links into the pipeline, which fetches this. Stubbed
     // so the console-error check stays meaningful instead of absorbing a 404.
@@ -797,6 +858,116 @@ async function main() {
 
     check('no console errors on the staff screen', consoleErrors, []);
     await ctx.close();
+
+    // ---- configuration, from a browser that is NOT in Central --------------
+    /*
+     * THE POINT OF THE TIMEZONE. A deadline typed by somebody in Houston and
+     * the same deadline typed by a consultant in London must be the same
+     * instant. `<input type="datetime-local">` hands back a naive string and
+     * the browser reads it in the browser's zone, so this drives the form from
+     * Europe/London and asserts the UTC instant that leaves is Central.
+     *
+     * Get this wrong and applications are rejected as late by five hours, with
+     * nothing on any screen saying why.
+     */
+    resetConfigState();
+    const ctxTz = await browser.newContext({ timezoneId: 'Europe/London' });
+    const pageTz = await ctxTz.newPage();
+    const tzErrors = [];
+    pageTz.on('console', (m) => { if (m.type() === 'error') tzErrors.push(m.text()); });
+    pageTz.on('pageerror', (e) => tzErrors.push(String(e)));
+    await stubApi(pageTz, { role: 'admin' });
+    await pageTz.goto(`${base}/configuration`);
+    await pageTz.locator('.state h1, .panel h2').first().waitFor();
+
+    truthy('an admin is offered a way to create a program',
+      await pageTz.getByRole('button', { name: 'New program' }).isVisible());
+
+    await pageTz.getByRole('button', { name: 'New program' }).click();
+    await pageTz.fill('#program-name', 'Neighborhood Resilience Fund');
+    await pageTz.fill('#program-fiscal-year', '2027');
+    await pageTz.selectOption('#program-compliance', 'block');
+    await pageTz.getByRole('button', { name: 'Create program' }).click();
+    await pageTz.waitForFunction(() => document.querySelectorAll('.panel h2').length > 0, { timeout: 10_000 });
+
+    check('the program is created with what was typed', configCalls.programs, [
+      { name: 'Neighborhood Resilience Fund', compliance_policy: 'block', fiscal_year: 2027 },
+    ]);
+    truthy('and the screen re-reads, so the new program is on it',
+      (await pageTz.locator('.panel h2').first().innerText()).includes('Neighborhood Resilience Fund'));
+
+    // ---- a cycle, with the deadline that matters ---------------------------
+    await pageTz.getByRole('button', { name: /^New cycle/ }).click();
+    await pageTz.fill('#cycle-name-p1', 'FY2027 Spring');
+    await pageTz.fill('#cycle-opens-p1', '2027-01-05T08:00');
+    await pageTz.fill('#cycle-closes-p1', '2027-03-01T23:59');
+    await pageTz.fill('#cycle-grace-p1', '24');
+
+    truthy('the form says which zone the times are in, before saving',
+      (await pageTz.locator('[data-testid="cycle-zone-echo"]').innerText()).includes('CST'));
+
+    await pageTz.getByRole('button', { name: 'Create cycle' }).click();
+    await pageTz.waitForFunction(() => document.querySelectorAll('tbody tr').length > 0, { timeout: 10_000 });
+
+    check('the cycle name and grace window arrive intact',
+      configCalls.cycles.map((c) => [c.programId, c.name, c.draft_grace_hours]),
+      [['p1', 'FY2027 Spring', 24]]);
+
+    /*
+     * 8:00 AM Central on 5 January 2027 is 14:00 UTC (CST, -6).
+     * 11:59 PM Central on 1 March 2027 is 05:59 UTC the next day.
+     * A browser in London reading these as local time would send 08:00 and
+     * 23:59 UTC instead -- six hours and six hours wrong.
+     */
+    check('a Central wall time leaves as the right UTC instant, from a London browser',
+      [configCalls.cycles[0]?.opens_at, configCalls.cycles[0]?.closes_at],
+      ['2027-01-05T14:00:00.000Z', '2027-03-02T05:59:00.000Z']);
+
+    // ---- opening it --------------------------------------------------------
+    pageTz.once('dialog', (d) => d.accept());
+    await pageTz.getByRole('button', { name: /^Open / }).click();
+    // The real observable is the control flipping: an open cycle offers Close.
+    // Waiting on the word "open" appearing anywhere matched nothing, because
+    // the column header reads "Opens" and includes() is case-sensitive.
+    await pageTz.getByRole('button', { name: /^Close / }).waitFor({ timeout: 10_000 });
+    check('opening a cycle asks first, then opens exactly that cycle',
+      configCalls.status, [{ id: 'c1', next: 'open' }]);
+
+    check('no console errors while configuring', tzErrors, []);
+    await ctxTz.close();
+
+    // ---- a reviewer is offered none of it ----------------------------------
+    resetConfigState();
+    const ctxRev = await browser.newContext();
+    const pageRev = await ctxRev.newPage();
+    await stubApi(pageRev, { role: 'reviewer' });
+    // A program exists, so the absence below is about the ROLE rather than
+    // about an empty screen with nothing on it to act on.
+    programsState = [
+      { id: 'p1', name: 'Existing Program', slug: 'existing', status: 'open',
+        fiscal_year: 2027, compliance_policy: 'warn' },
+    ];
+    cyclesState = [
+      { id: 'c1', program_id: 'p1', name: 'FY2027 Spring', opens_at: '2027-01-05T14:00:00.000Z',
+        closes_at: '2027-03-02T05:59:00.000Z', status: 'draft', draft_grace_hours: 0,
+        opens_at_display: '5 Jan 2027, 8:00 AM CST', closes_at_display: '1 Mar 2027, 11:59 PM CST' },
+    ];
+    await pageRev.goto(`${base}/configuration`);
+    await pageRev.locator('.panel h2').first().waitFor();
+
+    check('a reviewer is offered no way to create a program',
+      await pageRev.getByRole('button', { name: 'New program' }).count(), 0);
+    check('a reviewer is offered no way to create a cycle',
+      await pageRev.getByRole('button', { name: /^New cycle/ }).count(), 0);
+    check('a reviewer cannot open a cycle, which would make a form public',
+      await pageRev.getByRole('button', { name: /^Open FY2027/ }).count(), 0);
+    truthy('but a reviewer can still see the cycle exists',
+      (await pageRev.locator('tbody').innerText()).includes('FY2027 Spring'));
+    await ctxRev.close();
+    // Hand the stub back empty. The sections below this one were written when
+    // /api/programs always answered with an empty list, and they wait on the
+    // "No programs yet" state that a leftover program would hide.
+    resetConfigState();
 
     // ---- as a reviewer -----------------------------------------------------
     mergedAlready = false;
