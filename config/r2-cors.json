@@ -1,0 +1,20 @@
+{
+  "rules": [
+    {
+      "allowed": {
+        "origins": ["https://apply.houstontexansfoundation.org"],
+        "methods": ["PUT"],
+        "headers": []
+      },
+      "maxAgeSeconds": 3600
+    },
+    {
+      "allowed": {
+        "origins": ["http://localhost:8787"],
+        "methods": ["PUT"],
+        "headers": []
+      },
+      "maxAgeSeconds": 3600
+    }
+  ]
+}

@@ -47,8 +47,24 @@ preview_urls = false
 #
 # Verified working behind Access before workers_dev was turned off. Doing it in
 # the other order leaves no way in if the custom domain misbehaves.
+#
+# `apply.` is the APPLICANT AND GRANTEE hostname, separate from `grants.` by
+# DECISIONS 15: Cloudflare Access cannot cover external users, its free tier
+# stops at 50 seats, and user 51 is blocked rather than billed. Nonprofits must
+# never touch Access.
+#
+# custom_domain = true means WRANGLER CREATES THE DNS RECORD on deploy. There is
+# no separate step in the dashboard and no A or CNAME to hand-write.
+#
+# BEFORE TELLING ANY APPLICANT THIS HOSTNAME, load it and confirm you get the
+# Steward page and NOT a Cloudflare Access login. The Access application was
+# set up against the WORKER (docs/ACCESS-SETUP.md 1), and if that covers every
+# hostname on this Worker rather than `grants.` alone, then every applicant
+# consumes an Access seat and the 51st is locked out of their own application.
+# That is a one-request check and it cannot be reasoned about from here.
 routes = [
-  { pattern = "grants.houstontexansfoundation.org", custom_domain = true }
+  { pattern = "grants.houstontexansfoundation.org", custom_domain = true },
+  { pattern = "apply.houstontexansfoundation.org", custom_domain = true }
 ]
 
 [observability]
