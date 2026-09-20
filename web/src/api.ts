@@ -237,6 +237,49 @@ export interface BulkGenerateResult {
   more: boolean;
 }
 
+export interface ImportIssue {
+  rowNumber: number;
+  column: string | null;
+  message: string;
+}
+
+export interface ImportPreview {
+  parse: {
+    ok: boolean;
+    rows: number;
+    issues: ImportIssue[];
+    unknownColumns: string[];
+    report: string;
+  };
+  plan: {
+    ok: boolean;
+    summary: {
+      toCreate: number;
+      toSkip: number;
+      blocked: number;
+      organizationsToCreate: number;
+      usersToCreate: number;
+      totalCents: number;
+    };
+    rows: {
+      reference: string;
+      organization: string;
+      kind: 'create' | 'skip' | 'blocked';
+      reason: string | null;
+      amountCents: number;
+      createsOrganization: boolean;
+      createsUser: boolean;
+    }[];
+  } | null;
+}
+
+export interface ImportRunResult {
+  awardsCreated: number;
+  organizationsCreated: number;
+  usersCreated: number;
+  skipped: number;
+}
+
 export const api = {
   session: (signal?: AbortSignal) => get<{ user: SessionUser }>('/api/session', signal),
   programs: (signal?: AbortSignal) => get<{ programs: ProgramRow[] }>('/api/programs', signal),
@@ -271,6 +314,10 @@ export const api = {
       method: 'POST',
       body: {},
     }),
+  previewAwardImport: (csv: string) =>
+    request<ImportPreview>('/api/awards/import/preview', { method: 'POST', body: { csv } }),
+  runAwardImport: (csv: string) =>
+    request<ImportRunResult>('/api/awards/import', { method: 'POST', body: { csv } }),
   generateReportPeriods: () =>
     request<BulkGenerateResult>('/api/report-periods/generate', { method: 'POST', body: {} }),
   dataHealth: (signal?: AbortSignal) => get<HealthReport>('/api/data-health', signal),

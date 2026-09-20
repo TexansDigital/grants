@@ -193,6 +193,36 @@ const PORTFOLIO = {
   ],
 };
 
+/*
+ * An import preview with one of everything a person has to be able to read:
+ * a clean row, a row already imported, a row that is blocked, an ignored
+ * column and a parse issue.
+ */
+let importPreview = {
+  parse: {
+    ok: false,
+    rows: 3,
+    issues: [{ rowNumber: 4, column: 'awarded_amount', message: 'Enter a dollar amount.' }],
+    unknownColumns: ['favourite_colour'],
+    report: '',
+  },
+  plan: {
+    ok: true,
+    summary: {
+      toCreate: 1, toSkip: 1, blocked: 0,
+      organizationsToCreate: 1, usersToCreate: 1, totalCents: 2500000,
+    },
+    rows: [
+      { reference: 'IC-2026-001', organization: 'Bayou Reach Collective', kind: 'create',
+        reason: null, amountCents: 2500000, createsOrganization: true, createsUser: true },
+      { reference: 'IC-2025-002', organization: 'Third Ward Futures Alliance', kind: 'skip',
+        reason: 'already imported', amountCents: 7500000,
+        createsOrganization: false, createsUser: false },
+    ],
+  },
+};
+const importCalls = [];
+
 /** What the next generate run will claim to have done. */
 let generateResult = {
   generated: [{ awardId: 'award-silent-1', created: 1, skipped: null }],
@@ -285,6 +315,13 @@ async function stubApi(page, { role }) {
     // so the console-error check stays meaningful instead of absorbing a 404.
     if (p === '/api/applications') return json(route, { applications: [], total: 0 });
 
+    if (p === '/api/awards/import/preview') return json(route, importPreview);
+    if (p === '/api/awards/import') {
+      importCalls.push(JSON.parse(route.request().postData() ?? '{}'));
+      return json(route, {
+        awardsCreated: 1, organizationsCreated: 1, usersCreated: 1, skipped: 1,
+      });
+    }
     if (p === '/api/reports') return json(route, PORTFOLIO);
     if (p === '/api/report-periods/generate') {
       generateCalls.push(1);
@@ -589,6 +626,116 @@ async function main() {
       1,
     );
 
+    // ---- importing a year of grants ---------------------------------------
+    await page.getByRole('button', { name: 'Configuration' }).click();
+    const importPanel = page.locator('section.panel', { hasText: 'Import grants from a spreadsheet' });
+    await importPanel.waitFor();
+
+    const checkBtn = importPanel.getByRole('button', { name: 'Check this file' });
+    truthy('the check button is dead until a file is chosen', await checkBtn.isDisabled());
+
+    const CSV =
+      'external_reference,organization_name,ein,program_slug,awarded_amount,awarded_date,' +
+      'grantee_contact_name,grantee_contact_email\n' +
+      'IC-2026-001,Bayou Reach Collective,00-1234567,inspire-change,25000,2026-03-14,' +
+      'Dana Okonkwo,dana@example-bayoureach.org\n';
+    /*
+     * Attach, then CHECK IT STUCK, and retry if it did not.
+     *
+     * The first version attached once and waited for the button. It sat
+     * disabled for fifteen seconds with `input.files.length === 0` and no
+     * console error: the file had not been attached at all. A re-render
+     * between Playwright resolving the input and the browser applying the
+     * files replaces the DOM node, and a file input loses its file with the
+     * node -- silently, because nothing errors.
+     */
+    let attached = false;
+    for (let i = 0; i < 5 && !attached; i += 1) {
+      await importPanel.locator('#awards-csv').setInputFiles({
+        name: 'fy26-awards.csv', mimeType: 'text/csv', buffer: Buffer.from(CSV),
+      });
+      await page.waitForTimeout(150);
+      attached =
+        (await page.evaluate(() => document.querySelector('#awards-csv')?.files?.length ?? 0)) > 0;
+    }
+    truthy('the file attaches to the input', attached);
+    /*
+     * Polls the control itself. Reading the file is async -- File.text() is a
+     * promise and React re-renders after it settles -- so there is a real
+     * moment where a file is chosen and the button is still dead.
+     *
+     * An earlier version of this used page.waitForFunction with a predicate
+     * that read `!buttons.find(...)?.disabled`. While the button says
+     * "Reading…" that find returns undefined, `undefined?.disabled` is
+     * undefined, and `!undefined` is TRUE -- so it resolved instantly no
+     * matter what the button was doing. A predicate that cannot fail is worse
+     * than no predicate.
+     */
+    let enabled = false;
+    for (let i = 0; i < 60 && !enabled; i += 1) {
+      enabled = !(await checkBtn.isDisabled());
+      if (!enabled) await page.waitForTimeout(250);
+    }
+    truthy('and alive once the file has been read', enabled);
+
+    await checkBtn.click();
+    await importPanel.locator('.panel-decide').waitFor();
+
+    truthy(
+      'a broken row is named by the line number the spreadsheet shows',
+      (await importPanel.locator('[role=alert] .tally').innerText()).includes('Row 4, awarded_amount'),
+    );
+    truthy(
+      'a column it does not understand is named, not silently dropped',
+      (await importPanel.locator('.banner').innerText()).includes('favourite_colour'),
+    );
+    check(
+      'nothing can be imported while a row is unreadable',
+      await importPanel.getByRole('button', { name: /^Import / }).count(),
+      0,
+    );
+    check(
+      'the plan lists what each row would do',
+      await importPanel.locator('tbody th[scope=row]').allInnerTexts(),
+      ['IC-2026-001', 'IC-2025-002'],
+    );
+    truthy(
+      'and money is formatted from integer cents',
+      (await importPanel.locator('tbody .num').first().innerText()) === '$25,000',
+    );
+
+    // Fix the file: the button appears.
+    importPreview = { ...importPreview, parse: { ...importPreview.parse, ok: true, issues: [] } };
+    await checkBtn.click();
+    const importBtn = importPanel.getByRole('button', { name: 'Import 1 grant' });
+    await importBtn.waitFor();
+
+    page.once('dialog', (d) => d.dismiss());
+    await importBtn.click();
+    await page.waitForTimeout(200);
+    check('dismissing the confirm imports nothing', importCalls.length, 0);
+
+    page.once('dialog', (d) => d.accept());
+    await importBtn.click();
+    await importPanel.locator('[role=status]').waitFor();
+    check('accepting sends the file once', importCalls.length, 1);
+    truthy('and sends the file, not a plan the browser made up', importCalls[0].csv.includes('IC-2026-001'));
+    truthy(
+      'the result says what it created',
+      (await importPanel.locator('[role=status]').innerText()).includes('Imported 1 grant'),
+    );
+    // The result must SURVIVE. It used to be wiped a moment later by a reload
+    // that unmounted the panel, leaving an admin with no idea what happened.
+    await page.waitForTimeout(600);
+    truthy(
+      'and the confirmation is still there a moment later',
+      (await importPanel.locator('[role=status]').count()) === 1,
+    );
+    truthy(
+      'and points at the step without which nobody is ever asked to report',
+      (await importPanel.locator('[role=status]').innerText()).includes('Create missing report obligations'),
+    );
+
     // ---- creating the report obligations ----------------------------------
     //
     // The single most important control for "can a nonprofit file a report at
@@ -658,6 +805,22 @@ async function main() {
     await stubApi(page2, { role: 'reviewer' });
     await page2.goto(`${base}/configuration`);
     await page2.getByRole('heading', { name: 'Configuration' }).or(page2.locator('.state h1')).first().waitFor();
+
+    /*
+     * ON THE CONFIGURATION SCREEN, which is where the panel lives for an
+     * admin, and after it has rendered.
+     *
+     * The first version asked this question from the Reporting screen, where
+     * the import panel would never appear for anybody -- so it passed for an
+     * admin too, and a mutation that showed the panel to everyone survived it.
+     * Counting zero of something proves nothing unless you are standing where
+     * it would have been.
+     */
+    check(
+      'a reviewer is offered no way to import grants',
+      await page2.locator('section.panel', { hasText: 'Import grants from a spreadsheet' }).count(),
+      0,
+    );
 
     await page2.getByRole('button', { name: 'Reporting' }).click();
     await page2.getByRole('heading', { name: 'Grant reports' }).waitFor();

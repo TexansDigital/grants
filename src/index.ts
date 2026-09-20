@@ -48,6 +48,7 @@ import { buildReportForm, publishReportForm } from './lib/reportForm';
 import { findDuplicateCandidates, planMerge, applyMerge } from './lib/merge';
 import { dataHealth } from './lib/dataHealth';
 import { generateReportPeriods, generateMissingReportPeriods } from './lib/reportPeriods';
+import { previewAwardImport, runAwardImport } from './lib/awardsImportRoutes';
 import {
   ADMIN_ONLY,
   STAFF_READ,
@@ -419,6 +420,28 @@ const routes: readonly Route[] = [
       await waiveReport(env.DB, ctx, session, params.id!, String(body.reason ?? ''));
       return json({ waived: true }, ctx);
     },
+  },
+
+  // ---- importing awards -----------------------------------------------------
+  //
+  // Two steps, deliberately. The preview writes nothing and is what an admin
+  // reads; the apply RE-PARSES AND RE-PLANS FROM THE FILE rather than trusting
+  // the plan it just returned. A plan is a set of decisions about which
+  // organizations exist and which rows create users -- accepting one over HTTP
+  // would let a caller hand back a plan naming any organization it liked.
+  {
+    method: 'POST',
+    path: '/api/awards/import/preview',
+    roles: ADMIN_ONLY,
+    handler: async ({ request, env, ctx, session }) =>
+      json(await previewAwardImport(env.DB, session, await readJsonBody(request)), ctx),
+  },
+  {
+    method: 'POST',
+    path: '/api/awards/import',
+    roles: ADMIN_ONLY,
+    handler: async ({ request, env, ctx, session }) =>
+      json(await runAwardImport(env.DB, ctx, session, await readJsonBody(request)), ctx),
   },
 
   // ---- report periods -------------------------------------------------------

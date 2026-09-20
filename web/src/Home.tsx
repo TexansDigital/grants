@@ -11,6 +11,7 @@ import { useCallback, useState } from 'react';
 import type { ReactElement } from 'react';
 import { ApiError, api } from './api';
 import type { CycleRow, FormSummary, ProgramRow } from './api';
+import { AwardsImport } from './AwardsImport';
 
 interface Props {
   programs: ProgramRow[];
@@ -151,6 +152,13 @@ export function Home({
             </section>
           );
         })}
+
+        {/*
+          Loading historical grants. It belongs on the configuration screen
+          because it is setup rather than day-to-day work, and because until it
+          has run there is nothing for the rest of the platform to be about.
+        */}
+        <AwardsImport isAdmin={isAdmin} />
 
     </>
   );
