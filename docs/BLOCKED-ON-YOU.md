@@ -139,10 +139,21 @@ whole file direct to Google, CORS and all, under the narrow `drive.file` scope.
 `steward-uploads@steward-grants.iam.gserviceaccount.com` added as a **Content
 manager** member. Then the new folder id, which is not a secret.
 
-**The thirty-second check:** open drive.google.com and look at the left sidebar.
-If **Shared drives** is listed, you can create one. If it is not, the Workspace
-edition does not include them, and we need to talk before going further — the
-remaining options are worse.
+**This needs a Workspace admin, not you.** Shared drives exist in the tenant and
+there is 5 TB of pooled storage, but *New shared drive* is greyed out on this
+account: "You don't have permission to create shared drives." That is an
+admin-console setting on the organizational unit.
+
+Two things to request together, because the second one is the next wall and
+finding it after the first is done costs another round trip:
+
+1. A new Shared Drive, with the requester as **Manager** — or permission to
+   create shared drives, whichever the admin prefers.
+2. Confirmation that an **external member** may be added to it. The service
+   account's address is not in the `houstontexans.com` domain, so Drive treats
+   it as external, and many tenants block that on shared drives. There is a
+   per-shared-drive toggle a Manager can flip; failing that it is an admin
+   change.
 
 ### 1.5 A security review by somebody who did not write this
 
