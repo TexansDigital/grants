@@ -96,8 +96,23 @@ they go into Inspire Change, which this leaves untouched.
 1. **Seed the program.**
 
    ```
-   npx wrangler d1 execute steward-preview --remote --file=seeds/community-futures-fund.sql
+   npm run sql:apply -- --file=seeds/community-futures-fund.sql --remote
    ```
+
+   **Not `wrangler d1 execute --file --remote`.** Wrangler sends a small file
+   inline and switches to D1's bulk IMPORT endpoint above a size threshold, and
+   that endpoint refuses an OAuth login:
+
+   ```
+   ✘ A request to the Cloudflare API (…/d1/database/…/import) failed.
+     Authentication error [code: 10000]
+   ```
+
+   It is not a missing permission — the same login carries `d1 (write)` and runs
+   migrations happily. It is that endpoint. Which is why `seeds/admins.sql` has
+   always applied (it is tiny) and a 37 KB seed does not. `sql:apply` sends the
+   same statements through the inline path in batches, so nothing new has to be
+   minted or looked after.
 
 2. **Load the invented metrics.** Dry run first; it writes nothing.
 

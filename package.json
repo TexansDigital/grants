@@ -12,7 +12,7 @@
     "migrate:preview": "wrangler d1 migrations apply steward-preview --remote",
     "dev": "wrangler dev --env=\"\"",
     "seed:build": "esbuild scripts/buildSeed.ts --bundle --platform=node --format=esm --outfile=.seedbuild.mjs --log-level=warning && node .seedbuild.mjs && rm -f .seedbuild.mjs",
-    "seed:preview": "wrangler d1 execute steward-preview --remote --file=seeds/inspire-change.sql",
+    "seed:preview": "node scripts/apply-sql.mjs --file=seeds/inspire-change.sql --remote",
     "seed:local": "wrangler d1 execute steward-preview --local --file=seeds/inspire-change.sql",
     "admin:sql": "esbuild scripts/buildAdmins.ts --bundle --platform=node --format=esm --outfile=.adminbuild.mjs --log-level=warning && node .adminbuild.mjs",
     "admin:apply": "wrangler d1 execute steward-preview --remote --file=seeds/admins.sql",
@@ -32,7 +32,8 @@
     "e2e:staff": "node scripts/e2e-staff-ui.mjs",
     "spike": "wrangler dev --config wrangler.spike.toml --port 8788",
     "e2e:signin": "node scripts/e2e-signin.mjs",
-    "dev:applicant": "wrangler dev --env=\"\" --var APPLICANT_BASE_URL:http://grants.houstontexansfoundation.org"
+    "dev:applicant": "wrangler dev --env=\"\" --var APPLICANT_BASE_URL:http://grants.houstontexansfoundation.org",
+    "sql:apply": "node scripts/apply-sql.mjs"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.12.21",
