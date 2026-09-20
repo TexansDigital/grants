@@ -76,6 +76,14 @@
   --warn: #8a5a00;
   --warn-bg: #fdf5e6;
 
+  /* Semantic INK, separate from the semantic fill.
+     --danger is Battle Red, which is correct on white and only 4.0:1 on the
+     dark internal surface -- a fail for text. These are the same meanings,
+     raised to read on whichever ground they land on. */
+  --danger-ink: var(--danger);
+  --warn-ink: var(--warn);
+  --ok-ink: var(--ok);
+
   --focus: var(--blue);
 
   /* Type. One family, weights carry the hierarchy. No decorative faces. */
@@ -136,6 +144,10 @@
   --surface: #0a1720;
   --surface-2: #021018;
   --surface-3: #14232e;
+
+  --danger-ink: #ff6b7f; /* 6.6:1 on --surface */
+  --warn-ink: #e0b45f;   /* 7.9:1 */
+  --ok-ink: #3fbd85;
 }
 
 *,

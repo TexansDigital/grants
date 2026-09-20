@@ -108,6 +108,78 @@ const GROUPS = [
   { reason: 'same_name', key: 'harbor light arts', organizations: [HARBOR_A, HARBOR_B] },
 ];
 
+/*
+ * A health report shaped to exercise every branch the screen has: blocking and
+ * attention, a check that found NOTHING (which must still render), a truncated
+ * one, an organization row (which links) and an award row (which cannot yet).
+ * Already in severity order, because the server sorts and the screen does not.
+ */
+const HEALTH = {
+  generatedAt: '2026-09-20T14:30:00.000Z',
+  blocking: 9,
+  attention: 1,
+  checks: [
+    {
+      key: 'award_no_w9',
+      label: 'Active grants with no W-9',
+      guidance: 'Finance cannot disburse without one.',
+      severity: 'blocking',
+      count: 2,
+      truncated: false,
+      rows: [
+        { id: 'award-bayou-1', kind: 'award', title: 'Bayou Bridge Youth Services',
+          detail: 'awarded 2026-03-04', amountCents: 2500000 },
+        { id: 'award-harbor-2', kind: 'award', title: 'Harbor Light Arts, Inc.',
+          detail: 'awarded 2026-03-11', amountCents: 125050 },
+      ],
+    },
+    {
+      key: 'award_no_report_periods',
+      label: 'Grants that will never be asked to report',
+      guidance: 'Term dates are set but no report periods exist.',
+      severity: 'blocking',
+      count: 7,
+      truncated: true,
+      rows: [
+        { id: 'award-silent-1', kind: 'award', title: 'Third Ward Music Project',
+          detail: 'term 2026-04-01 to 2027-03-31', amountCents: 1000000 },
+        { id: 'award-silent-2', kind: 'award', title: 'Cypress Creek Literacy',
+          detail: 'term 2026-04-01 to 2027-03-31', amountCents: 500000 },
+      ],
+    },
+    {
+      key: 'award_no_agreement',
+      label: 'Active grants with no signed agreement',
+      guidance: 'The grant is live and nothing is signed for it.',
+      severity: 'blocking',
+      count: 0,
+      truncated: false,
+      rows: [],
+    },
+    {
+      key: 'ein_unverified',
+      label: 'EINs never checked against the IRS file',
+      guidance: 'A mismatch is a flag for a human, never an automatic rejection.',
+      severity: 'attention',
+      count: 1,
+      truncated: false,
+      rows: [
+        { id: 'org-bayou-heavy', kind: 'organization', title: 'Bayou Bridge Youth Services',
+          detail: 'EIN 743210099, never verified', amountCents: null },
+      ],
+    },
+    {
+      key: 'duplicate_organizations',
+      label: 'Possible duplicate organizations',
+      guidance: 'Merge reunites a grantee with the grants and reports they hold.',
+      severity: 'informational',
+      count: 2, // rewritten per-request below once a merge has happened
+      truncated: false,
+      rows: [],
+    },
+  ],
+};
+
 /** Every merge-preview the page asked for, in order, so order can be asserted. */
 const previewCalls = [];
 const mergeCalls = [];
@@ -187,6 +259,25 @@ async function stubApi(page, { role }) {
     if (p === '/api/programs') return json(route, { programs: [] });
     if (p === '/api/cycles') return json(route, { cycles: [] });
     if (p === '/api/forms') return json(route, { forms: [] });
+    // The health screen links into the pipeline, which fetches this. Stubbed
+    // so the console-error check stays meaningful instead of absorbing a 404.
+    if (p === '/api/applications') return json(route, { applications: [], total: 0 });
+
+    if (p === '/api/data-health') {
+      if (role !== 'admin') {
+        return route.fulfill({
+          status: 403,
+          contentType: 'application/json',
+          body: JSON.stringify({ error: { message: 'Only an administrator can do that.' } }),
+        });
+      }
+      // The duplicates check counts what the merge panel below it shows, so
+      // they must not disagree once a merge has happened.
+      const report = structuredClone(HEALTH);
+      const dup = report.checks.find((c) => c.key === 'duplicate_organizations');
+      if (dup) dup.count = mergedAlready ? 1 : 2;
+      return json(route, report);
+    }
 
     if (p === '/api/organizations/duplicates') {
       // After a merge the pair is gone, which is how "the list re-read itself"
@@ -244,16 +335,12 @@ async function main() {
     page.on('pageerror', (e) => consoleErrors.push(String(e)));
 
     await stubApi(page, { role: 'admin' });
-    await page.goto(`${base}/configuration`);
+    await page.goto(`${base}/data-health`);
 
-    const panel = page.locator('section.panel', { hasText: 'Possible duplicate organizations' });
+    const panel = page.locator('article.check', { hasText: 'Possible duplicate organizations' });
     await panel.waitFor();
     truthy('the duplicates panel renders', await panel.isVisible());
-    check(
-      'it says how many there are to look at',
-      (await panel.locator('.panel-head .meta').first().textContent())?.trim(),
-      '2 to look at',
-    );
+    check('it says how many there are to look at', await panel.locator('.tag').innerText(), '2');
 
     const bayou = page.locator('article.review-section', { hasText: 'EIN 743210099' });
     check('the EIN group is titled by its EIN', await bayou.locator('h3').textContent(), 'EIN 743210099');
@@ -362,14 +449,19 @@ async function main() {
 
     page.once('dialog', (d) => d.accept());
     await bayou.getByRole('button', { name: 'Merge them' }).click();
-    await page.waitForFunction(() => !document.body.innerText.includes('EIN 743210099'));
+    // Scoped to the merge panel: the EIN also appears in the ein_unverified
+    // check's detail line further up the same screen, so a whole-page text
+    // search would wait forever on text that is not the group heading.
+    await panel
+      .locator('article.review-section', { hasText: 'EIN 743210099' })
+      .waitFor({ state: 'detached', timeout: 15000 });
     check('accepting merges the duplicate into the survivor', mergeCalls, [
       { duplicateId: 'org-bayou-heavy', into: 'org-bayou-thin' },
     ]);
     check(
-      'the list re-reads itself afterwards',
-      (await panel.locator('.panel-head .meta').first().textContent())?.trim(),
-      '1 to look at',
+      'the list re-reads itself afterwards, and the count above it agrees',
+      await panel.locator('.tag').innerText(),
+      '1',
     );
 
     // A screenshot on demand. The only way to see that a panel built from the
@@ -377,6 +469,117 @@ async function main() {
     if (process.env.STEWARD_SHOT) {
       await page.screenshot({ path: process.env.STEWARD_SHOT, fullPage: true });
     }
+
+    // ---- the data health screen -------------------------------------------
+    const summary = page.locator('.health-summary');
+    await summary.waitFor();
+
+    check(
+      'the summary leads with what is blocking',
+      (await summary.innerText()).replace(/\s+/g, ' ').trim(),
+      '9 things are blocking 1 needs attention',
+    );
+    check(
+      'it says when it was checked, in Central time',
+      (await page.locator('.panel-head .meta').first().innerText()).trim(),
+      'checked September 20, 2026 at 9:30 AM CDT',
+    );
+
+    const checks = page.locator('article.check');
+    if (process.env.STEWARD_SHOT_HEALTH) {
+      await page.screenshot({ path: process.env.STEWARD_SHOT_HEALTH, fullPage: true });
+    }
+    check('every check is on screen, including the clean one', await checks.count(), 5);
+    check(
+      'in the order the server sorted them, blocking first',
+      await checks.locator('.check-head h3').allInnerTexts(),
+      [
+        'Active grants with no W-9',
+        'Grants that will never be asked to report',
+        'Active grants with no signed agreement',
+        'EINs never checked against the IRS file',
+        'Possible duplicate organizations',
+      ],
+    );
+
+    // A check that found nothing must still be visible, saying so.
+    const clean = page.locator('article.check', { hasText: 'no signed agreement' });
+    check('a clean check says none rather than vanishing', await clean.locator('.tag').innerText(), 'none');
+    check('and lists nothing', await clean.locator('.findings').count(), 0);
+    check('and is not striped as a problem', await clean.getAttribute('data-found'), 'false');
+    check(
+      'the stripe follows the finding, not the category',
+      await clean.evaluate((el) => getComputedStyle(el).borderLeftColor),
+      await page
+        .locator('article.check', { hasText: 'Possible duplicate organizations' })
+        .evaluate((el) => getComputedStyle(el).borderLeftColor),
+    );
+
+    const w9 = page.locator('article.check', { hasText: 'no W-9' });
+    check('severity is on the element, not just in the words', await w9.getAttribute('data-severity'), 'blocking');
+    check('the count is the count', await w9.locator('.tag').innerText(), '2');
+    check(
+      'money is formatted at the display edge, from integer cents',
+      await w9.locator('.findings .amount').allInnerTexts(),
+      ['$25,000', '$1,250.50'],
+    );
+    check(
+      'an award shows a short id, because it has no screen yet',
+      await w9.locator('.findings .ref').first().innerText(),
+      'award-ba',
+    );
+
+    const truncated = page.locator('article.check', { hasText: 'never be asked to report' });
+    truthy(
+      'a truncated check says how many it is not showing',
+      (await truncated.locator('.more').innerText()).includes('Showing 2 of 7'),
+    );
+
+    // The organization row is the one finding that can be opened today.
+    const ein = page.locator('article.check', { hasText: 'never checked against the IRS' });
+    check('an attention check is striped as one', await ein.getAttribute('data-severity'), 'attention');
+    await ein.getByRole('button', { name: /^Applications/ }).click();
+    check(
+      'and opens the pipeline filtered to that organization',
+      new URL(page.url()).pathname + new URL(page.url()).search,
+      '/pipeline?organization_id=org-bayou-heavy',
+    );
+
+    // Back, and the merge panel is embedded in its check rather than beside it.
+    await page.getByRole('button', { name: 'Data health' }).click();
+    await page.locator('.health-summary').waitFor();
+    const dupCheck = page.locator('article.check', { hasText: 'Possible duplicate organizations' });
+    await dupCheck.locator('article.review-section').first().waitFor();
+    check(
+      'the merge panel is inside the check, not a second panel',
+      await dupCheck.locator('section.panel').count(),
+      0,
+    );
+    check(
+      'and does not repeat the heading the check already carries',
+      await page.getByRole('heading', { name: 'Possible duplicate organizations' }).count(),
+      1,
+    );
+
+    /*
+     * Narrow widths, as a standing guard rather than a one-off look. Adding
+     * the fourth nav item pushed the masthead 63px past a 320px viewport and
+     * scrolled the whole page sideways -- nothing on the health screen itself
+     * was at fault, and no assertion about the health screen would have caught
+     * it. This one would have.
+     */
+    for (const width of [320, 390]) {
+      await page.setViewportSize({ width, height: 900 });
+      await page.locator('.health-summary').waitFor();
+      check(
+        `no sideways scroll at ${width}px`,
+        await page.evaluate(
+          () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+        ),
+        0,
+      );
+    }
+    await page.setViewportSize({ width: 1280, height: 900 });
 
     check('no console errors on the staff screen', consoleErrors, []);
     await ctx.close();
@@ -387,18 +590,21 @@ async function main() {
     const page2 = await ctx2.newPage();
     await stubApi(page2, { role: 'reviewer' });
     await page2.goto(`${base}/configuration`);
-    const bayou2 = page2.locator('article.review-section', { hasText: 'EIN 743210099' });
-    await bayou2.waitFor();
-    await bayou2.getByRole('button', { name: /Preview merging Bayou Bridge Youth$/ }).click();
-    await bayou2.locator('.panel-decide').waitFor();
+    await page2.getByRole('heading', { name: 'Configuration' }).or(page2.locator('.state h1')).first().waitFor();
+
     check(
-      'a reviewer can look but gets no merge button',
-      await bayou2.getByRole('button', { name: 'Merge them' }).count(),
+      'a reviewer is not offered a door that answers FORBIDDEN',
+      await page2.getByRole('button', { name: 'Data health' }).count(),
       0,
     );
-    truthy(
-      'and is told who can do it',
-      (await bayou2.locator('.panel-decide').innerText()).includes('administrator'),
+    // The merge panel moved to the admin-only screen with the rest of data
+    // health, so a reviewer no longer reaches it from anywhere in the UI. The
+    // API still permits a staff READ -- that guard, and the admin-only merge,
+    // are covered in test/merge.test.ts where they belong.
+    check(
+      'and the merge panel is gone from configuration',
+      await page2.locator('article.review-section').count(),
+      0,
     );
     await ctx2.close();
   } finally {

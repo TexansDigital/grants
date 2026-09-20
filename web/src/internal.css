@@ -262,7 +262,11 @@ th.num {
 
 /* ---- primary navigation --------------------------------------------------- */
 
+/* Wraps. Three items fitted 320px with nothing to spare, so adding a fourth
+   pushed the masthead 63px past the viewport and the whole page scrolled
+   sideways. A nav that grows is a nav that must wrap. */
 .mainnav {
+  flex-wrap: wrap;
   display: flex;
   gap: var(--space-1);
   margin-left: var(--space-4);
@@ -627,3 +631,81 @@ th.num {
   background: var(--surface);
   color: var(--ink);
 }
+
+/* ---- data health --------------------------------------------------------
+   Severity is encoded in form as well as number, so what is urgent reads
+   before anything is counted: a stripe down the panel and a label, both from
+   the same token. Fill is deliberately not used -- --danger-bg and --warn-bg
+   are near-white grounds defined only for the light surface, and a panel
+   painted with one sits as a bright card in the middle of a dark screen. */
+.check {
+  border-left: 3px solid var(--line);
+  padding-left: var(--space-4);
+}
+.check[data-severity='blocking'] { border-left-color: var(--danger); }
+.check[data-severity='attention'] { border-left-color: var(--warn-ink); }
+/* AFTER the severity rules, and relying on source order to win: a check that
+   found nothing is not a problem, whatever category it belongs to. A red
+   stripe down "none" is the screen contradicting itself. */
+.check[data-found='false'] { border-left-color: var(--line); }
+
+.check-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-1);
+}
+.check-head h3 {
+  font-size: var(--step-1);
+  font-weight: 600;
+  margin: 0;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--ink);
+}
+.check-head .tag {
+  font-size: var(--step--1);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: var(--ink-3);
+}
+.check[data-severity='blocking'] .check-head .tag { color: var(--danger-ink); }
+.check[data-severity='attention'] .check-head .tag { color: var(--warn-ink); }
+.check[data-found='false'] .check-head .tag { color: var(--ok-ink); }
+
+.check > .meta { margin-bottom: var(--space-3); }
+
+/* The rows. A list, not a table: two of the five columns would be empty for
+   most checks, and an empty column reads as missing data. */
+.findings { list-style: none; margin: 0; padding: 0; display: grid; }
+.findings li {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  padding: var(--space-2) 0;
+  border-top: 1px solid var(--line-2);
+  flex-wrap: wrap;
+}
+.findings .who { font-weight: 600; }
+.findings .what { color: var(--ink-2); font-size: var(--step--1); }
+.findings .amount {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.findings .ref {
+  font-family: var(--font-mono);
+  font-size: var(--step--1);
+  color: var(--ink-3);
+}
+.more { font-size: var(--step--1); color: var(--ink-3); padding-top: var(--space-3); }
+
+.health-summary {
+  display: flex;
+  gap: var(--space-7);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-4);
+}
+.health-summary .bignum[data-severity='blocking'] { color: var(--danger-ink); }
+.health-summary .bignum[data-severity='clear'] { color: var(--ok-ink); }

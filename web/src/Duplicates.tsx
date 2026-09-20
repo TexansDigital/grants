@@ -20,9 +20,17 @@ import { formatDay } from './reportWording';
 
 interface Props {
   isAdmin: boolean;
+  /**
+   * True when this sits inside a panel that already supplies the heading and
+   * the chrome -- the data health screen. A panel inside a panel reads as two
+   * objects, and there is only one thing here.
+   */
+  embedded?: boolean;
+  /** So a merge can refresh whatever is counting duplicates above it. */
+  onMerged?: () => void;
 }
 
-export function Duplicates({ isAdmin }: Props): ReactElement {
+export function Duplicates({ isAdmin, embedded = false, onMerged }: Props): ReactElement {
   const [groups, setGroups] = useState<DuplicateGroup[] | null>(null);
   const [error, setError] = useState<ApiError | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
@@ -40,26 +48,15 @@ export function Duplicates({ isAdmin }: Props): ReactElement {
     return () => controller.abort();
   }, [reloadKey]);
 
-  return (
-    <section className="panel" aria-labelledby="duplicates-heading">
-      <div className="panel-head">
-        <h2 id="duplicates-heading">
-          Possible duplicate organizations
-        </h2>
-        <p className="meta" aria-live="polite">
-          {groups === null
-            ? 'Loading…'
-            : groups.length === 0
-              ? 'None found'
-              : `${groups.length} to look at`}
+  const body = (
+    <>
+      {!embedded && (
+        <p className="meta">
+          Two records of one nonprofit are expected — an EIN typed with a dash one year and
+          without it the next, or a second contact applying under their own name. Merging
+          reunites a grantee with the grants and reports they already hold.
         </p>
-      </div>
-
-      <p className="meta">
-        Two records of one nonprofit are expected — an EIN typed with a dash one year and
-        without it the next, or a second contact applying under their own name. Merging
-        reunites a grantee with the grants and reports they already hold.
-      </p>
+      )}
 
       {error && (
         <p className="banner danger" role="alert">
@@ -76,9 +73,29 @@ export function Duplicates({ isAdmin }: Props): ReactElement {
           key={`${g.reason}:${g.key}`}
           group={g}
           isAdmin={isAdmin}
-          onMerged={() => setReloadKey((n) => n + 1)}
+          onMerged={() => {
+            setReloadKey((n) => n + 1);
+            onMerged?.();
+          }}
         />
       ))}
+    </>
+  );
+
+  if (embedded) return body;
+  return (
+    <section className="panel" aria-labelledby="duplicates-heading">
+      <div className="panel-head">
+        <h2 id="duplicates-heading">Possible duplicate organizations</h2>
+        <p className="meta" aria-live="polite">
+          {groups === null
+            ? 'Loading…'
+            : groups.length === 0
+              ? 'None found'
+              : `${groups.length} to look at`}
+        </p>
+      </div>
+      {body}
     </section>
   );
 }

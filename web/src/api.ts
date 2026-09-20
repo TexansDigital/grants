@@ -196,6 +196,34 @@ export interface MergePlan {
   ok: boolean;
 }
 
+export type Severity = 'blocking' | 'attention' | 'informational';
+
+export interface HealthRow {
+  id: string;
+  kind: 'award' | 'organization' | 'application' | 'report_period' | 'attachment';
+  title: string;
+  detail: string;
+  /** Integer cents, formatted at the display edge. Null when not about money. */
+  amountCents: number | null;
+}
+
+export interface HealthCheck {
+  key: string;
+  label: string;
+  guidance: string;
+  severity: Severity;
+  count: number;
+  rows: HealthRow[];
+  truncated: boolean;
+}
+
+export interface HealthReport {
+  generatedAt: string;
+  checks: HealthCheck[];
+  blocking: number;
+  attention: number;
+}
+
 export const api = {
   session: (signal?: AbortSignal) => get<{ user: SessionUser }>('/api/session', signal),
   programs: (signal?: AbortSignal) => get<{ programs: ProgramRow[] }>('/api/programs', signal),
@@ -230,6 +258,7 @@ export const api = {
       method: 'POST',
       body: {},
     }),
+  dataHealth: (signal?: AbortSignal) => get<HealthReport>('/api/data-health', signal),
   duplicates: (signal?: AbortSignal) =>
     get<{ groups: DuplicateGroup[] }>('/api/organizations/duplicates', signal),
   mergePreview: (duplicateId: string, into: string, signal?: AbortSignal) =>

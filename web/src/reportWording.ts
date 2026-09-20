@@ -55,6 +55,30 @@ export function formatMoment(iso: string | null): string {
   });
 }
 
+/**
+ * A moment WITH the clock on it, in Central.
+ *
+ * formatMoment gives the Central calendar day of an instant, which is right
+ * for "filed on the 4th". It is useless for "this was checked a moment ago",
+ * where the whole point is freshness -- a date alone cannot distinguish a page
+ * loaded now from a tab left open since breakfast. The zone name is included
+ * because a staff member in another office reading "9:30" needs to know whose.
+ */
+export function formatWhen(iso: string | null): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toLocaleString('en-US', {
+    timeZone: 'America/Chicago',
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    timeZoneName: 'short',
+  });
+}
+
 /** The Central calendar date, as YYYY-MM-DD. */
 function centralDay(now: Date): string {
   // en-CA is the locale that yields ISO-ordered date parts.

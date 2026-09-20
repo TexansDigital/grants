@@ -27,6 +27,7 @@ import { Home } from './Home';
 import { FormRenderer } from './FormRenderer';
 import { Pipeline } from './Pipeline';
 import { Reports } from './Reports';
+import { DataHealth } from './DataHealth';
 import { ApplicationDetail } from './ApplicationDetail';
 import { Shell } from './Shell';
 import {
@@ -45,6 +46,7 @@ type Route =
   | { name: 'form'; id: string }
   | { name: 'apply'; id: string }
   | { name: 'reporting' }
+  | { name: 'dataHealth' }
   | { name: 'openCycles' }
   | { name: 'eligibility'; cycleId: string }
   | { name: 'portal' }
@@ -58,6 +60,7 @@ function parseRoute(pathname: string): Route | null {
   // The staff compliance desk. NOT /reports, which is the grantee portal --
   // two different audiences must never share a path.
   if (parts.length === 1 && parts[0] === 'reporting') return { name: 'reporting' };
+  if (parts.length === 1 && parts[0] === 'data-health') return { name: 'dataHealth' };
   if (parts.length === 2 && parts[0] === 'applications' && parts[1]) {
     return { name: 'application', id: parts[1] };
   }
@@ -198,6 +201,7 @@ export function App(): ReactElement {
       application: 'Application · Steward',
       home: 'Configuration · Steward',
       reporting: 'Grant reports · Steward',
+      dataHealth: 'Data health · Steward',
       openCycles: 'Apply for a grant · Houston Texans Foundation',
       eligibility: 'Before you start · Houston Texans Foundation',
       form: 'Form preview · Steward',
@@ -234,7 +238,8 @@ export function App(): ReactElement {
           route?.name === 'home' ||
           route?.name === 'pipeline' ||
           route?.name === 'application' ||
-          route?.name === 'reporting'
+          route?.name === 'reporting' ||
+          route?.name === 'dataHealth'
         ) {
           const [s, p, c, f] = await Promise.all([
             api.session(signal),
@@ -455,6 +460,15 @@ export function App(): ReactElement {
       <ApplicationDetail
         applicationId={route.id}
         onBack={() => navigate(toPipeline())}
+      />,
+    );
+  }
+
+  if (route.name === 'dataHealth') {
+    return shell(
+      <DataHealth
+        isAdmin={home.user.role === 'admin'}
+        onNavigate={(path) => navigate(path)}
       />,
     );
   }

@@ -20,9 +20,13 @@ interface Props {
   children: ReactNode;
 }
 
-const NAV: { path: string; label: string; route: string }[] = [
+const NAV: { path: string; label: string; route: string; adminOnly?: boolean }[] = [
   { path: '/pipeline', label: 'Pipeline', route: 'pipeline' },
   { path: '/reporting', label: 'Reporting', route: 'reporting' },
+  // Admin only, and hidden rather than shown-and-refused. The route is guarded
+  // server-side regardless; this is so a reviewer is not offered a door that
+  // answers FORBIDDEN, which reads as a fault rather than a boundary.
+  { path: '/data-health', label: 'Data health', route: 'dataHealth', adminOnly: true },
   { path: '/configuration', label: 'Configuration', route: 'home' },
 ];
 
@@ -45,7 +49,7 @@ export function Shell({
         <div className="masthead-inner">
           <h1>Steward</h1>
           <nav className="mainnav" aria-label="Sections">
-            {NAV.map((item) => (
+            {NAV.filter((item) => !item.adminOnly || user.role === 'admin').map((item) => (
               <button
                 key={item.path}
                 type="button"
