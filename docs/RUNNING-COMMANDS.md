@@ -70,3 +70,73 @@ active in every tab, for every project, forever.
 destructive. There is no flag that makes a mistake here reversible: D1's Time
 Travel is a 30-day in-place restore, not an undo, and it does not help at all if
 you were pointed at the wrong database.
+
+---
+
+## The self-test: proving an upload reaches R2
+
+**Why this exists.** Whether R2 accepts a presigned PUT cannot be proven from
+this repository. The browser harness intercepts the request, so what is tested
+is its shape — a PUT carrying no `Content-Type`, which is the rule R2 punishes
+with a 403 that does not reproduce in curl. The rest needs real credentials, a
+real bucket, and a human. This is that test.
+
+**It runs in its own program.** `community-futures-fund` was written as the
+Phase 0 proof that adding a program needs no migration, and it is used here so
+that nothing invented ever lands in Inspire Change. Its only cycle is status
+`draft`, so it cannot appear on the public open-cycles page — a fabricated
+grant programme advertised to nonprofits would be a genuinely bad outcome.
+
+**The metrics in `docs/selftest-metrics.csv` are invented.** They are not the
+Foundation's and must never be treated as them. When the real metrics arrive
+they go into Inspire Change, which this leaves untouched.
+
+### The sequence
+
+1. **Seed the program.**
+
+   ```
+   npx wrangler d1 execute steward-preview --remote --file=seeds/community-futures-fund.sql
+   ```
+
+2. **Load the invented metrics.** Dry run first; it writes nothing.
+
+   ```
+   npm run metrics -- --program=community-futures-fund --file=docs/selftest-metrics.csv --preview
+   npm run metrics -- --program=community-futures-fund --file=docs/selftest-metrics.csv --preview --apply
+   ```
+
+3. **Build and publish the report form.** Configuration → *Build a report form
+   from this program's metrics* → read it → **Publish**.
+
+4. **Import the award.** Configuration → *Import grants from a spreadsheet* →
+   `docs/selftest-award.csv` → Check → Import.
+
+   Its term ran to **31 August 2026**, which is deliberate: a report opens on
+   the term end date and is due ninety days later, so this one is open now
+   rather than in 2027.
+
+5. **Create the obligation.** Reporting → *Create missing report obligations*.
+   Expect one final report, open, due late November 2026.
+
+6. **File it as the grantee.** Sign in at `apply.houstontexansfoundation.org`
+   with the address in the CSV, open the report, **attach a file**, and send it.
+
+7. **Confirm the object exists.** Cloudflare → R2 → `steward-preview-files`.
+   There should be one object under `org/<organization id>/`.
+
+   That last step is the whole point. Everything before it has been proven in a
+   browser against a local database; only this proves R2 accepted the upload.
+
+### If the upload fails
+
+A `403` in the browser console is almost always one of the two documented
+traps: a `Content-Type` sent by the browser, or a CORS rule that does not
+admit the origin. `config/r2-cors.json` holds the rules, and
+`DECISIONS.md` §31 holds the third trap, which was the page's own
+Content-Security-Policy refusing the request before it was ever made.
+
+### Afterwards
+
+The fixture is invented data in a program nothing else uses. Leave it or
+soft-delete it; nothing in Inspire Change depends on it either way.

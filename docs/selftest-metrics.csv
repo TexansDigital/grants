@@ -1,0 +1,5 @@
+metric_key,label,help_text,metric_type,unit,is_required,sort_order,promotes_to
+people_reached,How many people did this grant directly reach?,Your best available figure. An estimate you can explain is more useful than a blank.,integer,people,yes,0,
+sessions_delivered,How many sessions or events did you run?,Count each occurrence rather than each series.,integer,sessions,no,1,
+funds_spent,How much of the grant has been spent?,As of the date you are filing this.,currency,,yes,2,funds_spent_cents
+partner_organizations,How many partner organizations were involved?,Leave blank if none.,integer,organizations,no,3,
