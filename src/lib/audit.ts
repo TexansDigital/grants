@@ -43,6 +43,15 @@ export type AuditAction =
   | 'application.blocked_by_compliance'
   // organizations
   | 'organization.created'
+  /*
+   * Removing junk. Registration is open, so an organization can be created by
+   * anybody who fills in the eligibility screen, and the Foundation clears out
+   * the fakes. Soft always: `removed` is a deleted_at stamp with a reason, and
+   * `restored` undoes exactly what one removal took.
+   */
+  | 'organization.removed'
+  | 'organization.restored'
+  | 'application.removed'
   | 'organization.updated'
   | 'organization.merged'
   | 'contact.created'

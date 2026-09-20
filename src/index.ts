@@ -47,6 +47,9 @@ import {
 import { buildReportForm, publishReportForm } from './lib/reportForm';
 import { findDuplicateCandidates, planMerge, applyMerge } from './lib/merge';
 import {
+  junkOrganization, restoreOrganization, junkApplication, listRemovedOrganizations,
+} from './lib/junk';
+import {
   assignReviewer, unassignReviewer, declareConflict, recuse,
   reviewCoverage, distributeReviewers, DEFAULT_REVIEWERS_PER_APPLICATION,
 } from './lib/reviewAssign';
@@ -867,6 +870,57 @@ const routes: readonly Route[] = [
   },
 
   // ---- review --------------------------------------------------------------
+  // ---- removing what should not be there ------------------------------------
+  //
+  // Registration is open, so junk arrives. Soft, always, with a reason and an
+  // audit row -- and refused outright for anything holding an award or a
+  // submitted application, which is not junk by definition.
+  {
+    method: 'POST',
+    path: '/api/organizations/:id/remove',
+    roles: ADMIN_ONLY,
+    handler: async ({ request, env, ctx, session, params }) => {
+      const body = (await request.json().catch(() => ({}))) as { reason?: unknown };
+      return json(
+        await junkOrganization(
+          env.DB, ctx, session, params.id!,
+          typeof body.reason === 'string' ? body.reason : '',
+        ),
+        ctx,
+      );
+    },
+  },
+  {
+    method: 'POST',
+    path: '/api/organizations/:id/restore',
+    roles: ADMIN_ONLY,
+    handler: async ({ env, ctx, session, params }) => {
+      await restoreOrganization(env.DB, ctx, session, params.id!);
+      return json({ ok: true }, ctx);
+    },
+  },
+  {
+    method: 'POST',
+    path: '/api/applications/:id/remove',
+    roles: ADMIN_ONLY,
+    handler: async ({ request, env, ctx, session, params }) => {
+      const body = (await request.json().catch(() => ({}))) as { reason?: unknown };
+      await junkApplication(
+        env.DB, ctx, session, params.id!,
+        typeof body.reason === 'string' ? body.reason : '',
+      );
+      return json({ ok: true }, ctx);
+    },
+  },
+  {
+    // So a mistake is findable. A soft delete nobody can see is a hard delete
+    // with extra steps.
+    method: 'GET',
+    path: '/api/organizations/removed',
+    roles: ADMIN_ONLY,
+    handler: async ({ env, ctx }) =>
+      json({ organizations: await listRemovedOrganizations(env.DB) }, ctx),
+  },
   // ---- review assignment ----------------------------------------------------
   //
   // Everything that can exist before a rubric does: who reviews what, who

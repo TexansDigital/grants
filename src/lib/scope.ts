@@ -127,6 +127,16 @@ export const INTERNAL_ONLY_COLUMNS = [
   'reviewer_user_id',
   'conflict_note',
   'admin_feedback',
+  /*
+   * Why an application was removed, which is staff's judgment about it and not
+   * the applicant's business: "obvious spam", "duplicate of #412", "applied to
+   * the wrong program". Returning it would be telling somebody what a staff
+   * member wrote about them in a moment of triage.
+   *
+   * The same column on organizations is not reachable from any external
+   * endpoint; this list governs the applications table.
+   */
+  'deleted_reason',
 ] as const;
 
 const SAFE_COLUMN = /^[a-z_][a-z0-9_]*$/;
