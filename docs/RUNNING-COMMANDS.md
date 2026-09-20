@@ -131,6 +131,16 @@ they go into Inspire Change, which this leaves untouched.
    the term end date and is due ninety days later, so this one is open now
    rather than in 2027.
 
+   It reuses the organization and EIN of the earlier `TEST-0001` fixture on
+   purpose. **One sign-in belongs to one organization**, and the importer
+   refuses a row whose contact email already signs in elsewhere — correctly, and
+   this fixture would have tripped over it. Reusing the organization also means
+   the portal shows two grants for one grantee, which is the more interesting
+   thing to look at anyway.
+
+   If you have not run the `TEST-0001` import, this creates the organization
+   instead, and the preview will say so before anything is written.
+
 5. **Create the obligation.** Reporting → *Create missing report obligations*.
    Expect one final report, open, due late November 2026.
 
