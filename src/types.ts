@@ -63,7 +63,7 @@ export interface Env {
   R2_BUCKET_NAME?: string;
   R2_ACCOUNT_ID?: string;
   /**
-   * Origin applicants reach, e.g. https://applications.houstontexansfoundation.org.
+   * Origin applicants reach, e.g. https://apply.houstontexansfoundation.org.
    *
    * Used to build sign-in links. NOT derived from the incoming request: a
    * Host header is attacker-controlled, and a magic link built from one would

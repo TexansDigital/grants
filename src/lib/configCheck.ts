@@ -378,5 +378,45 @@ export function configProblems(src: string): string[] {
     }
   }
 
+
+  /*
+   * The applicant hostname must be one this Worker actually answers on.
+   *
+   * APPLICANT_BASE_URL is what every magic link is built from -- deliberately,
+   * rather than the request's Host header, which is attacker-controlled. So a
+   * value naming a hostname that does not exist does not degrade: it makes
+   * every sign-in link in the system point at nothing, and
+   * isSameOriginRequest() in authRoutes.ts refuses the sign-in request that
+   * would have produced it. Both failures look like an auth bug.
+   *
+   * This existed. The routes said `apply.` and this said `applications.`,
+   * settled as `apply.` in DECISIONS 15 and never carried across, and nothing
+   * would have noticed until a grantee could not sign in.
+   */
+  const routeHosts = lines
+    .filter((l) => /pattern\s*=/.test(l))
+    .map((l) => /pattern\s*=\s*"([^"]+)"/.exec(l)?.[1])
+    .filter((h): h is string => Boolean(h));
+
+  for (const line of lines) {
+    const m = /^\s*APPLICANT_BASE_URL\s*=\s*"([^"]*)"/.exec(line);
+    const value = m?.[1];
+    // Empty is the deliberate fail-closed state for staging; skip it.
+    if (value === undefined || value === '') continue;
+    let host: string;
+    try {
+      host = new URL(value).host;
+    } catch {
+      problems.push(`APPLICANT_BASE_URL is not a URL: ${value}`);
+      continue;
+    }
+    if (routeHosts.length > 0 && !routeHosts.includes(host)) {
+      problems.push(
+        `APPLICANT_BASE_URL points at ${host}, which is not one of the declared ` +
+          `routes (${routeHosts.join(', ')}). Every magic link would be dead.`,
+      );
+    }
+  }
+
   return problems;
 }

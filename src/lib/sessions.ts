@@ -233,7 +233,7 @@ export async function signOut(
  * Secure, has no Domain attribute, and has Path=/. That makes it impossible
  * for a sibling subdomain to set or overwrite it -- staff live on
  * grants.houstontexansfoundation.org and applicants on
- * applications.houstontexansfoundation.org, and a cookie scoped to the parent
+ * apply.houstontexansfoundation.org, and a cookie scoped to the parent
  * domain would be readable across both.
  */
 export const SESSION_COOKIE = '__Host-steward_session';

@@ -105,12 +105,17 @@ EMAIL_REPLY_TO = "grants@houstontexansfoundation.org"
 # the request's Host header -- a Host is attacker-controlled, and a magic link
 # built from one would send an applicant to an address of the attacker's
 # choosing carrying a live token.
-APPLICANT_BASE_URL = "https://applications.houstontexansfoundation.org"
+APPLICANT_BASE_URL = "https://apply.houstontexansfoundation.org"
 # R2, for presigned uploads. Neither is a credential: the bucket name is the
 # same one bound below, and the account id is visible in any Cloudflare URL.
 # The key and secret that make them usable are Wrangler secrets.
 R2_BUCKET_NAME = "steward-preview-files"
-R2_ACCOUNT_ID = "FILL_IN_ONCE_KNOWN"
+# Not a secret -- an account id identifies, it does not authorise. The keys
+# that authorise are R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY, which are
+# Wrangler secrets and appear nowhere in this repository. This belongs in
+# version control with the rest of the hostname surface, so that what the
+# presigner talks to is reviewable rather than a value somebody once typed.
+R2_ACCOUNT_ID = "15755cdb48de12ee8f25ae64e13f20e2"
 # Turnstile / Resend / Eloqua / R2 signing credentials are Wrangler SECRETS.
 # They are never listed here. See docs/SECRETS.md.
 
@@ -245,7 +250,7 @@ ENVIRONMENT = "production"
 DISPLAY_TIMEZONE = "America/Chicago"
 EMAIL_FROM = "Houston Texans Foundation <grants@houstontexansfoundation.org>"
 EMAIL_REPLY_TO = "grants@houstontexansfoundation.org"
-APPLICANT_BASE_URL = "https://applications.houstontexansfoundation.org"
+APPLICANT_BASE_URL = "https://apply.houstontexansfoundation.org"
 
 [[env.production.d1_databases]]
 binding = "DB"
