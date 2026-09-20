@@ -189,6 +189,61 @@ interface SessionRequest {
   filename: string;
   mimeType: string;
   sizeBytes: number;
+  /**
+   * The browser origin that will do the PUT.
+   *
+   * THIS IS THE WHOLE BALLGAME. Google's upload endpoint varies its CORS
+   * response on Origin -- literally `vary: origin` in the response headers --
+   * and a session opened WITHOUT one is not bound to any browser origin, so
+   * the eventual cross-origin PUT is refused before it leaves the machine.
+   * The first run of this spike failed exactly that way: `TypeError: Failed to
+   * fetch`, no response, which reads like Google forbidding browser uploads
+   * outright and is not that at all.
+   *
+   * Probed directly against googleapis.com to confirm: an OPTIONS carrying
+   * Origin comes back 200 with access-control-allow-origin echoing it and PUT
+   * in the allowed methods; the identical OPTIONS without one comes back 404.
+   */
+  origin: string;
+}
+
+/** What Google says about cross-origin access to a session URI. */
+interface CorsProbe {
+  status: number;
+  allowOrigin: string | null;
+  allowMethods: string | null;
+  allowHeaders: string | null;
+  /** True when this URI would accept a PUT from the origin we asked about. */
+  wouldAllowPut: boolean;
+}
+
+/**
+ * Run, server side, the exact preflight the browser is about to run.
+ *
+ * A browser tells you nothing when a preflight fails -- `Failed to fetch` and
+ * an opaque network row. Asking the same question from the Worker, where the
+ * response is fully readable, turns that into the actual headers.
+ */
+async function probeCors(uploadUrl: string, origin: string): Promise<CorsProbe> {
+  const res = await fetch(uploadUrl, {
+    method: 'OPTIONS',
+    headers: {
+      origin,
+      'access-control-request-method': 'PUT',
+    },
+  });
+  const allowOrigin = res.headers.get('access-control-allow-origin');
+  const allowMethods = res.headers.get('access-control-allow-methods');
+  return {
+    status: res.status,
+    allowOrigin,
+    allowMethods,
+    allowHeaders: res.headers.get('access-control-allow-headers'),
+    wouldAllowPut:
+      res.ok &&
+      (allowOrigin === '*' || allowOrigin === origin) &&
+      (allowMethods ?? '').toUpperCase().includes('PUT'),
+  };
 }
 
 async function openSession(
@@ -203,6 +258,9 @@ async function openSession(
     headers: {
       authorization: `Bearer ${token}`,
       'content-type': 'application/json; charset=UTF-8',
+      // The origin the browser will PUT from. Without it Google returns a
+      // session URI that refuses cross-origin requests -- see SessionRequest.
+      origin: req.origin,
       // Declared HERE, server side, so the browser never has to send a
       // Content-Type of its own. That matters: see the note in the harness.
       'x-upload-content-type': req.mimeType,
@@ -254,7 +312,11 @@ export default {
         // Narrow scope first. A failure here is itself a finding.
         const narrow = await openSession(sa, folderId, req, NARROW_SCOPE);
         if (narrow.ok) {
-          return json({ uploadUrl: narrow.uploadUrl, scopeUsed: 'drive.file' });
+          return json({
+            uploadUrl: narrow.uploadUrl,
+            scopeUsed: 'drive.file',
+            cors: await probeCors(narrow.uploadUrl, req.origin),
+          });
         }
 
         const broad = await openSession(sa, folderId, req, BROAD_SCOPE);
@@ -262,6 +324,7 @@ export default {
           return json({
             uploadUrl: broad.uploadUrl,
             scopeUsed: 'drive',
+            cors: await probeCors(broad.uploadUrl, req.origin),
             narrowScopeFailed: { status: narrow.status, detail: narrow.detail },
           });
         }
@@ -395,7 +458,11 @@ const HARNESS = `<!doctype html>
         body: JSON.stringify({
           filename: 'spike-' + Date.now() + '-' + file.name,
           mimeType: file.type || 'application/octet-stream',
-          sizeBytes: file.size
+          sizeBytes: file.size,
+          // Google varies its CORS answer on Origin. A session opened without
+          // one is not bound to this page and the PUT is refused before it
+          // leaves the browser.
+          origin: window.location.origin
         })
       });
       out = await r.json();
@@ -416,6 +483,15 @@ const HARNESS = `<!doctype html>
       say('bad', 'scope', 'drive.file was refused (' + out.narrowScopeFailed.status + '). Falling back to drive.\\n' + out.narrowScopeFailed.detail);
     }
 
+    // The same preflight the browser is about to run, already run from the
+    // Worker where the response is readable. If the PUT below fails, this row
+    // says whether Google refused it or something else did.
+    var c = out.cors || {};
+    say(c.wouldAllowPut ? 'ok' : 'bad', 'preflight',
+      'OPTIONS -> ' + c.status +
+      '\\nallow-origin:  ' + (c.allowOrigin || '(none)') +
+      '\\nallow-methods: ' + (c.allowMethods || '(none)'));
+
     // ---- 2. THE ACTUAL QUESTION --------------------------------------
     // An ArrayBuffer, deliberately NOT the File. A File/Blob body makes fetch
     // set Content-Type from the blob, which is not a CORS-safelisted value and
@@ -430,7 +506,9 @@ const HARNESS = `<!doctype html>
     } catch (e) {
       say('bad', 'blocked', String(e));
       verdictIs(false, 'The browser refused to send it.',
-        'No response came back at all, which means CORS: Google did not permit a cross-origin PUT from this page. This is the failure the spike exists to find. Open DevTools, check the Network tab for a red OPTIONS or PUT row, and send me the console message.');
+        c.wouldAllowPut
+          ? 'Google DID say this origin may PUT -- see the preflight row above -- so the block came from somewhere else. Open DevTools, Network tab, and send me the OPTIONS and PUT rows.'
+          : 'No response came back, and the preflight row above shows why: Google did not grant this origin permission on the session URI. Send me both rows.');
       btn.disabled = false; return;
     }
 

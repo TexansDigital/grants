@@ -20,8 +20,29 @@ own.
 
 Whether a browser is *allowed* to make that PUT cross-origin is the part we
 cannot settle by reading. Unlike R2 there is no CORS configuration we control —
-Google sends whatever Google sends. If the answer is no, the Drive approach
-fails and no later work rescues it.
+Google sends whatever Google sends.
+
+**First run answered it, and the answer was not the obvious one.** The PUT was
+blocked with `TypeError: Failed to fetch`, which reads like Google forbidding
+browser uploads outright. It is not that. Probing `googleapis.com` directly:
+
+```
+OPTIONS /upload/drive/v3/files?uploadType=resumable
+Origin: http://localhost:8788
+Access-Control-Request-Method: PUT
+
+200
+access-control-allow-origin: http://localhost:8788
+access-control-allow-methods: DELETE,GET,HEAD,OPTIONS,PATCH,POST,PUT
+vary: origin
+```
+
+CORS is supported, and PUT is allowed. The same request *without* an `Origin`
+header returns **404** — note `vary: origin`. The Worker was opening the session
+without one, so Google minted a session URI bound to no browser origin at all.
+The Worker now forwards the page's origin on session creation, and runs the
+browser's preflight itself beforehand so a failure produces headers rather than
+`Failed to fetch`.
 
 A second question comes free: **which OAuth scope is enough.** We want
 `drive.file`, which limits this identity to files it created itself, so that a
@@ -92,12 +113,14 @@ The page ends on one of four verdicts. They mean quite different things.
 | Verdict | What it means | What happens next |
 |---|---|---|
 | **It works** | The browser uploaded direct, with no credentials of its own | Phase B starts. Note which scope it used. |
-| **The browser refused to send it** | CORS. Google would not permit a cross-origin PUT | The approach fails. Send me the DevTools console message. |
+| **The browser refused to send it** | Something blocked the PUT. The **preflight** row says whether it was Google | Read the preflight row first. `allow-origin` empty means the session is not origin-bound; populated means look elsewhere. |
 | **Google answered, and said no** | CORS is fine; Drive rejected the request | Much better problem. Send the status and body. |
 | **Stopped before the real test** | Drive would not open a session at all | Credentials, folder sharing, or scope. The detail says which. |
 
-The second row is the one that kills the design, which is why this ran before
-the schema migration and before the upload path was rewritten.
+Every run now also prints a **preflight** row: the exact `OPTIONS` the browser
+is about to send, already sent from the Worker where the response is readable.
+A browser tells you nothing when a preflight fails — `Failed to fetch` and an
+opaque network row — so this is the difference between a diagnosis and a guess.
 
 ## What it deliberately does not do
 
