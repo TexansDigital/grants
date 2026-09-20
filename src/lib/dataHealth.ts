@@ -27,6 +27,7 @@
 import type { Session } from '../types';
 import { AppError } from './errors';
 import { findDuplicateCandidates } from './merge';
+import { NEEDS_PERIODS_SQL } from './reportPeriods';
 import { nowIso } from './time';
 
 /** What a row points at. The UI turns this into a link where a screen exists. */
@@ -214,15 +215,18 @@ function specs(now: string): CheckSpec[] {
       key: 'award_no_report_periods',
       label: 'Grants that will never be asked to report',
       guidance:
-        'Term dates are set but no report periods exist, so no report is ever due.',
+        'Term dates are set but no report periods exist, so no report is ever due. ' +
+        'Reporting has a button that creates them.',
       severity: 'blocking',
       kind: 'award',
-      sql: award(
-        `a.status IN ('active','completed')
-         AND a.term_start IS NOT NULL AND a.term_end IS NOT NULL
-         AND NOT EXISTS (SELECT 1 FROM report_periods rp
-                          WHERE rp.award_id = a.id AND rp.deleted_at IS NULL)`,
-      ),
+      /*
+       * The predicate comes from reportPeriods.ts, which is also what the
+       * generator acts on. Two copies would drift, and the first anyone would
+       * know is this screen saying seven beside a button that fixes five.
+       * NEEDS_PERIODS_SQL already carries `a.deleted_at IS NULL`; award()
+       * repeats it harmlessly.
+       */
+      sql: award(NEEDS_PERIODS_SQL),
       binds: [ROWS_PER_CHECK],
       row: (r) => ({
         id: str(r.id),

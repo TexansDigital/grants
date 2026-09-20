@@ -19,10 +19,11 @@
  * need their periods entered by hand.
  */
 
-import type { RequestContext } from '../types';
+import type { RequestContext, Session } from '../types';
 import { newId } from './ids';
 import { nowIso } from './time';
 import { auditStatement } from './audit';
+import { AppError } from './errors';
 
 /**
  * Days after a term ends before the final report is due.
@@ -270,4 +271,93 @@ export async function generateReportPeriods(
 
   await db.batch(statements);
   return { awardId, created: plan.periods.length, skipped: null };
+}
+
+/**
+ * An award that will never be asked to report.
+ *
+ * ONE DEFINITION, used by the thing that finds them and the thing that fixes
+ * them. The data health screen counts these and the generator below acts on
+ * them; two copies of this predicate would drift, and the first anyone would
+ * know is a screen saying seven beside a button that fixes five.
+ *
+ * A WHERE fragment over `awards a`, deliberately not a whole query -- the
+ * health check wraps it in a window function and a join, and this one does not.
+ */
+export const NEEDS_PERIODS_SQL = `
+  a.deleted_at IS NULL
+  AND a.status IN ('active','completed')
+  AND a.term_start IS NOT NULL AND a.term_end IS NOT NULL
+  AND NOT EXISTS (SELECT 1 FROM report_periods rp
+                   WHERE rp.award_id = a.id AND rp.deleted_at IS NULL)`;
+
+/**
+ * How many awards one bulk run will touch.
+ *
+ * Each award is its own db.batch() -- the generator writes a period and its
+ * audit row together, and that atomicity is per award, not per run. So a bulk
+ * run is N round trips on a single-threaded database, and at 25 to 100 awards
+ * a year this cap is far above any real portfolio. It exists so that an import
+ * gone wrong cannot turn one button into a thousand writes.
+ */
+export const BULK_GENERATE_LIMIT = 200;
+
+export interface BulkGenerateResult {
+  /** Awards that gained periods, and how many each. */
+  generated: GenerateResult[];
+  /** Awards looked at but left alone, with the reason. */
+  skipped: GenerateResult[];
+  periodsCreated: number;
+  /** True when more awards needed periods than one run will take. */
+  more: boolean;
+}
+
+/**
+ * Generate periods for every award that has none.
+ *
+ * Partial success is the normal outcome and is reported as such rather than
+ * rolled back: an award whose term dates cannot produce a sensible schedule
+ * should not stop the other ninety-nine from getting theirs, and the caller is
+ * told exactly which were skipped and why.
+ */
+export async function generateMissingReportPeriods(
+  db: D1Database,
+  ctx: RequestContext,
+  session: Session,
+  opts: { limit?: number } = {},
+): Promise<BulkGenerateResult> {
+  if (session.role !== 'admin') {
+    throw new AppError('FORBIDDEN', 'Only an administrator can do that.', {
+      internalMessage: `bulk report period generation attempted by role ${session.role}`,
+      severity: 'warn',
+    });
+  }
+
+  const limit = Math.max(1, Math.min(opts.limit ?? BULK_GENERATE_LIMIT, BULK_GENERATE_LIMIT));
+  const rows = await db
+    .prepare(
+      `SELECT a.id AS id FROM awards a
+        WHERE ${NEEDS_PERIODS_SQL}
+        ORDER BY a.awarded_at
+        LIMIT ?`,
+    )
+    .bind(limit + 1)
+    .all<{ id: string }>();
+
+  const ids = (rows.results ?? []).map((r) => r.id);
+  const more = ids.length > limit;
+
+  const generated: GenerateResult[] = [];
+  const skipped: GenerateResult[] = [];
+  for (const id of ids.slice(0, limit)) {
+    const result = await generateReportPeriods(db, ctx, id);
+    (result.created > 0 ? generated : skipped).push(result);
+  }
+
+  return {
+    generated,
+    skipped,
+    periodsCreated: generated.reduce((n, g) => n + g.created, 0),
+    more,
+  };
 }

@@ -47,6 +47,7 @@ import {
 import { buildReportForm, publishReportForm } from './lib/reportForm';
 import { findDuplicateCandidates, planMerge, applyMerge } from './lib/merge';
 import { dataHealth } from './lib/dataHealth';
+import { generateReportPeriods, generateMissingReportPeriods } from './lib/reportPeriods';
 import {
   ADMIN_ONLY,
   STAFF_READ,
@@ -418,6 +419,31 @@ const routes: readonly Route[] = [
       await waiveReport(env.DB, ctx, session, params.id!, String(body.reason ?? ''));
       return json({ waived: true }, ctx);
     },
+  },
+
+  // ---- report periods -------------------------------------------------------
+  //
+  // Until these exist, an award is a grant nobody will ever be asked to report
+  // on: the grantee portal lists periods, the compliance desk lists periods,
+  // and an award with none appears in neither. The generator was written and
+  // tested in Phase 5 and had no way in at all, which is why the data health
+  // check that counts them was the only thing in the system that knew.
+  //
+  // ADMIN_ONLY: this creates obligations against somebody else's grant, with a
+  // date they will be held to.
+  {
+    method: 'POST',
+    path: '/api/awards/:id/report-periods',
+    roles: ADMIN_ONLY,
+    handler: async ({ env, ctx, params }) =>
+      json(await generateReportPeriods(env.DB, ctx, params.id!), ctx),
+  },
+  {
+    method: 'POST',
+    path: '/api/report-periods/generate',
+    roles: ADMIN_ONLY,
+    handler: async ({ env, ctx, session }) =>
+      json(await generateMissingReportPeriods(env.DB, ctx, session), ctx),
   },
 
   // ---- data health ----------------------------------------------------------

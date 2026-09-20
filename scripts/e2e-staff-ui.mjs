@@ -180,6 +180,28 @@ const HEALTH = {
   ],
 };
 
+const PORTFOLIO = {
+  total: 1,
+  rows: [
+    {
+      reportPeriodId: 'rp-1', awardId: 'award-bayou-1', organizationId: 'org-bayou-heavy',
+      organizationName: 'Bayou Bridge Youth Services', programName: 'Inspire Change',
+      label: 'Final report', periodType: 'final', dueDate: '2027-06-29',
+      status: 'scheduled', awardedAmountCents: 2500000, submittedAt: null,
+      fundsSpentCents: null, daysUntilDue: 280, overdue: false,
+    },
+  ],
+};
+
+/** What the next generate run will claim to have done. */
+let generateResult = {
+  generated: [{ awardId: 'award-silent-1', created: 1, skipped: null }],
+  skipped: [{ awardId: 'award-zero-term', created: 0, skipped: 'This award ends on or before it starts.' }],
+  periodsCreated: 1,
+  more: false,
+};
+const generateCalls = [];
+
 /** Every merge-preview the page asked for, in order, so order can be asserted. */
 const previewCalls = [];
 const mergeCalls = [];
@@ -262,6 +284,12 @@ async function stubApi(page, { role }) {
     // The health screen links into the pipeline, which fetches this. Stubbed
     // so the console-error check stays meaningful instead of absorbing a 404.
     if (p === '/api/applications') return json(route, { applications: [], total: 0 });
+
+    if (p === '/api/reports') return json(route, PORTFOLIO);
+    if (p === '/api/report-periods/generate') {
+      generateCalls.push(1);
+      return json(route, generateResult);
+    }
 
     if (p === '/api/data-health') {
       if (role !== 'admin') {
@@ -561,6 +589,44 @@ async function main() {
       1,
     );
 
+    // ---- creating the report obligations ----------------------------------
+    //
+    // The single most important control for "can a nonprofit file a report at
+    // all": until this existed nothing in the running system could produce a
+    // report period, so an imported grant was one nobody would ever be asked
+    // about.
+    await page.getByRole('button', { name: 'Reporting' }).click();
+    const generate = page.getByRole('button', { name: 'Create missing report obligations' });
+    await generate.waitFor();
+
+    page.once('dialog', (d) => d.dismiss());
+    await generate.click();
+    await page.waitForTimeout(200);
+    check('dismissing the confirm creates nothing', generateCalls.length, 0);
+
+    page.once('dialog', (d) => d.accept());
+    await generate.click();
+    await page.locator('[role=status]').waitFor();
+    check('accepting runs it once', generateCalls.length, 1);
+    check(
+      'and says what it created, in obligations and in grants',
+      (await page.locator('[role=status] .meta').first().innerText()).replace(/\s+/g, ' ').trim(),
+      'Created 1 report obligation across 1 grant. Reload to see them.',
+    );
+    truthy(
+      'a grant it could not schedule is named, not swallowed',
+      (await page.locator('[role=status] .tally').innerText()).includes('ends on or before it starts'),
+    );
+
+    // Pressing it again with nothing left must not read as a failure.
+    generateResult = { generated: [], skipped: [], periodsCreated: 0, more: false };
+    page.once('dialog', (d) => d.accept());
+    await generate.click();
+    await page.waitForFunction(
+      () => document.querySelector('[role=status] .meta')?.textContent?.includes('Nothing to do'),
+    );
+    check('a second run says there is nothing to do, not that it failed', generateCalls.length, 2);
+
     /*
      * Narrow widths, as a standing guard rather than a one-off look. Adding
      * the fourth nav item pushed the masthead 63px past a 320px viewport and
@@ -568,6 +634,7 @@ async function main() {
      * was at fault, and no assertion about the health screen would have caught
      * it. This one would have.
      */
+    await page.getByRole('button', { name: 'Data health' }).click();
     for (const width of [320, 390]) {
       await page.setViewportSize({ width, height: 900 });
       await page.locator('.health-summary').waitFor();
@@ -591,6 +658,15 @@ async function main() {
     await stubApi(page2, { role: 'reviewer' });
     await page2.goto(`${base}/configuration`);
     await page2.getByRole('heading', { name: 'Configuration' }).or(page2.locator('.state h1')).first().waitFor();
+
+    await page2.getByRole('button', { name: 'Reporting' }).click();
+    await page2.getByRole('heading', { name: 'Grant reports' }).waitFor();
+    check(
+      'a reviewer cannot create obligations against somebody else\u2019s grant',
+      await page2.getByRole('button', { name: 'Create missing report obligations' }).count(),
+      0,
+    );
+    await page2.getByRole('button', { name: 'Configuration' }).click();
 
     check(
       'a reviewer is not offered a door that answers FORBIDDEN',

@@ -14,7 +14,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { ReactElement } from 'react';
 import { ApiError, api } from './api';
-import type { PortfolioRow, ProgramRow, StaffReport } from './api';
+import type { BulkGenerateResult, PortfolioRow, ProgramRow, StaffReport } from './api';
 import { formatCents } from '../../src/lib/money';
 import { formatDay } from './reportWording';
 
@@ -97,6 +97,8 @@ export function Reports({ programs, isAdmin, query, onQueryChange }: Props): Rea
               (outstanding > 0 ? ` · ${outstanding} overdue` : '')}
         </p>
       </div>
+
+      {isAdmin && <GeneratePeriods />}
 
       <div className="filters">
         <label className="filter">
@@ -424,5 +426,100 @@ function ReportDetail({
         </div>
       )}
     </section>
+  );
+}
+
+/**
+ * Create the report obligations for grants that have none.
+ *
+ * WHY THIS BUTTON EXISTS AT ALL. Until it did, nothing in the running system
+ * could produce a report period. The generator was written and tested in
+ * Phase 5 and reachable from nowhere, so an imported grant was a grant nobody
+ * would ever be asked to report on -- the portal lists periods, this desk
+ * lists periods, and an award with none appeared in neither. The data health
+ * check that counts them was the only thing that knew.
+ *
+ * It sits here rather than on the health screen because this is where the
+ * person who manages report obligations already works, and because health
+ * stays read-only: it diagnoses, this acts.
+ *
+ * Safe to press twice. The generator refuses an award that already has
+ * periods rather than merging into it -- once a grantee has been told a date,
+ * regenerating could move it.
+ */
+function GeneratePeriods(): ReactElement {
+  const [state, setState] = useState<
+    | { kind: 'idle' }
+    | { kind: 'working' }
+    | { kind: 'done'; result: BulkGenerateResult }
+    | { kind: 'error'; message: string }
+  >({ kind: 'idle' });
+
+  const run = useCallback(async () => {
+    const ok = window.confirm(
+      'Create report obligations for every grant that has none? ' +
+        'Grantees will be asked to file on the dates this works out.',
+    );
+    if (!ok) return;
+    setState({ kind: 'working' });
+    try {
+      setState({ kind: 'done', result: await api.generateReportPeriods() });
+    } catch (e) {
+      setState({
+        kind: 'error',
+        message: e instanceof ApiError ? e.message : 'That did not go through. Try again.',
+      });
+    }
+  }, []);
+
+  return (
+    <div className="panel-decide">
+      <div className="actions">
+        <button
+          type="button"
+          className="btn secondary small"
+          disabled={state.kind === 'working'}
+          onClick={run}
+        >
+          {state.kind === 'working' ? 'Working…' : 'Create missing report obligations'}
+        </button>
+      </div>
+
+      {state.kind === 'error' && (
+        <p className="banner danger" role="alert">
+          {state.message}
+        </p>
+      )}
+
+      {state.kind === 'done' && (
+        <div role="status">
+          <p className="meta">
+            {state.result.periodsCreated === 0
+              ? 'Nothing to do — every grant with a term already has its report obligations.'
+              : `Created ${state.result.periodsCreated} report obligation` +
+                `${state.result.periodsCreated === 1 ? '' : 's'} across ` +
+                `${state.result.generated.length} grant` +
+                `${state.result.generated.length === 1 ? '' : 's'}. Reload to see them.`}
+          </p>
+          {state.result.skipped.length > 0 && (
+            <ul className="tally">
+              {state.result.skipped.map((s) => (
+                <li key={s.awardId}>
+                  <span className="meta strong" data-overdue="true">
+                    {s.skipped}
+                  </span>
+                  <span className="ref">{s.awardId.slice(0, 8)}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+          {state.result.more && (
+            <p className="meta">
+              More grants still need obligations than one run will take. Press it again.
+            </p>
+          )}
+        </div>
+      )}
+    </div>
   );
 }

@@ -1,11 +1,13 @@
 import { describe, it, expect } from 'vitest';
-import { db, ctxFor, adminSession } from './helpers';
+import { db, ctxFor, adminSession, reviewerSession, appErrorFrom } from './helpers';
 import { seedProgram } from '../src/seed/seedProgram';
 import { INSPIRE_CHANGE } from '../src/seed/inspireChange';
 import {
   planReportPeriods, generateReportPeriods, addMonths, addDays, monthsBetween,
   FINAL_REPORT_DAYS_AFTER_TERM, INTERIM_REPORT_DAYS_AFTER_PERIOD,
+  generateMissingReportPeriods,
 } from '../src/lib/reportPeriods';
+import { dataHealth } from '../src/lib/dataHealth';
 import { newId } from '../src/lib/ids';
 import { nowIso } from '../src/lib/time';
 
@@ -286,5 +288,199 @@ describe('writing them', () => {
     expect(rows.results.map((r) => r.label)).toEqual([
       'Year 1 report', 'Year 2 report', 'Final report',
     ]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+describe('generating for every award that has none', () => {
+  let n = 0;
+  const admin = adminSession();
+
+  async function award(over: Record<string, unknown> = {}) {
+    const ctx = ctxFor(admin);
+    const p = await seedProgram(db, ctx, { ...INSPIRE_CHANGE, slug: `bulk-${++n}` });
+    const now = nowIso();
+    const orgId = newId();
+    await db
+      .prepare(
+        `INSERT INTO organizations (id, legal_name, ein, status, created_at, updated_at)
+         VALUES (?,?,?,'active',?,?)`,
+      )
+      .bind(orgId, `Bayou Reach ${n}`, String(960000000 + n), now, now)
+      .run();
+
+    const id = newId();
+    const row: Record<string, unknown> = {
+      id,
+      organization_id: orgId,
+      program_id: p.programId,
+      awarded_amount_cents: 2_500_000,
+      awarded_at: day('2026-03-04'),
+      status: 'active',
+      term_start: day('2026-04-01'),
+      term_end: day('2027-03-31'),
+      source_system: 'spreadsheet',
+      source_reference: `B-${id.slice(0, 8)}`,
+      created_at: now,
+      updated_at: now,
+      ...over,
+    };
+    const cols = Object.keys(row);
+    await db
+      .prepare(`INSERT INTO awards (${cols.join(',')}) VALUES (${cols.map(() => '?').join(',')})`)
+      .bind(...cols.map((c) => row[c] as never))
+      .run();
+    return id;
+  }
+
+  const periodsFor = async (awardId: string) =>
+    (
+      await db
+        .prepare(`SELECT COUNT(*) AS n FROM report_periods WHERE award_id = ?`)
+        .bind(awardId)
+        .first<{ n: number }>()
+    )?.n ?? 0;
+
+  it('refuses anyone who is not an admin', async () => {
+    const e = await appErrorFrom(
+      generateMissingReportPeriods(db, ctxFor(reviewerSession()), reviewerSession()),
+    );
+    expect(e.code).toBe('FORBIDDEN');
+  });
+
+  it('gives periods to every award that had none', async () => {
+    const a = await award();
+    const b = await award();
+
+    const out = await generateMissingReportPeriods(db, ctxFor(admin), admin);
+    expect(out.generated.length).toBe(2);
+    expect(out.periodsCreated).toBe(2);
+    expect(out.skipped).toEqual([]);
+    expect(await periodsFor(a)).toBe(1);
+    expect(await periodsFor(b)).toBe(1);
+  });
+
+  it('leaves an award that already has periods entirely alone', async () => {
+    const already = await award();
+    await generateReportPeriods(db, ctxFor(admin), already);
+    const before = await periodsFor(already);
+
+    const out = await generateMissingReportPeriods(db, ctxFor(admin), admin);
+    expect(out.generated).toEqual([]);
+    expect(await periodsFor(already)).toBe(before);
+  });
+
+  it('is safe to run twice', async () => {
+    await award();
+    const first = await generateMissingReportPeriods(db, ctxFor(admin), admin);
+    const second = await generateMissingReportPeriods(db, ctxFor(admin), admin);
+    expect(first.periodsCreated).toBe(1);
+    expect(second.periodsCreated).toBe(0);
+    expect(second.generated).toEqual([]);
+  });
+
+  it('ignores an award with no term, which cannot be scheduled', async () => {
+    await award({ term_start: null, term_end: null });
+    const out = await generateMissingReportPeriods(db, ctxFor(admin), admin);
+    expect(out.generated).toEqual([]);
+    expect(out.skipped).toEqual([]);
+  });
+
+  it('ignores a cancelled award', async () => {
+    await award({ status: 'cancelled' });
+    const out = await generateMissingReportPeriods(db, ctxFor(admin), admin);
+    expect(out.periodsCreated).toBe(0);
+  });
+
+  it('does not even look at a soft-deleted award', async () => {
+    const gone = await award();
+    await db.prepare(`UPDATE awards SET deleted_at = ? WHERE id = ?`).bind(nowIso(), gone).run();
+    const out = await generateMissingReportPeriods(db, ctxFor(admin), admin);
+    expect(out.periodsCreated).toBe(0);
+    // And is not picked up only to be refused a query later as "no such
+    // award", which would surface to an admin as a problem with their data.
+    expect(out.skipped).toEqual([]);
+    expect(out.generated).toEqual([]);
+  });
+
+  /*
+   * Obligations and grants are different numbers, and the difference only
+   * shows on a multi-year term: over 18 months the planner adds an interim
+   * report, so two grants can owe three reports. Every other fixture here has
+   * a 12-month term and exactly one final report, which makes "count the
+   * grants" and "count the obligations" indistinguishable.
+   */
+  it('counts obligations, not grants', async () => {
+    await award();
+    await award({
+      term_start: day('2026-04-01'),
+      term_end: day('2028-03-31'),
+      is_multi_year: 1,
+    });
+
+    const out = await generateMissingReportPeriods(db, ctxFor(admin), admin);
+    expect(out.generated.length).toBe(2);
+    expect(out.periodsCreated).toBe(3);
+    expect(out.generated.map((g) => g.created).sort()).toEqual([1, 2]);
+  });
+
+  /*
+   * Partial success is the point. One award whose dates cannot produce a
+   * sensible schedule must not stop the rest, and the caller has to be told
+   * which were left and why -- an all-or-nothing bulk action on a hundred
+   * grants is unusable, because one bad row makes it do nothing forever.
+   */
+  it('reports what it skipped without abandoning the rest', async () => {
+    const good = await award();
+    /*
+     * A ZERO-LENGTH term. The schema permits it -- its CHECK is
+     * `term_end >= term_start` -- and the planner refuses it, because its
+     * guard is `termEnd <= termStart`. That one-character difference is the
+     * only gap through which an unschedulable award can reach the generator,
+     * and it is why `skipped` is a real branch rather than a defensive one.
+     */
+    const bad = await award({ term_start: day('2026-04-01'), term_end: day('2026-04-01') });
+
+    const out = await generateMissingReportPeriods(db, ctxFor(admin), admin);
+    expect(out.generated.map((g) => g.awardId)).toEqual([good]);
+    expect(out.skipped.map((g) => g.awardId)).toEqual([bad]);
+    expect(out.skipped[0]!.skipped).toBeTruthy();
+    expect(await periodsFor(good)).toBe(1);
+  });
+
+  it('stops at the limit and says there is more', async () => {
+    await award();
+    await award();
+    const out = await generateMissingReportPeriods(db, ctxFor(admin), admin, { limit: 1 });
+    expect(out.generated.length).toBe(1);
+    expect(out.more).toBe(true);
+  });
+
+  it('does not claim there is more when it finished', async () => {
+    await award();
+    const out = await generateMissingReportPeriods(db, ctxFor(admin), admin, { limit: 1 });
+    expect(out.more).toBe(false);
+  });
+
+  /*
+   * The data health screen counts these awards and this generates for them.
+   * They must agree, or the screen says seven beside a button that fixes five.
+   */
+  it('acts on exactly what data health counts', async () => {
+    await award();
+    await award();
+    await award({ term_start: null, term_end: null });
+    await award({ status: 'cancelled' });
+
+    const before = await dataHealth(db, admin);
+    const counted =
+      before.checks.find((c) => c.key === 'award_no_report_periods')?.count ?? -1;
+    expect(counted).toBe(2);
+
+    const out = await generateMissingReportPeriods(db, ctxFor(admin), admin);
+    expect(out.periodsCreated).toBe(counted);
+
+    const after = await dataHealth(db, admin);
+    expect(after.checks.find((c) => c.key === 'award_no_report_periods')?.count).toBe(0);
   });
 });

@@ -224,6 +224,19 @@ export interface HealthReport {
   attention: number;
 }
 
+export interface GenerateResult {
+  awardId: string;
+  created: number;
+  skipped: string | null;
+}
+
+export interface BulkGenerateResult {
+  generated: GenerateResult[];
+  skipped: GenerateResult[];
+  periodsCreated: number;
+  more: boolean;
+}
+
 export const api = {
   session: (signal?: AbortSignal) => get<{ user: SessionUser }>('/api/session', signal),
   programs: (signal?: AbortSignal) => get<{ programs: ProgramRow[] }>('/api/programs', signal),
@@ -258,6 +271,8 @@ export const api = {
       method: 'POST',
       body: {},
     }),
+  generateReportPeriods: () =>
+    request<BulkGenerateResult>('/api/report-periods/generate', { method: 'POST', body: {} }),
   dataHealth: (signal?: AbortSignal) => get<HealthReport>('/api/data-health', signal),
   duplicates: (signal?: AbortSignal) =>
     get<{ groups: DuplicateGroup[] }>('/api/organizations/duplicates', signal),
