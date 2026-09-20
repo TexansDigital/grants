@@ -106,6 +106,55 @@ JWT we hand Google is well formed and verifies against the key that signed it.
 Worth running first, because Google answers a mangled key and a clock two
 minutes fast with the same opaque `invalid_grant` and never says which.
 
+## THE ANSWER (20 September 2026)
+
+**Yes. A browser can upload direct to Google Drive.** Run against the real
+service account and the real folder:
+
+```
+FILE       RS2_Flip Card_CIN 1.pdf  334282 bytes  application/pdf
+SESSION    opened, scope = drive.file
+PREFLIGHT  OPTIONS -> 200
+           allow-origin:  http://localhost:8788
+           allow-methods: PUT
+BROWSER    PUT 334282 bytes direct to Google, no auth header, no content-type
+REFUSED    403 storageQuotaExceeded
+```
+
+Three findings, in order of how much they matter.
+
+**1. The architecture holds.** The browser was permitted to PUT cross-origin,
+sent the whole file, and got a real HTTP response back from Google. The body
+never passed through the Worker. That was the question that could have killed
+the approach, and the answer is no it does not.
+
+**2. `drive.file` is sufficient.** The session opened under the narrow scope;
+the fallback to full `drive` never fired. So the shipped identity can create
+files in the Foundation's folder while being unable to read anything else in
+the Drive.
+
+**3. A My Drive folder cannot be the destination.** Google's words:
+
+> Service Accounts do not have storage quota. Leverage shared drives, or use
+> OAuth delegation instead.
+
+A file written by a service account is OWNED by that service account, and a
+service account has no Drive storage in Workspace. In a My Drive folder there
+is no one else to charge the bytes to, so the write is refused — at the last
+possible moment, after a successful preflight and a full file transfer. In a
+Shared Drive the organization owns the file and the bytes come from pooled
+storage, so the same call succeeds.
+
+The upload URL already carries `supportsAllDrives=true`, so pointing
+`GOOGLE_DRIVE_FOLDER_ID` at a folder inside a Shared Drive is the entire
+change on this side.
+
+Google's other suggestion, OAuth delegation, means domain-wide delegation: the
+service account impersonates a real person and the files are owned by them.
+It works, and it is worse — a broad grant no admin should give for this, and
+it puts other organizations' financial statements back under one employee's
+ownership.
+
 ## Reading the result
 
 The page ends on one of four verdicts. They mean quite different things.

@@ -13,6 +13,7 @@ Last updated: 19 September 2026.
 | 1 | `apply.` DNS record, and Resend's DNS records | Everything public. Nobody can receive a sign-in link. |
 | 2 | Resend API key, as a Wrangler secret | Same |
 | 3 | Cloudflare account id, R2 key + secret, two backup buckets, bucket CORS | Every file upload, and the nightly export |
+| 3a | **A Google Shared Drive** for applicant uploads | Every file upload. Proven blocker, not a preference — see §1.4a |
 | 4 | Your impact metrics, as a CSV | What grantee reports ASK. The machinery is finished. |
 | 5 | The scoring rubric, as a CSV or XLSX | The entire review and scoring module |
 | 6 | Decline letter wording | Decision communication |
@@ -115,6 +116,33 @@ without these.
 - The Cloudflare account id, into `wrangler.toml`.
 - An R2 access key id and secret, as Wrangler secrets.
 - CORS on the preview bucket allowing the app origin, once 1.1 exists.
+
+### 1.4a A Google Shared Drive, not a My Drive folder
+
+**Status: blocking, and now proven rather than argued.** Applicant uploads are
+moving to Google Drive at your direction. The Phase A spike ran against the real
+service account and the real `houstontexansfoundation` folder, and Google
+refused the write:
+
+> `403 storageQuotaExceeded` — "Service Accounts do not have storage quota.
+> Leverage shared drives, or use OAuth delegation instead."
+
+A file written by a service account is owned by that service account, and a
+service account has no Drive storage in Workspace. In a My Drive folder there is
+nobody else to charge the bytes to. In a Shared Drive the organization owns the
+file and the bytes come from pooled storage.
+
+Everything else about the approach is proven working: the browser uploaded the
+whole file direct to Google, CORS and all, under the narrow `drive.file` scope.
+
+**What I need.** A Shared Drive, with a folder in it, and
+`steward-uploads@steward-grants.iam.gserviceaccount.com` added as a **Content
+manager** member. Then the new folder id, which is not a secret.
+
+**The thirty-second check:** open drive.google.com and look at the left sidebar.
+If **Shared drives** is listed, you can create one. If it is not, the Workspace
+edition does not include them, and we need to talk before going further — the
+remaining options are worse.
 
 ### 1.5 A security review by somebody who did not write this
 
