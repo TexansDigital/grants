@@ -123,7 +123,11 @@ const DASHBOARD = {
 };
 
 function appState(status) {
-  return { status, awards: [], awardId: null, payments: [], documents: [] };
+  return {
+    status, awards: [], awardId: null, payments: [], documents: [],
+    amendments: [], amended: [],
+    amountCents: 2_500_029, updatedAt: '2026-11-01T12:00:00.000Z',
+  };
 }
 
 async function stubApi(page, s) {
@@ -166,9 +170,28 @@ async function stubApi(page, s) {
         byCriterion: [],
       });
     }
+    if (p === '/api/awards/w1/amendments') {
+      return json(route, { amendments: s.amendments });
+    }
+    if (p === '/api/awards/w1' && method === 'PATCH') {
+      const body = JSON.parse(route.request().postData() ?? '{}');
+      s.amended.push(body);
+      s.amendments.push({
+        id: `am${s.amendments.length + 1}`, awardId: 'w1',
+        amendedAt: '2026-11-20T12:00:00.000Z', amendedBy: 'admin@example.org',
+        fieldChanged: 'awarded_amount_cents',
+        oldValue: '2500029', newValue: String(body.awardedAmountCents),
+        reason: body.reason,
+      });
+      s.amountCents = body.awardedAmountCents;
+      s.updatedAt = '2026-11-20T12:00:00.000Z';
+      return json(route, { awardId: 'w1', changed: ['awarded_amount_cents'], updatedAt: s.updatedAt });
+    }
     if (p === '/api/awards/w1/paperwork') {
       return json(route, {
         awardId: 'w1', organizationName: 'Invented Collective', status: 'pending',
+        awardedAmountCents: s.amountCents, termStart: null, termEnd: null,
+        announcementDate: null, updatedAt: s.updatedAt,
         acceptedAt: null, declinedByGranteeAt: null, granteeResponseNote: null,
         documents: [
           { key: 'w9', label: 'W-9', receivedAt: null },
@@ -401,6 +424,52 @@ async function main() {
       s.documents[0].receivedAt.slice(0, 10),
       '2026-10-14',
     );
+
+    // ---- amending it, which was impossible ---------------------------------
+    /*
+     * 0012 has refused to let an awarded amount be updated since Phase 0,
+     * pointing at an amendments table Phase 4 never built -- so an award
+     * recorded at the wrong amount could not be corrected through this system
+     * at all.
+     */
+    await page.getByRole('heading', { name: 'Amendments' }).waitFor();
+    check(
+      'an unamended award says so rather than showing an empty table',
+      (await page.locator('body').innerText()).includes('unchanged since it was recorded'),
+      true,
+    );
+    await page.getByRole('button', { name: 'Amend this award' }).click();
+    await page.locator('#amend-reason').waitFor();
+    check(
+      'the form opens on the current amount, so nothing reads as a change',
+      await page.locator('#amend-amount').inputValue(),
+      '25000.29',
+    );
+    check(
+      'and it will not fire while nothing has changed',
+      await page.getByRole('button', { name: 'Record this amendment' }).isDisabled(),
+      true,
+    );
+
+    await page.locator('#amend-amount').fill('18,000');
+    await page.locator('#amend-reason').fill('The partner site withdrew.');
+    await page.getByRole('button', { name: 'Record this amendment' }).click();
+    await page.getByText('Amended: Amount').waitFor();
+
+    check('one amendment went out', s.amended.length, 1);
+    check('dollars became integer cents', s.amended[0].awardedAmountCents, 1_800_000);
+    check('it carried the reason', s.amended[0].reason, 'The partner site withdrew.');
+    check(
+      'and the concurrency token the screen had loaded',
+      s.amended[0].expectedUpdatedAt,
+      '2026-11-01T12:00:00.000Z',
+    );
+    const amendBody = await page.locator('body').innerText();
+    check('the history shows the change in money, not in cents', [
+      amendBody.includes('$25,000.29'),
+      amendBody.includes('$18,000'),
+      amendBody.includes('The partner site withdrew.'),
+    ], [true, true, true]);
 
     // ---- the payment ledger, once an award exists -------------------------
     /*

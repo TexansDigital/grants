@@ -24,7 +24,9 @@ import { INSPIRE_CHANGE } from '../src/seed/inspireChange';
 import { newId } from '../src/lib/ids';
 import { nowIso } from '../src/lib/time';
 import { decideApplication } from '../src/lib/decisions';
-import { createAwardFromDecision, budgetByProgram } from '../src/lib/awards';
+import {
+  createAwardFromDecision, budgetByProgram, amendAward, amendmentHistory,
+} from '../src/lib/awards';
 import {
   awardsAwaitingResponse, acceptAward, declineAward, recordAwardDocument, awardPaperwork,
 } from '../src/lib/acceptance';
@@ -528,5 +530,271 @@ describe('what is outstanding on one award', () => {
       .toBe('NOT_FOUND');
     expect((await appErrorFrom(awardPaperwork(db, s.grantee, s.awardId))).code)
       .toBe('NOT_FOUND');
+  });
+});
+
+// ---------------------------------------------------------------------------
+describe('amending an award', () => {
+  /*
+   * WHY THIS EXISTS. 0012 refuses to let an awarded amount be updated,
+   * pointing at an amendments table Phase 4 never built -- so an award
+   * recorded at the wrong amount could not be corrected through this system in
+   * any way, and the documented remedy amounted to editing the production
+   * database by hand. CLAUDE.md's Module 3 asks for "amendments tracked, never
+   * overwritten".
+   */
+
+  it('changes the amount and writes one amendment row per field', async () => {
+    const s = await offered();
+    const r = await amendAward(db, ctx(), admin, s.awardId, {
+      awardedAmountCents: 1_800_000,
+      termEnd: '2027-06-30T12:00:00.000Z',
+      reason: 'The partner site withdrew; the committee revised it on 14 March.',
+    });
+    expect(r.changed.sort()).toEqual(['awarded_amount_cents', 'term_end']);
+
+    const award = await db
+      .prepare(`SELECT awarded_amount_cents AS c, term_end AS e FROM awards WHERE id=?`)
+      .bind(s.awardId)
+      .first<{ c: number; e: string }>();
+    expect(award?.c).toBe(1_800_000);
+    expect(award?.e).toBe('2027-06-30T12:00:00.000Z');
+
+    const history = await amendmentHistory(db, admin, s.awardId);
+    expect(history.length).toBe(2);
+    const money = history.find((h) => h.fieldChanged === 'awarded_amount_cents')!;
+    // CENTS AS A STRING, never formatted: a record that says "$18,000" cannot
+    // be compared with the column it came from.
+    expect(money.oldValue).toBe('2500000');
+    expect(money.newValue).toBe('1800000');
+    expect(money.reason).toContain('partner site withdrew');
+    expect(history.every((h) => h.amendedBy.includes('@'))).toBe(true);
+  });
+
+  it('writes an audit row as well, because the two answer different questions', async () => {
+    const s = await offered();
+    await amendAward(db, ctx(), admin, s.awardId, {
+      awardedAmountCents: 1_800_000,
+      reason: 'Revised by the committee.',
+    });
+    const audited = await db
+      .prepare(
+        `SELECT COUNT(*) AS n FROM audit_log WHERE action='award.amended' AND entity_id=?`,
+      )
+      .bind(s.awardId)
+      .first<{ n: number }>();
+    expect(audited?.n).toBe(1);
+  });
+
+  it('will not let the amount move without an amendment, whatever the caller does', async () => {
+    /*
+     * THE GUARANTEE, and the reason this is a trigger rather than a convention.
+     * 0024 lets the column move only when a matching amendment row exists
+     * stamped at the same instant. A hand-written UPDATE -- an import, a
+     * repair, a future function that forgets -- is refused by the database.
+     */
+    const s = await offered();
+    await expect(
+      db
+        .prepare(`UPDATE awards SET awarded_amount_cents = ?, updated_at = ? WHERE id = ?`)
+        .bind(999, nowIso(), s.awardId)
+        .run(),
+    ).rejects.toThrow(/amendment, not an update/);
+
+    await expect(
+      db
+        .prepare(`UPDATE awards SET term_end = ?, updated_at = ? WHERE id = ?`)
+        .bind('2030-01-01T00:00:00.000Z', nowIso(), s.awardId)
+        .run(),
+    ).rejects.toThrow(/amendment, not an update/);
+  });
+
+  it('will not reuse an old amendment row to wave a later change through', async () => {
+    // The amendment must be stamped at the same instant as the update, so a
+    // change recorded last month cannot authorise one made today.
+    const s = await offered();
+    await amendAward(db, ctx(), admin, s.awardId, {
+      awardedAmountCents: 1_800_000,
+      reason: 'Revised by the committee.',
+    });
+    await expect(
+      db
+        .prepare(`UPDATE awards SET awarded_amount_cents = ?, updated_at = ? WHERE id = ?`)
+        .bind(2_500_000, nowIso(), s.awardId)
+        .run(),
+    ).rejects.toThrow(/amendment, not an update/);
+  });
+
+  it('refuses to cut an award below what has already been paid', async () => {
+    /*
+     * Finance has moved that money. An award for less than was disbursed is a
+     * reconciliation problem the moment it is written, and the number to fix
+     * is not this one.
+     */
+    const s = await offered();
+    await acceptAward(db, ctx(), s.grantee, s.awardId, { attestationText: ATTESTATION });
+    const pay = await schedulePayment(db, ctx(), admin, s.awardId, {
+      amountCents: 2_000_000,
+      scheduledDate: new Date(Date.now() - 86_400_000).toISOString(),
+    });
+    await recordPayment(db, ctx(), admin, pay.id, {
+      paidDate: new Date().toISOString(),
+      referenceNumber: 'CHQ-1001',
+    });
+
+    const err = await appErrorFrom(
+      amendAward(db, ctx(), admin, s.awardId, {
+        awardedAmountCents: 1_000_000,
+        reason: 'Trying to cut it below what went out.',
+      }),
+    );
+    expect(err.code).toBe('CONFLICT');
+    expect(err.publicMessage).toMatch(/already been paid/i);
+  });
+
+  it('DOES allow cutting it below what is merely scheduled', async () => {
+    /*
+     * A reduced award with an over-committed schedule is exactly the situation
+     * an amendment exists to start. Refusing would force somebody to cancel
+     * payments before recording the fact that prompted it.
+     */
+    const s = await offered();
+    await acceptAward(db, ctx(), s.grantee, s.awardId, { attestationText: ATTESTATION });
+    await schedulePayment(db, ctx(), admin, s.awardId, {
+      amountCents: 2_000_000,
+      scheduledDate: new Date(Date.now() + 30 * 86_400_000).toISOString(),
+    });
+    const r = await amendAward(db, ctx(), admin, s.awardId, {
+      awardedAmountCents: 1_000_000,
+      reason: 'Reduced; the schedule needs rebuilding.',
+    });
+    expect(r.changed).toEqual(['awarded_amount_cents']);
+  });
+
+  it('refuses an amendment that changes nothing', async () => {
+    const s = await offered();
+    expect(
+      (await appErrorFrom(
+        amendAward(db, ctx(), admin, s.awardId, {
+          awardedAmountCents: 2_500_000,
+          reason: 'No change at all.',
+        }),
+      )).code,
+    ).toBe('VALIDATION_FAILED');
+  });
+
+  it('refuses one with no reason', async () => {
+    const s = await offered();
+    expect(
+      (await appErrorFrom(
+        amendAward(db, ctx(), admin, s.awardId, { awardedAmountCents: 1_000, reason: '  ' }),
+      )).code,
+    ).toBe('VALIDATION_FAILED');
+  });
+
+  it('refuses to amend a cancelled award', async () => {
+    // That grant did not happen; changing its terms produces a record of a
+    // commitment nobody made.
+    const s = await offered();
+    await declineAward(db, ctx(), s.grantee, s.awardId, 'We could not take it on.');
+    expect(
+      (await appErrorFrom(
+        amendAward(db, ctx(), admin, s.awardId, {
+          awardedAmountCents: 1_000_000,
+          reason: 'Trying anyway.',
+        }),
+      )).code,
+    ).toBe('CONFLICT');
+  });
+
+  it('refuses a term that ends before it starts', async () => {
+    const s = await offered();
+    const err = await appErrorFrom(
+      amendAward(db, ctx(), admin, s.awardId, {
+        termStart: '2027-06-01T00:00:00.000Z',
+        termEnd: '2027-01-01T00:00:00.000Z',
+        reason: 'Typo in the dates.',
+      }),
+    );
+    expect(err.code).toBe('VALIDATION_FAILED');
+    expect(err.publicMessage).toMatch(/end before it starts/i);
+  });
+
+  it('refuses a stale write rather than quietly dropping the other change', async () => {
+    /*
+     * CLAUDE.md names this as a known gap: "Two admins on one award produces
+     * last-write-wins unless optimistic locking is built deliberately." Two
+     * people working a decision week from the same spreadsheet is not
+     * hypothetical, and last-write-wins on an award amount means one of them
+     * believes a number that is not in the database.
+     */
+    const s = await offered();
+    const stale = (
+      await db.prepare(`SELECT updated_at AS u FROM awards WHERE id=?`).bind(s.awardId)
+        .first<{ u: string }>()
+    )!.u;
+
+    await amendAward(db, ctx(), admin, s.awardId, {
+      awardedAmountCents: 1_800_000,
+      reason: 'The first admin got there first.',
+    });
+
+    const err = await appErrorFrom(
+      amendAward(db, ctx(), admin, s.awardId, {
+        awardedAmountCents: 2_200_000,
+        reason: 'The second admin, working from a stale screen.',
+        expectedUpdatedAt: stale,
+      }),
+    );
+    expect(err.code).toBe('CONFLICT');
+    /*
+     * THE EXACT WORDING, because there are two layers here and a loose match
+     * cannot tell them apart. The pre-flight comparison says "Reload and look
+     * at it again"; the UPDATE's own `AND updated_at = ?` predicate, which
+     * catches a change landing between the read and the write, says "Somebody
+     * else changed this award first." A regex matching both passed with the
+     * pre-flight check deleted -- a mutant proved it -- and so reported
+     * nothing about the layer this test is named for.
+     */
+    expect(err.publicMessage).toMatch(/Reload and look at it again/);
+
+    // And the first admin's number survived.
+    const award = await db
+      .prepare(`SELECT awarded_amount_cents AS c FROM awards WHERE id=?`)
+      .bind(s.awardId)
+      .first<{ c: number }>();
+    expect(award?.c).toBe(1_800_000);
+  });
+
+  it('refuses everyone but an admin', async () => {
+    const s = await offered();
+    for (const who of [reviewerSession(newId()), s.grantee]) {
+      expect(
+        (await appErrorFrom(
+          amendAward(db, ctx(), who, s.awardId, {
+            awardedAmountCents: 1, reason: 'Not mine to change.',
+          }),
+        )).code,
+      ).toBe('NOT_FOUND');
+    }
+    expect((await appErrorFrom(amendmentHistory(db, s.grantee, s.awardId))).code)
+      .toBe('NOT_FOUND');
+  });
+
+  it('keeps the history append-only', async () => {
+    // An amendment history that can be rewritten answers nothing, and these
+    // describe money.
+    const s = await offered();
+    await amendAward(db, ctx(), admin, s.awardId, {
+      awardedAmountCents: 1_800_000,
+      reason: 'Revised by the committee.',
+    });
+    const one = (await amendmentHistory(db, admin, s.awardId))[0]!;
+    await expect(
+      db.prepare(`UPDATE award_amendments SET new_value='1' WHERE id=?`).bind(one.id).run(),
+    ).rejects.toThrow(/append-only/);
+    await expect(
+      db.prepare(`DELETE FROM award_amendments WHERE id=?`).bind(one.id).run(),
+    ).rejects.toThrow(/append-only/);
   });
 });

@@ -46,7 +46,10 @@ import {
 import {
   exportScorecard, planScorecardImport, applyScorecardImport, reviewersInCycle,
 } from './lib/scorecards';
-import { createAwardFromDecision, budgetByProgram } from './lib/awards';
+import {
+  createAwardFromDecision, budgetByProgram, amendAward, amendmentHistory,
+  type AmendmentInput,
+} from './lib/awards';
 import { publicGrants, publishableAwards, setAwardPublic } from './lib/publicGrants';
 import {
   awardsAwaitingResponse, acceptAward, declineAward, recordAwardDocument, awardPaperwork,
@@ -1121,6 +1124,50 @@ const routes: readonly Route[] = [
         ctx,
       );
     },
+  },
+  {
+    /*
+     * Changing an award, with a record of the change.
+     *
+     * 0012 has refused to let an awarded amount be updated since Phase 0,
+     * pointing at an amendments table Phase 4 never built -- so an award
+     * recorded at the wrong amount could not be corrected through this system
+     * at all, and the documented remedy amounted to editing the production
+     * database by hand.
+     *
+     * PATCH, not POST: this changes an existing thing rather than creating
+     * one, and the body is a partial.
+     */
+    method: 'PATCH',
+    path: '/api/awards/:id',
+    roles: ADMIN_ONLY,
+    handler: async ({ request, env, ctx, params, session }) => {
+      const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+      const input: AmendmentInput = { reason: String(body.reason ?? '') };
+      // Present-or-absent matters here: an omitted field is "leave it alone"
+      // and an explicit null is "clear it". Copying the whole body would turn
+      // every absent field into an attempted change to undefined.
+      if (body.awardedAmountCents !== undefined) {
+        input.awardedAmountCents = Number(body.awardedAmountCents);
+      }
+      for (const key of ['termStart', 'termEnd', 'announcementDate'] as const) {
+        if (key in body) {
+          input[key] = body[key] == null ? null : String(body[key]);
+        }
+      }
+      if (typeof body.expectedUpdatedAt === 'string') {
+        input.expectedUpdatedAt = body.expectedUpdatedAt;
+      }
+      return json(await amendAward(env.DB, ctx, session, params.id!, input), ctx);
+    },
+  },
+  {
+    /** Every change ever made to one award. Admin-only, like the award. */
+    method: 'GET',
+    path: '/api/awards/:id/amendments',
+    roles: ADMIN_ONLY,
+    handler: async ({ env, ctx, params, session }) =>
+      json({ amendments: await amendmentHistory(env.DB, session, params.id!) }, ctx),
   },
   {
     /*

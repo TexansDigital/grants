@@ -179,10 +179,28 @@ export interface ScoringSheet {
   editable: boolean;
 }
 
+export interface AmendmentRow {
+  id: string;
+  awardId: string;
+  amendedAt: string;
+  /** The amending admin's email, or their id if the user row is gone. */
+  amendedBy: string;
+  fieldChanged: 'awarded_amount_cents' | 'term_start' | 'term_end' | 'announcement_date';
+  oldValue: string | null;
+  newValue: string | null;
+  reason: string;
+}
+
 export interface AwardPaperwork {
   awardId: string;
   organizationName: string;
   status: string;
+  awardedAmountCents: number;
+  termStart: string | null;
+  termEnd: string | null;
+  announcementDate: string | null;
+  /** The token an amendment sends back, so two admins cannot overwrite each other. */
+  updatedAt: string;
   acceptedAt: string | null;
   declinedByGranteeAt: string | null;
   granteeResponseNote: string | null;
@@ -727,6 +745,26 @@ export const api = {
     request<{ assignmentId: string }>(
       `/api/review/assignments/${encodeURIComponent(assignmentId)}/reopen`,
       { method: 'POST', body: {} },
+    ),
+  amendments: (awardId: string, signal?: AbortSignal) =>
+    get<{ amendments: AmendmentRow[] }>(
+      `/api/awards/${encodeURIComponent(awardId)}/amendments`,
+      signal,
+    ),
+  amendAward: (
+    awardId: string,
+    body: {
+      awardedAmountCents?: number;
+      termStart?: string | null;
+      termEnd?: string | null;
+      announcementDate?: string | null;
+      reason: string;
+      expectedUpdatedAt?: string;
+    },
+  ) =>
+    request<{ awardId: string; changed: string[]; updatedAt: string }>(
+      `/api/awards/${encodeURIComponent(awardId)}`,
+      { method: 'PATCH', body },
     ),
   awardPaperwork: (awardId: string, signal?: AbortSignal) =>
     get<AwardPaperwork>(`/api/awards/${encodeURIComponent(awardId)}/paperwork`, signal),

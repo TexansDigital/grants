@@ -309,3 +309,311 @@ export async function budgetByProgram(
     overBudget: r.totalBudgetCents !== null && r.committedCents > r.totalBudgetCents,
   }));
 }
+
+// ---------------------------------------------------------------------------
+// Amending one
+// ---------------------------------------------------------------------------
+
+/** The four fields an amendment may move. Everything else has its own path. */
+export const AMENDABLE = [
+  'awarded_amount_cents',
+  'term_start',
+  'term_end',
+  'announcement_date',
+] as const;
+export type AmendableField = (typeof AMENDABLE)[number];
+
+export interface AmendmentInput {
+  /** Integer cents. Omit to leave the amount alone; null is not an amount. */
+  awardedAmountCents?: number;
+  termStart?: string | null;
+  termEnd?: string | null;
+  announcementDate?: string | null;
+  /** Required. The whole content of an amendment; the amount is on the award. */
+  reason: string;
+  /**
+   * The `updated_at` the caller believes the award carries.
+   *
+   * OPTIMISTIC LOCKING, and CLAUDE.md names its absence as a known gap: "Two
+   * admins on one award produces last-write-wins unless optimistic locking is
+   * built deliberately." Two people working a decision week from the same
+   * spreadsheet is not a hypothetical, and last-write-wins on an award amount
+   * means one of them believes a number that is not in the database. Omit it
+   * and the write proceeds unguarded -- which is honest about scripts and
+   * imports, and is never what the UI does.
+   */
+  expectedUpdatedAt?: string;
+}
+
+export interface AmendmentRow {
+  id: string;
+  awardId: string;
+  amendedAt: string;
+  amendedBy: string;
+  fieldChanged: AmendableField;
+  oldValue: string | null;
+  newValue: string | null;
+  reason: string;
+}
+
+/** Every change ever made to one award, oldest first. */
+export async function amendmentHistory(
+  db: D1Database,
+  session: Session,
+  awardId: string,
+): Promise<AmendmentRow[]> {
+  if (session.role !== 'admin') throw notFound('award');
+  const { results } = await db
+    .prepare(
+      `SELECT a.id, a.award_id AS awardId, a.amended_at AS amendedAt,
+              COALESCE(u.email, a.amended_by) AS amendedBy,
+              a.field_changed AS fieldChanged,
+              a.old_value AS oldValue, a.new_value AS newValue, a.reason
+         FROM award_amendments a
+         LEFT JOIN users u ON u.id = a.amended_by
+        WHERE a.award_id = ?
+        ORDER BY a.amended_at, a.created_at`,
+    )
+    .bind(awardId)
+    .all<AmendmentRow>();
+  return results ?? [];
+}
+
+/**
+ * Change an award, and record the change.
+ *
+ * WHY THIS EXISTS AT ALL. 0012 refuses to let an awarded amount be updated,
+ * pointing at an amendments table that Phase 4 never built -- so an award
+ * recorded at the wrong amount could not be corrected through this system in
+ * any way, and the documented remedy amounted to editing the production
+ * database by hand. CLAUDE.md's Module 3 asks for "amendments tracked, never
+ * overwritten"; this is that, and 0024's triggers make it the only door.
+ *
+ * WHAT IT WILL NOT DO:
+ *
+ *   - Amend a cancelled award. That grant did not happen; changing its terms
+ *     produces a record of a commitment nobody made.
+ *   - Cut the amount below what has already been PAID. Finance has moved that
+ *     money. An award for less than was disbursed is a reconciliation problem
+ *     the moment it is written, and the number to fix is not this one.
+ *   - Accept an amendment that changes nothing. A reason attached to no change
+ *     is a row somebody has to explain.
+ *
+ * WHAT IT DELIBERATELY WILL DO: cut the amount below what is SCHEDULED. A
+ * reduced award with an over-committed schedule is exactly the situation an
+ * amendment exists to start, and the payment ledger already says, in words,
+ * when a schedule overruns its award. Refusing here would force somebody to
+ * cancel payments before they are allowed to record the fact that prompted it.
+ */
+export async function amendAward(
+  db: D1Database,
+  ctx: RequestContext,
+  session: Session,
+  awardId: string,
+  input: AmendmentInput,
+): Promise<{ awardId: string; changed: AmendableField[]; updatedAt: string }> {
+  if (session.role !== 'admin') throw notFound('award');
+
+  const reason = (input.reason ?? '').trim();
+  if (reason.length < 3) {
+    throw new AppError('VALIDATION_FAILED', 'Say why this award is being changed.', {
+      internalMessage: 'amendment with an empty or near-empty reason',
+      severity: 'warn',
+      fieldErrors: [{ field: 'reason', message: 'Say why this award is being changed.' }],
+    });
+  }
+
+  const award = await db
+    .prepare(
+      `SELECT id, status, updated_at AS updatedAt,
+              awarded_amount_cents AS amountCents,
+              term_start AS termStart, term_end AS termEnd,
+              announcement_date AS announcementDate,
+              COALESCE((
+                SELECT SUM(p.amount_cents) FROM payments p
+                 WHERE p.award_id = awards.id AND p.deleted_at IS NULL
+                   AND p.status = 'paid'
+              ), 0) AS paidCents
+         FROM awards WHERE id = ? AND deleted_at IS NULL`,
+    )
+    .bind(awardId)
+    .first<{
+      id: string; status: string; updatedAt: string; amountCents: number;
+      termStart: string | null; termEnd: string | null;
+      announcementDate: string | null; paidCents: number;
+    }>();
+  if (!award) throw notFound('award');
+
+  if (award.status === 'cancelled') {
+    throw new AppError('CONFLICT', 'This award was cancelled, so there is nothing to amend.', {
+      internalMessage: `amendment on cancelled award ${awardId}`,
+      severity: 'warn',
+    });
+  }
+
+  if (input.expectedUpdatedAt !== undefined && input.expectedUpdatedAt !== award.updatedAt) {
+    /*
+     * Somebody else changed this award between the screen loading and the
+     * button being pressed. Refusing and saying so is the whole point: the
+     * alternative is that their change disappears and neither of them knows.
+     */
+    throw new AppError(
+      'CONFLICT',
+      'Somebody else changed this award while you were working on it. Reload and look at it again.',
+      {
+        internalMessage: `stale amendment on ${awardId}: expected ${input.expectedUpdatedAt}, found ${award.updatedAt}`,
+        severity: 'warn',
+      },
+    );
+  }
+
+  const changes: { field: AmendableField; oldValue: string | null; newValue: string | null }[] = [];
+
+  if (input.awardedAmountCents !== undefined) {
+    assertCents(input.awardedAmountCents, 'awarded amount');
+    if (input.awardedAmountCents > MAX_CENTS) {
+      throw new AppError('VALIDATION_FAILED', 'That amount is too large.', {
+        internalMessage: `amendment amount ${input.awardedAmountCents} above MAX_CENTS`,
+        severity: 'warn',
+      });
+    }
+    if (input.awardedAmountCents < award.paidCents) {
+      throw new AppError(
+        'CONFLICT',
+        'This award cannot be reduced below what has already been paid out.',
+        {
+          internalMessage:
+            `amendment to ${input.awardedAmountCents} below paid ${award.paidCents} on ${awardId}`,
+          severity: 'warn',
+          fieldErrors: [
+            { field: 'awardedAmountCents', message: 'Less than has already been paid.' },
+          ],
+        },
+      );
+    }
+    if (input.awardedAmountCents !== award.amountCents) {
+      changes.push({
+        field: 'awarded_amount_cents',
+        // CENTS AS A STRING, never formatted. A record that says "$18,000"
+        // cannot be compared with the column it came from.
+        oldValue: String(award.amountCents),
+        newValue: String(input.awardedAmountCents),
+      });
+    }
+  }
+
+  const dateFields: [keyof AmendmentInput, AmendableField, string | null][] = [
+    ['termStart', 'term_start', award.termStart],
+    ['termEnd', 'term_end', award.termEnd],
+    ['announcementDate', 'announcement_date', award.announcementDate],
+  ];
+  for (const [key, field, current] of dateFields) {
+    if (!(key in input)) continue;
+    const raw = input[key] as string | null | undefined;
+    const next = raw === null || raw === '' ? null : String(raw);
+    if (next !== null && !isDate(next)) {
+      throw new AppError('VALIDATION_FAILED', 'That is not a date we can read.', {
+        internalMessage: `amendment ${field} unparseable: ${next}`,
+        severity: 'warn',
+        fieldErrors: [{ field: String(key), message: 'That is not a date we can read.' }],
+      });
+    }
+    if (next !== current) changes.push({ field, oldValue: current, newValue: next });
+  }
+
+  if (changes.length === 0) {
+    throw new AppError('VALIDATION_FAILED', 'Nothing on this award would change.', {
+      internalMessage: `amendment on ${awardId} with no changes`,
+      severity: 'warn',
+    });
+  }
+
+  // The resulting term, checked here so the schema CHECK does not reach an
+  // admin as an INTERNAL error from a constraint name.
+  const nextStart = changes.find((c) => c.field === 'term_start')?.newValue ?? award.termStart;
+  const nextEnd = changes.find((c) => c.field === 'term_end')?.newValue ?? award.termEnd;
+  if (nextStart && nextEnd && nextEnd < nextStart) {
+    throw new AppError('VALIDATION_FAILED', 'A grant term cannot end before it starts.', {
+      internalMessage: `amendment term ${nextStart}..${nextEnd} on ${awardId}`,
+      severity: 'warn',
+      fieldErrors: [{ field: 'termEnd', message: 'This is before the term starts.' }],
+    });
+  }
+
+  const now = nowIso();
+
+  /*
+   * THE AMENDMENT ROWS GO FIRST, and the ordering is load-bearing rather than
+   * stylistic. 0024's triggers let the amount and the term move only when a
+   * matching amendment row already exists stamped at this same instant; in a
+   * D1 batch the statements run in order, so an UPDATE placed before its
+   * INSERT is refused by the database. That is the guarantee: the columns
+   * cannot move without the record, no matter what a future caller does.
+   */
+  const statements = changes.map((c) =>
+    db
+      .prepare(
+        `INSERT INTO award_amendments
+           (id, award_id, amended_at, amended_by, field_changed, old_value, new_value,
+            reason, created_at)
+         VALUES (?,?,?,?,?,?,?,?,?)`,
+      )
+      .bind(newId(), awardId, now, session.userId, c.field, c.oldValue, c.newValue, reason, now),
+  );
+
+  const sets = changes.map((c) => `${c.field} = ?`).join(', ');
+  const binds = changes.map((c) =>
+    c.field === 'awarded_amount_cents' ? Number(c.newValue) : c.newValue,
+  );
+  statements.push(
+    db
+      .prepare(
+        `UPDATE awards SET ${sets}, updated_at = ?
+          WHERE id = ? AND deleted_at IS NULL AND status <> 'cancelled'
+            ${input.expectedUpdatedAt !== undefined ? 'AND updated_at = ?' : ''}`,
+      )
+      .bind(
+        ...binds,
+        now,
+        awardId,
+        ...(input.expectedUpdatedAt !== undefined ? [input.expectedUpdatedAt] : []),
+      ),
+  );
+
+  statements.push(
+    auditStatement(
+      db,
+      ctx,
+      {
+        action: 'award.amended',
+        entityType: 'award',
+        entityId: awardId,
+        before: Object.fromEntries(changes.map((c) => [c.field, c.oldValue])),
+        after: {
+          ...Object.fromEntries(changes.map((c) => [c.field, c.newValue])),
+          reason,
+          actor_user_id: session.userId,
+        },
+      },
+      {
+        guard: {
+          sql: `EXISTS (SELECT 1 FROM awards WHERE id = ? AND updated_at = ?)`,
+          binds: [awardId, now],
+        },
+      },
+    ),
+  );
+
+  const results = await db.batch(statements);
+  const write = results[changes.length];
+  if ((write?.meta?.changes ?? 0) === 0) {
+    // The re-asserted predicate did not match: cancelled, deleted, or moved
+    // under us between the read and the write.
+    throw new AppError('CONFLICT', 'Somebody else changed this award first.', {
+      internalMessage: `amendment UPDATE on ${awardId} matched no row`,
+      severity: 'warn',
+    });
+  }
+
+  return { awardId, changed: changes.map((c) => c.field), updatedAt: now };
+}

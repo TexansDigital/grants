@@ -105,7 +105,7 @@ async function stubApi(page, s) {
                     dueDate: '2027-05-30T12:00:00.000Z', state: 'not_open_yet',
                     outstanding: false, formDefinitionId: null,
                     periodStart: null, periodEnd: null, opensAt: null,
-                    submittedAt: null, adminFeedback: null,
+                    submittedAt: null, adminFeedback: null, attachments: [],
                   },
                 ],
               },

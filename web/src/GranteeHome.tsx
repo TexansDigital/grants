@@ -164,7 +164,18 @@ function AwardCard({
                   </button>
                 )}
               </div>
-              {report.attachments.length > 0 && <FiledFiles files={report.attachments} />}
+              {/*
+                DEFENSIVE READ, and not out of habit. A grantee's browser can
+                hold a cached bundle from before this field existed while the
+                Worker serves the new payload, or the reverse during a deploy
+                -- and `report.attachments.length` on an absent field throws,
+                which takes out the whole page. This is the one screen a
+                grantee has three clicks to file a report on; losing it over an
+                optional list of filenames is not a trade worth making.
+              */}
+              {(report.attachments ?? []).length > 0 && (
+                <FiledFiles files={report.attachments ?? []} />
+              )}
             </li>
           ))}
         </ul>

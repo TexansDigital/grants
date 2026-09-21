@@ -24,6 +24,7 @@ import type { ReactElement } from 'react';
 import { ApiError, api } from './api';
 import type { AwardPaperwork as Paperwork } from './api';
 import { formatCents } from '../../src/lib/money';
+import { AwardAmendments } from './AwardAmendments';
 
 interface Props {
   awardId: string;
@@ -84,6 +85,17 @@ export function AwardPaperwork({ awardId }: Props): ReactElement | null {
   const row = data.documents.find((d) => d.key === recording) ?? null;
 
   return (
+    <>
+    {/*
+      THE AMENDMENTS PANEL IS RENDERED FROM HERE rather than beside this one,
+      because it needs the award as this screen last read it -- including
+      `updatedAt`, the token that stops two admins overwriting each other. A
+      sibling would fetch the award a second time and could hold a different
+      version of it, which is the exact failure optimistic locking exists to
+      prevent.
+    */}
+    <AwardAmendments awardId={awardId} award={data} onAmended={() => void load()} />
+
     <section className="panel">
       <h3>Before funds are released</h3>
 
@@ -235,5 +247,6 @@ export function AwardPaperwork({ awardId }: Props): ReactElement | null {
         </div>
       )}
     </section>
+    </>
   );
 }

@@ -433,6 +433,18 @@ export interface AwardPaperwork {
   awardId: string;
   organizationName: string;
   status: string;
+  /*
+   * THE AMENDABLE STATE TRAVELS WITH THE PAPERWORK, so the amendment form has
+   * the award's current values and its `updated_at` without a third round
+   * trip. `updated_at` is not decoration: it is the token an amendment sends
+   * back as `expectedUpdatedAt`, which is what stops two admins working the
+   * same decision week from silently overwriting each other.
+   */
+  awardedAmountCents: number;
+  termStart: string | null;
+  termEnd: string | null;
+  announcementDate: string | null;
+  updatedAt: string;
   acceptedAt: string | null;
   declinedByGranteeAt: string | null;
   /** The grantee's own words, whichever way they answered. */
@@ -460,6 +472,9 @@ export async function awardPaperwork(
   const row = await db
     .prepare(
       `SELECT w.id, w.status, w.accepted_at AS acceptedAt,
+              w.awarded_amount_cents AS awardedAmountCents,
+              w.term_start AS termStart, w.term_end AS termEnd,
+              w.announcement_date AS announcementDate, w.updated_at AS updatedAt,
               w.declined_by_grantee_at AS declinedByGranteeAt,
               w.grantee_response_note AS granteeResponseNote,
               w.w9_received_at AS w9, w.agreement_signed_at AS agreement,
@@ -480,6 +495,8 @@ export async function awardPaperwork(
       declinedByGranteeAt: string | null; granteeResponseNote: string | null;
       w9: string | null; agreement: string | null; mediaRelease: string | null;
       organizationName: string; scheduledCents: number;
+      awardedAmountCents: number; termStart: string | null; termEnd: string | null;
+      announcementDate: string | null; updatedAt: string;
     }>();
   if (!row) throw notFound('award');
 
@@ -497,6 +514,11 @@ export async function awardPaperwork(
     awardId,
     organizationName: row.organizationName,
     status: row.status,
+    awardedAmountCents: row.awardedAmountCents,
+    termStart: row.termStart,
+    termEnd: row.termEnd,
+    announcementDate: row.announcementDate,
+    updatedAt: row.updatedAt,
     acceptedAt: row.acceptedAt,
     declinedByGranteeAt: row.declinedByGranteeAt,
     granteeResponseNote: row.granteeResponseNote,
