@@ -34,6 +34,7 @@ import { RubricBuilder } from './RubricBuilder';
 import { ReviewQueue } from './ReviewQueue';
 import { ScoringSheet } from './ScoringSheet';
 import { Communications } from './Communications';
+import { Scorecards } from './Scorecards';
 import { ApplicationDetail } from './ApplicationDetail';
 import { Shell } from './Shell';
 import {
@@ -58,6 +59,7 @@ type Route =
   | { name: 'reviewQueue' }
   | { name: 'scoringSheet'; assignmentId: string }
   | { name: 'communications'; cycleId: string }
+  | { name: 'scorecards'; cycleId: string }
   | { name: 'openCycles' }
   | { name: 'signIn' }
   | { name: 'eligibility'; cycleId: string }
@@ -88,6 +90,9 @@ function parseRoute(pathname: string): Route | null {
   if (parts.length === 1 && parts[0] === 'my-reviews') return { name: 'reviewQueue' };
   if (parts.length === 3 && parts[0] === 'cycles' && parts[2] === 'letters' && parts[1]) {
     return { name: 'communications', cycleId: parts[1] };
+  }
+  if (parts.length === 3 && parts[0] === 'cycles' && parts[2] === 'scorecards' && parts[1]) {
+    return { name: 'scorecards', cycleId: parts[1] };
   }
   if (parts.length === 3 && parts[0] === 'my-reviews' && parts[2] === 'score' && parts[1]) {
     return { name: 'scoringSheet', assignmentId: parts[1] };
@@ -304,7 +309,8 @@ export function App(): ReactElement {
           route?.name === 'rubrics' ||
           route?.name === 'reviewQueue' ||
           route?.name === 'scoringSheet' ||
-          route?.name === 'communications'
+          route?.name === 'communications' ||
+          route?.name === 'scorecards'
         ) {
           const [s, p, c, f] = await Promise.all([
             api.session(signal),
@@ -578,6 +584,12 @@ export function App(): ReactElement {
     );
   }
 
+  if (route.name === 'scorecards') {
+    return shell(
+      <Scorecards cycleId={route.cycleId} onBack={() => navigate('/configuration')} />,
+    );
+  }
+
   if (route.name === 'communications') {
     return shell(
       <Communications cycleId={route.cycleId} onBack={() => navigate('/configuration')} />,
@@ -648,6 +660,7 @@ export function App(): ReactElement {
       onOpenForm={(id) => navigate(`/forms/${encodeURIComponent(id)}`)}
       onOpenRubrics={(id) => navigate(`/programs/${encodeURIComponent(id)}/rubrics`)}
       onOpenLetters={(id) => navigate(`/cycles/${encodeURIComponent(id)}/letters`)}
+      onOpenScorecards={(id) => navigate(`/cycles/${encodeURIComponent(id)}/scorecards`)}
     />,
   );
 }

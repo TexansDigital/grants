@@ -233,6 +233,30 @@ export interface CommunicationQueue {
   declinesUnlocked: boolean;
 }
 
+export interface CycleReviewer {
+  reviewerUserId: string;
+  email: string;
+  assigned: number;
+  completed: number;
+  conflicts: number;
+}
+
+export interface ScorecardPlan {
+  ok: boolean;
+  rubricId: string | null;
+  rubricVersion: number | null;
+  issues: { row: number | null; message: string }[];
+  assignments: {
+    assignmentId: string;
+    organization: string;
+    reviewerEmail: string;
+    scored: number;
+    cleared: number;
+    unchanged: number;
+  }[];
+  totalScores: number;
+}
+
 export interface SearchHit {
   application_id: string;
   rank: number;
@@ -454,6 +478,21 @@ export const api = {
    * row -- and because a GET would let a link prefetcher issue live download
    * credentials for every financial statement on a page nobody clicked.
    */
+  cycleReviewers: (cycleId: string, signal?: AbortSignal) =>
+    get<{ cycleId: string; reviewers: CycleReviewer[] }>(
+      `/api/cycles/${encodeURIComponent(cycleId)}/reviewers`,
+      signal,
+    ),
+  previewScorecard: (cycleId: string, csv: string) =>
+    request<ScorecardPlan>(`/api/cycles/${encodeURIComponent(cycleId)}/scorecard/preview`, {
+      method: 'POST',
+      body: { csv },
+    }),
+  importScorecard: (cycleId: string, csv: string) =>
+    request<{ applied: number; assignments: number }>(
+      `/api/cycles/${encodeURIComponent(cycleId)}/scorecard/import`,
+      { method: 'POST', body: { csv } },
+    ),
   communications: (cycleId: string, signal?: AbortSignal) =>
     get<CommunicationQueue>(
       `/api/cycles/${encodeURIComponent(cycleId)}/communications`,

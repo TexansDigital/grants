@@ -1217,3 +1217,66 @@ declines is a long afternoon and is the next thing to build here. Nothing yet
 creates the award record from an awarded decision, so that step is manual. The
 Foundation still owes the decline wording itself; the machinery does not need it
 and the first real send does.
+
+## §39 — The offline scorecard, and what it still cannot fix
+
+**Date:** 2026-09-21
+**Status:** In force. Completes Phase 3.
+
+CLAUDE.md's three objections to uploaded scorecards are that they "drift from
+the rubric, carry no conflict declaration, and produce no audit trail". Two are
+fixed here. The third is not fixable, and is why this stays a fallback.
+
+**Drift is fixed by a stamp on every row.** Each exported file carries the
+rubric id, its version, and the criterion key on every line. A file filled in
+against last year's rubric looks exactly like one filled in against this
+year's, right up to the point where the scores land against whatever keys
+happen to match and the totals are wrong invisibly. The import compares the
+stamp before reading a single score and refuses on any mismatch — one fatal
+issue naming the versions, not sixty row errors that all trace back to it.
+
+**The audit trail is fixed by writing through `saveScores`.** An imported score
+takes the same path as one typed in the app: the same range checks, the same
+update-rather-than-replace, and the same audit row — which names the admin who
+imported it separately from the reviewer it belongs to.
+
+**What is not fixed.** A spreadsheet emailed back carries no evidence that the
+person who filled it in was the person it was sent to, and no moment at which
+they were asked about a conflict. The screen says this in the words above the
+controls, because the person choosing this route is the one who should know its
+cost.
+
+**One row per application per criterion, not a grid.** A grid with criteria as
+columns is nicer to read and impossible to validate: a reviewer who inserts a
+column, or whose spreadsheet reorders them, produces a file whose scores are
+silently against the wrong criteria. A long file carries the key on every row,
+so a reordered file is still correct and a renamed one is refused.
+
+**The stamp is columns, not a preamble.** A preamble above the header is what
+most systems do and is why most scorecard imports are fragile: Excel reformats
+it and reviewers delete "instructions" rows. Repeating the stamp on every row
+is redundant and survives both.
+
+**A conflict declared after the file went out blocks the import.** The
+scorecard was emailed Monday; on Wednesday the consultant realised they know the
+executive director and said so. Importing anyway writes a score from somebody
+who has since said they should not be scoring it.
+
+**Any issue refuses the whole file.** A partial import leaves a review that is
+neither what the reviewer sent nor what was there before, and nobody can tell
+which rows landed.
+
+**Re-planned at apply time.** The plan is a description, not a token. Between
+the preview and the click somebody may declare a conflict, decide the
+application, or give the cycle a new rubric.
+
+**Ten mutants, nine killed on the first run.** The survivor — a blank score cell
+read as zero — was alive because the file was parsed twice, once to validate and
+once to write, and the two parses disagreed. Either reading might have been the
+wrong one and nothing would have shown which. The planner now returns the rows
+it validated and the writer uses them: one parse, one answer.
+
+**Known gaps.** No file picker — the CSV is pasted, which is fine for the one
+or two consultants a cycle and poor for more. Nothing marks a review complete
+on import; an imported scorecard fills the scores and an admin still submits
+the review. Reviewers cannot import their own file, only admins.

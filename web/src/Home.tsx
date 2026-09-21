@@ -24,6 +24,8 @@ interface Props {
   onOpenRubrics: (programId: string) => void;
   /** The decision-letter desk for one cycle. */
   onOpenLetters: (cycleId: string) => void;
+  /** The offline scorecard fallback for one cycle. */
+  onOpenScorecards: (cycleId: string) => void;
   /** Reload the configuration after a form is built or published. */
   onChanged: () => void;
 }
@@ -36,6 +38,7 @@ export function Home({
   onOpenForm,
   onOpenRubrics,
   onOpenLetters,
+  onOpenScorecards,
   onChanged,
 }: Props): ReactElement {
   const cyclesByProgram = new Map<string, CycleRow[]>();
@@ -149,6 +152,15 @@ export function Home({
                               onClick={() => onOpenLetters(c.id)}
                             >
                               Letters<span className="sr-only"> for {c.name}</span>
+                            </button>
+                          )}
+                          {isAdmin && (
+                            <button
+                              type="button"
+                              className="btn secondary small"
+                              onClick={() => onOpenScorecards(c.id)}
+                            >
+                              Scorecards<span className="sr-only"> for {c.name}</span>
                             </button>
                           )}
                         </td>

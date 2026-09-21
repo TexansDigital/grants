@@ -44,6 +44,9 @@ import {
   recordManualCommunication,
 } from './lib/decisionComms';
 import {
+  exportScorecard, planScorecardImport, applyScorecardImport, reviewersInCycle,
+} from './lib/scorecards';
+import {
   granteeHome, granteeMe, readReport, autosaveReport, fileReport,
 } from './lib/granteeRoutes';
 import { requireStaffSession } from './lib/auth';
@@ -472,6 +475,7 @@ const routes: readonly Route[] = [
       '/my-reviews',
       '/my-reviews/:id/score',
       '/cycles/:id/letters',
+      '/cycles/:id/scorecards',
     ] as const
   ).map(
     (path) =>
@@ -999,6 +1003,72 @@ const routes: readonly Route[] = [
           status: String(body.status ?? '') as DecisionStatus,
           notes: body.notes == null ? null : String(body.notes),
         }),
+        ctx,
+      );
+    },
+  },
+
+  // ---- offline scorecards --------------------------------------------------
+  //
+  // THE FALLBACK, NOT THE PATH. CLAUDE.md: this exists so a consultant does not
+  // block a decision. Uploaded scorecards carry no conflict declaration and no
+  // evidence that the person who filled one in is the person it was sent to.
+  // The import fixes what can be fixed -- it writes the same audit rows as
+  // in-app scoring and refuses a file made for a different rubric version --
+  // and the rest is why this stays the exception.
+  {
+    /*
+     * A reviewer may export their OWN; an admin may export anyone's, because
+     * sending a consultant their scorecard is the whole point. Anyone else's
+     * is a 404 in the library, so the id in the URL cannot confirm that a
+     * reviewer exists.
+     */
+    method: 'GET',
+    path: '/api/cycles/:id/scorecard/:reviewerId',
+    roles: ['admin', 'reviewer'],
+    handler: async ({ env, ctx, params, session }) => {
+      const out = await exportScorecard(env.DB, session, params.id!, params.reviewerId!);
+      return new Response(out.csv, {
+        status: 200,
+        headers: {
+          ...securityHeaders(ctx.requestId),
+          'content-type': 'text/csv; charset=utf-8',
+          'content-disposition': `attachment; filename="${out.filename}"`,
+        },
+      });
+    },
+  },
+  {
+    // Who to send one to. Not reviewCoverage, which answers the other
+    // question: how many reviewers each APPLICATION has.
+    method: 'GET',
+    path: '/api/cycles/:id/reviewers',
+    roles: ADMIN_ONLY,
+    handler: async ({ env, ctx, params, session }) =>
+      json(await reviewersInCycle(env.DB, session, params.id!), ctx),
+  },
+  {
+    // Writes nothing. A file somebody edited in Excel over a weekend is not a
+    // thing to apply unseen.
+    method: 'POST',
+    path: '/api/cycles/:id/scorecard/preview',
+    roles: ADMIN_ONLY,
+    handler: async ({ request, env, ctx, params, session }) => {
+      const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+      return json(
+        await planScorecardImport(env.DB, session, params.id!, String(body.csv ?? '')),
+        ctx,
+      );
+    },
+  },
+  {
+    method: 'POST',
+    path: '/api/cycles/:id/scorecard/import',
+    roles: ADMIN_ONLY,
+    handler: async ({ request, env, ctx, params, session }) => {
+      const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+      return json(
+        await applyScorecardImport(env.DB, ctx, session, params.id!, String(body.csv ?? '')),
         ctx,
       );
     },
