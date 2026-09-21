@@ -30,6 +30,7 @@ import { newId } from './ids';
 import { nowIso } from './time';
 import { auditStatement } from './audit';
 import { WEIGHT_ONE_BP } from './rubrics';
+import { conflictIsOutstanding } from './reviewAssign';
 
 export interface ScoringCriterion {
   id: string;
@@ -56,6 +57,8 @@ export interface ScoringSheet {
   completedAt: string | null;
   /** Set when this reviewer disclosed a conflict and nobody has acted on it. */
   conflictDeclaredAt: string | null;
+  /** When an admin recorded that it was not one. Null while it still blocks. */
+  conflictClearedAt: string | null;
   /** False once the application is decided: a settled decision is not rescored. */
   editable: boolean;
 }
@@ -66,6 +69,8 @@ interface AssignmentContext {
   reviewerUserId: string;
   completedAt: string | null;
   conflictDeclaredAt: string | null;
+  /** When an admin recorded that it was not one. Null while it still blocks. */
+  conflictClearedAt: string | null;
   decidedAt: string | null;
   rubricId: string | null;
   projectTitle: string | null;
@@ -97,6 +102,7 @@ async function loadAssignment(
               ra.reviewer_user_id AS reviewerUserId,
               ra.completed_at AS completedAt,
               ra.conflict_declared_at AS conflictDeclaredAt,
+              ra.conflict_cleared_at AS conflictClearedAt,
               a.decided_at AS decidedAt, a.project_title AS projectTitle,
               c.rubric_id AS rubricId,
               o.legal_name AS organizationName
@@ -172,11 +178,14 @@ export async function loadScoringSheet(
     totalSoFarBp: rows.reduce((t, c) => t + (c.score ?? 0) * c.weight_bp, 0),
     completedAt: a.completedAt,
     conflictDeclaredAt: a.conflictDeclaredAt,
+    conflictClearedAt: a.conflictClearedAt,
     // `completedAt` belongs here too: a submitted review is not editable
     // until it is reopened, and omitting it let the UI offer inputs the API
-    // now refuses.
+    // now refuses. A DECLARED conflict is not enough on its own either --
+    // 0023 lets an admin resolve one, and a resolved disclosure must not keep
+    // the sheet locked.
     editable:
-      a.decidedAt === null && a.conflictDeclaredAt === null && a.completedAt === null,
+      a.decidedAt === null && !conflictIsOutstanding(a) && a.completedAt === null,
   };
 }
 
@@ -231,7 +240,7 @@ export async function saveScores(
       severity: 'warn',
     });
   }
-  if (a.conflictDeclaredAt) {
+  if (conflictIsOutstanding(a)) {
     /*
      * A DISCLOSED CONFLICT STOPS SCORING until somebody acts on it.
      *
@@ -239,8 +248,13 @@ export async function saveScores(
      * "a conflict discovered while scoring has already contaminated the
      * score". The same reasoning applies after the fact: once a reviewer has
      * said there is a conflict, a score they then enter is exactly what that
-     * rule exists to prevent. The admin's move is to recuse them or to
-     * reassign, both of which are recorded.
+     * rule exists to prevent.
+     *
+     * "UNTIL SOMEBODY ACTS ON IT" used to mean recusal or nothing. 0023 adds
+     * the third move an admin actually needs: record that it is not a
+     * conflict, keeping the declaration, and let the reviewer carry on. Once
+     * that is done this guard stops firing -- which is why it asks whether a
+     * conflict is OUTSTANDING rather than whether one was ever declared.
      */
     throw new AppError('CONFLICT', 'You declared a conflict on this application.', {
       internalMessage: `saveScores with an unresolved conflict on ${assignmentId}`,

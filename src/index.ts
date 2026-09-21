@@ -29,7 +29,7 @@ import { submitEligibility } from './lib/eligibility';
 import { listOpenCycles, readPublicForm } from './lib/publicRoutes';
 import { createApplication, readDraft, autosaveDraft, submitDraft } from './lib/applicantRoutes';
 import { presignUpload, presignReportUpload, r2UploadOrigin } from './lib/uploads';
-import { presignDownloadForStaff } from './lib/downloads';
+import { presignDownloadForStaff, presignDownloadForExternal } from './lib/downloads';
 import { runRetention, holdAttachment, purgeAttachmentNow, retentionScreen } from './lib/retention';
 import {
   listRubrics, getRubric, createRubric, replaceCriteria, publishRubric,
@@ -77,7 +77,8 @@ import {
   junkOrganization, restoreOrganization, junkApplication, listRemovedOrganizations,
 } from './lib/junk';
 import {
-  assignReviewer, unassignReviewer, declareConflict, recuse,
+  assignReviewer, unassignReviewer, declareConflict, clearConflict, recuse,
+  outstandingConflicts,
   reviewCoverage, distributeReviewers, DEFAULT_REVIEWERS_PER_APPLICATION,
 } from './lib/reviewAssign';
 import { dataHealth } from './lib/dataHealth';
@@ -465,6 +466,30 @@ const routes: readonly Route[] = [
       });
     },
   },
+  {
+    /*
+     * An applicant or grantee reading back one of their own uploads.
+     *
+     * A SEPARATE PATH FROM THE STAFF ONE, not the same route with a wider role
+     * list. The two differ in what they may reach (this one is scoped by the
+     * session's organization, in the attachment row AND in its parent) and in
+     * what they record (this one leaves the retention counters alone, because
+     * an applicant fetching their own document says nothing about whether the
+     * Foundation holds a copy). Sharing a route would mean one handler whose
+     * behaviour forks on role, which is how the wrong branch eventually runs.
+     *
+     * POST for the same reason the staff route is POST: it writes an audit row
+     * and hands back a live credential, and a GET is something a prefetcher
+     * fires without anybody clicking.
+     */
+    method: 'POST',
+    path: '/api/portal/attachments/:id/download-url',
+    roles: EXTERNAL_USER,
+    auth: 'applicant',
+    handler: async ({ env, ctx, params, session }) =>
+      json(await presignDownloadForExternal(env, ctx, session, params.id!), ctx),
+  },
+
   // The portal's own paths. The shell is public; every call it makes is
   // scoped by the session behind it, so a signed-out grantee gets a 401 from
   // the data endpoint rather than a blank page.
@@ -1725,6 +1750,30 @@ const routes: readonly Route[] = [
     },
   },
   {
+    /*
+     * An admin records that a declared conflict is not one.
+     *
+     * ADMIN_ONLY, not ['admin','reviewer'] like the two routes either side of
+     * it. A reviewer declaring their own conflict and a reviewer stepping away
+     * from one are both acts against their own interest; a reviewer clearing
+     * their own declaration is the one act a conflict policy exists to
+     * prevent. The library refuses it too -- this list is not the only guard
+     * -- but a role list that reads 'reviewer' here would be read by the next
+     * person as permission.
+     */
+    method: 'POST',
+    path: '/api/review/assignments/:id/conflict/clear',
+    roles: ADMIN_ONLY,
+    handler: async ({ request, env, ctx, session, params }) => {
+      const body = (await request.json().catch(() => ({}))) as { resolution?: unknown };
+      await clearConflict(
+        env.DB, ctx, session, params.id!,
+        typeof body.resolution === 'string' ? body.resolution : '',
+      );
+      return json({ ok: true }, ctx);
+    },
+  },
+  {
     method: 'POST',
     path: '/api/review/assignments/:id/recuse',
     roles: ['admin', 'reviewer'],
@@ -1768,6 +1817,20 @@ const routes: readonly Route[] = [
           : DEFAULT_REVIEWERS_PER_APPLICATION;
       return json(await reviewCoverage(env.DB, params.id!, target), ctx);
     },
+  },
+  {
+    /*
+     * The disclosures somebody has to act on.
+     *
+     * ADMIN_ONLY for the same reason the coverage grid is, and for one more:
+     * the payload carries a reviewer's own words about a third party -- "my
+     * spouse works there" -- alongside the organization it is about.
+     */
+    method: 'GET',
+    path: '/api/cycles/:id/conflicts',
+    roles: ADMIN_ONLY,
+    handler: async ({ env, ctx, params, session }) =>
+      json({ conflicts: await outstandingConflicts(env.DB, session, params.id!) }, ctx),
   },
   {
     method: 'POST',

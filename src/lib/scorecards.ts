@@ -28,6 +28,7 @@ import type { RequestContext, Session } from '../types';
 import { AppError, notFound } from './errors';
 import { parseDelimited, toRecord, sniffDelimiter, CsvError } from './csv';
 import { saveScores } from './scoring';
+import { conflictOutstandingSql } from './reviewAssign';
 
 /** A megabyte of scorecard is thousands of rows. Anything larger is a mistake. */
 export const MAX_SCORECARD_BYTES = 1_000_000;
@@ -150,7 +151,7 @@ export async function exportScorecard(
         WHERE ra.reviewer_user_id = ?
           AND a.cycle_id = ?
           AND ra.recused_at IS NULL
-          AND ra.conflict_declared_at IS NULL
+          AND NOT ${conflictOutstandingSql('ra')}
           AND ra.deleted_at IS NULL
         ORDER BY o.legal_name, rc.sort_order, rc.criterion_key`,
     )
@@ -210,7 +211,10 @@ export async function reviewersInCycle(
       `SELECT ra.reviewer_user_id AS reviewerUserId, u.email,
               COUNT(*) AS assigned,
               SUM(CASE WHEN ra.completed_at IS NOT NULL THEN 1 ELSE 0 END) AS completed,
-              SUM(CASE WHEN ra.conflict_declared_at IS NOT NULL THEN 1 ELSE 0 END) AS conflicts
+              -- OUTSTANDING conflicts, not declarations ever made. A count
+              -- that includes resolved ones tells an admin there is work to
+              -- do on an assignment they already dealt with.
+              SUM(CASE WHEN ${conflictOutstandingSql('ra')} THEN 1 ELSE 0 END) AS conflicts
          FROM review_assignments ra
          JOIN users u ON u.id = ra.reviewer_user_id
          JOIN applications a ON a.id = ra.application_id AND a.deleted_at IS NULL
@@ -384,7 +388,9 @@ async function planInternal(
     ? await db
         .prepare(
           `SELECT ra.id, ra.reviewer_user_id AS reviewerUserId, ra.recused_at AS recusedAt,
-                  ra.conflict_declared_at AS conflictAt, ra.completed_at AS completedAt,
+                  ra.conflict_declared_at AS conflictAt,
+                  ra.conflict_cleared_at AS conflictClearedAt,
+                  ra.completed_at AS completedAt,
                   u.email AS reviewerEmail, o.legal_name AS organization,
                   a.cycle_id AS cycleId, a.decided_at AS decidedAt
              FROM review_assignments ra
@@ -396,7 +402,8 @@ async function planInternal(
         .bind(...ids)
         .all<{
           id: string; reviewerUserId: string; recusedAt: string | null;
-          conflictAt: string | null; completedAt: string | null;
+          conflictAt: string | null; conflictClearedAt: string | null;
+          completedAt: string | null;
           reviewerEmail: string; organization: string; cycleId: string; decidedAt: string | null;
         }>()
     : { results: [] };
@@ -444,7 +451,7 @@ async function planInternal(
       issues.push({ row: rowNo, message: `${assignment.reviewerEmail} was recused from this one.` });
       return;
     }
-    if (assignment.conflictAt) {
+    if (assignment.conflictAt && assignment.conflictClearedAt === null) {
       /*
        * The conflict was declared AFTER the file went out. Importing anyway
        * would write a score from somebody who has since said they should not

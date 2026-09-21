@@ -173,8 +173,21 @@ await ctx.addCookies([{
 const puts = [];
 await ctx.route('**/*.r2.cloudflarestorage.com/**', async (route) => {
   const r = route.request();
-  puts.push({ method: r.method(), headers: r.headers() });
-  await route.fulfill({ status: 200, body: '' });
+  puts.push({ method: r.method(), headers: r.headers(), url: r.url() });
+  /*
+   * A DOWNLOAD, NOT A NAVIGATION, for the GET. `content-disposition:
+   * attachment` is what the real signed URL carries, and it is also what stops
+   * Chromium replacing this page when the applicant opens a file -- which
+   * would end the drive halfway through the form.
+   */
+  await route.fulfill({
+    status: 200,
+    body: '',
+    headers:
+      r.method() === 'GET'
+        ? { 'content-disposition': 'attachment; filename="x.pdf"' }
+        : {},
+  });
 });
 
 const page = await ctx.newPage();
@@ -239,11 +252,53 @@ check('every required document attached',
   (await page.locator('.upload-name').allInnerTexts()).length,
   await page.locator('input[type="file"]').count());
 
+/*
+ * AND THEY CAN READ IT BACK.
+ *
+ * WHAT THIS CLOSES. A nonprofit handed over its audited accounts, its
+ * operating budget and an itemized spending budget and could never look at any
+ * of them again -- not to check the right file went up, not after submitting.
+ * "Attaching the wrong year's financials is the single most predictable
+ * mistake on a form like this", and the only remedy was to read a filename and
+ * hope: two years of audited accounts are usually called the same thing.
+ */
+const downloads = [];
+page.on('request', (r) => {
+  if (r.url().includes('/api/portal/attachments/') && r.method() === 'POST') {
+    downloads.push(r.url());
+  }
+});
+const openButtons = page.getByRole('button', { name: /^Open/ });
+check('every attached file offers a way to open it',
+  await openButtons.count(),
+  await page.locator('.upload-name').count());
+await openButtons.first().click();
+await page.waitForTimeout(900);
+check('opening one asked the portal for a download URL', downloads.length, 1);
+check('and the browser fetched the object it was pointed at',
+  puts.filter((p) => p.method === 'GET').length, 1);
+// The signed GET carries the disposition and the opaque type, so a hostile
+// HTML or SVG upload cannot be talked into rendering on this origin.
+const signedGet = puts.find((p) => p.method === 'GET');
+check('the signed read forces a download rather than a render',
+  [
+    decodeURIComponent(signedGet.url).includes('attachment;'),
+    decodeURIComponent(signedGet.url).includes('application/octet-stream'),
+  ],
+  [true, true]);
+check('the page did not navigate away', new URL(page.url()).pathname.startsWith('/apply/'), true);
+
 // THE RULE: signQuery signs only the host header, so a Content-Type from the
 // browser is a 403 that does not reproduce in curl.
+//
+// FILTERED TO THE UPLOADS, because this list now also holds the GET from
+// opening an attached file. Asserting over everything would have read "every
+// upload was a PUT: PUT, GET" -- a failure about a rule that was never broken.
+const uploads = puts.filter((p) => p.method === 'PUT');
 check('the browser sent no content-type on any upload',
-  puts.map((p) => p.headers['content-type'] ?? null).filter(Boolean), []);
-check('every upload was a PUT', [...new Set(puts.map((p) => p.method))], ['PUT']);
+  uploads.map((p) => p.headers['content-type'] ?? null).filter(Boolean), []);
+check('every upload was a PUT', [...new Set(uploads.map((p) => p.method))], ['PUT']);
+check('and one file was uploaded per required document', uploads.length > 0, true);
 
 /*
  * THE ATTESTATIONS, which is where the checkbox sweep belongs. It used to run

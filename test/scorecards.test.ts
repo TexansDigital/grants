@@ -25,7 +25,7 @@ import { INSPIRE_CHANGE } from '../src/seed/inspireChange';
 import { newId } from '../src/lib/ids';
 import { nowIso } from '../src/lib/time';
 import { createRubric, replaceCriteria, publishRubric, attachRubricToCycle, newDraftFrom } from '../src/lib/rubrics';
-import { assignReviewer, declareConflict, recuse } from '../src/lib/reviewAssign';
+import { assignReviewer, declareConflict, clearConflict, recuse } from '../src/lib/reviewAssign';
 import { loadScoringSheet, saveScores, completeReview } from '../src/lib/scoring';
 import { decideApplication } from '../src/lib/decisions';
 import { exportScorecard, planScorecardImport, applyScorecardImport } from '../src/lib/scorecards';
@@ -195,6 +195,18 @@ describe('the export', () => {
     const out = await exportScorecard(db, s.reviewer, s.cycleId, s.reviewerId);
     expect(out.rows).toBe(CRITERIA.length);
     expect(out.csv).not.toContain(s.apps[0]!.assignmentId);
+  });
+
+  it('puts it back once an admin records the conflict is not one', async () => {
+    // The other half. Without it, "leaves out a conflicted application" would
+    // keep passing against a system where a resolved disclosure still hides
+    // the application from the reviewer's own scorecard forever.
+    const s = await cycleWithReviewer();
+    await declareConflict(db, ctx(), s.reviewer, s.apps[0]!.assignmentId, 'I sit on their board');
+    await clearConflict(db, ctx(), admin, s.apps[0]!.assignmentId, 'Different board. Checked.');
+    const out = await exportScorecard(db, s.reviewer, s.cycleId, s.reviewerId);
+    expect(out.rows).toBe(CRITERIA.length * s.apps.length);
+    expect(out.csv).toContain(s.apps[0]!.assignmentId);
   });
 
   it('refuses to export a scorecard belonging to somebody else', async () => {

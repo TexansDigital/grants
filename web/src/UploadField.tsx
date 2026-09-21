@@ -18,6 +18,7 @@ import { useCallback, useRef, useState } from 'react';
 import type { ReactElement } from 'react';
 import type { FieldDef } from '../../src/lib/fieldTypes';
 import { formatBytes, uploadFile, UploadError, type AttachmentRef } from './uploadFile';
+import { applicantApi } from './applicantApi';
 
 interface InFlight {
   /** Local id, because two files can share a name. */
@@ -47,6 +48,8 @@ export function UploadField({
   const maxFiles = field.validation?.max_files ?? 1;
   const [inFlight, setInFlight] = useState<InFlight[]>([]);
   const [failures, setFailures] = useState<{ filename: string; message: string }[]>([]);
+  /** Which attached file is being opened, so its button cannot be double-fired. */
+  const [opening, setOpening] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   // Read through a ref inside the async loop: `value` is captured at the start
   // and two files finishing together would each write the same stale list, so
@@ -114,6 +117,42 @@ export function UploadField({
     [onBlur, onChange],
   );
 
+  /**
+   * Open one attached file.
+   *
+   * WHY IT IS HERE AND NOT ONLY ON THE REVIEW SCREEN. "Attaching the wrong
+   * year's financials is the single most predictable mistake on a form like
+   * this" -- it says so at the top of this file -- and until now the only
+   * thing an applicant could do about it was read a filename and hope. A
+   * filename is not the document; two years of audited accounts are usually
+   * called the same thing.
+   *
+   * The URL is used and dropped. It is a bearer token for this organization's
+   * own financial statements, valid for a few minutes, and nothing here keeps
+   * it in state.
+   */
+  const open = useCallback(async (attachmentId: string, filename: string) => {
+    setOpening(attachmentId);
+    setFailures((prev) => prev.filter((f) => f.filename !== filename));
+    try {
+      const grant = await applicantApi.downloadUrl(attachmentId);
+      window.location.assign(grant.url);
+    } catch (e) {
+      setFailures((prev) => [
+        ...prev,
+        {
+          filename,
+          message:
+            e instanceof Error && e.message
+              ? e.message
+              : 'That file could not be opened. It is still attached.',
+        },
+      ]);
+    } finally {
+      setOpening(null);
+    }
+  }, []);
+
   return (
     <div className="upload">
       {value.length > 0 && (
@@ -121,6 +160,15 @@ export function UploadField({
           {value.map((ref) => (
             <li key={ref.attachment_id}>
               <span className="upload-name">{ref.filename}</span>
+              <button
+                type="button"
+                className="linklike"
+                disabled={opening === ref.attachment_id}
+                onClick={() => void open(ref.attachment_id, ref.filename)}
+              >
+                {opening === ref.attachment_id ? 'Opening…' : 'Open'}
+                <span className="sr-only"> {ref.filename}</span>
+              </button>
               <button
                 type="button"
                 className="linklike"

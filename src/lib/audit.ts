@@ -91,6 +91,13 @@ export type AuditAction =
   | 'review.assigned'
   | 'review.unassigned'
   | 'review.conflict_declared'
+  /*
+   * An admin recorded that a declared conflict is not one. A second event
+   * beside the declaration, never a replacement for it: 0023 keeps
+   * `conflict_declared_at` and its note, because what a conflict-of-interest
+   * trail is for is answering what was disclosed AND what was done about it.
+   */
+  | 'review.conflict_cleared'
   | 'review.recused'
   | 'review.score_saved'
   | 'review.completed'

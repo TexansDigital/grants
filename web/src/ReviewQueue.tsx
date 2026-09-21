@@ -101,17 +101,25 @@ export function ReviewQueue({ onOpenSheet }: Props): ReactElement {
                     {r.requested_amount_cents === null ? '—' : formatCents(r.requested_amount_cents)}
                   </td>
                   <td>
-                    {r.conflict_declared_at
+                    {/*
+                      A DECLARED CONFLICT IS NOT ALWAYS A BLOCKED ONE. Until
+                      0023 it was, and this column said "Conflict declared"
+                      forever -- next to a disabled button -- even after an
+                      admin had looked into it and decided it was not one.
+                    */}
+                    {r.conflict_declared_at && !r.conflict_cleared_at
                       ? 'Conflict declared'
                       : r.completed_at
                         ? 'Submitted'
-                        : 'Not started'}
+                        : r.conflict_declared_at
+                          ? 'Disclosed, resolved'
+                          : 'Not started'}
                   </td>
                   <td>
                     <button
                       type="button"
                       className="btn secondary small"
-                      disabled={Boolean(r.conflict_declared_at)}
+                      disabled={Boolean(r.conflict_declared_at && !r.conflict_cleared_at)}
                       onClick={() => onOpenSheet(r.review_assignment_id)}
                     >
                       {r.completed_at ? 'Review' : 'Score'}

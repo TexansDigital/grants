@@ -40,6 +40,33 @@ export const DEFAULT_REVIEWERS_PER_APPLICATION = 2;
  */
 export const MAX_ASSIGNMENTS_PER_RUN = 1_200;
 
+/**
+ * "A conflict is outstanding on this assignment", in SQL.
+ *
+ * WRITTEN ONCE, because it is written in seven places. A declaration used to
+ * mean, everywhere, `conflict_declared_at IS NOT NULL` -- in the scoring
+ * guard, the scorecard export, the scorecard planner, the coverage counts and
+ * the assignment reads. 0023 makes a declaration resolvable, so every one of
+ * those had to learn the difference between "was disclosed" and "is still
+ * blocking", and missing one of seven is how a reviewer whose conflict was
+ * cleared stays locked out of a sheet the coverage screen says is fine.
+ *
+ * The alias is a parameter because these queries call the table `ra`, `a`, or
+ * nothing at all.
+ */
+export function conflictOutstandingSql(alias = 'ra'): string {
+  const a = alias ? `${alias}.` : '';
+  return `(${a}conflict_declared_at IS NOT NULL AND ${a}conflict_cleared_at IS NULL)`;
+}
+
+/** The same question about a row already in hand. */
+export function conflictIsOutstanding(row: {
+  conflictDeclaredAt?: string | null;
+  conflictClearedAt?: string | null;
+}): boolean {
+  return row.conflictDeclaredAt != null && row.conflictClearedAt == null;
+}
+
 export interface AssignmentRow {
   // Indexed, because the audit helper takes a Record<string, unknown> for its
   // before/after snapshots and a named interface without an index signature is
@@ -51,6 +78,8 @@ export interface AssignmentRow {
   reviewer_user_id: string;
   assigned_at: string;
   conflict_declared_at: string | null;
+  conflict_cleared_at: string | null;
+  conflict_cleared_by: string | null;
   conflict_note: string | null;
   recused_at: string | null;
   recused_reason: string | null;
@@ -161,6 +190,8 @@ export async function assignReviewer(
   return {
     ...after,
     conflict_declared_at: null,
+    conflict_cleared_at: null,
+    conflict_cleared_by: null,
     conflict_note: null,
     recused_at: null,
     recused_reason: null,
@@ -286,22 +317,39 @@ export async function declareConflict(
   if (before.reviewer_user_id !== session.userId && session.role !== 'admin') {
     throw notFound('assignment');
   }
-  if (before.conflict_declared_at !== null) {
+  if (before.conflict_declared_at !== null && before.conflict_cleared_at === null) {
     throw new AppError('CONFLICT', 'A conflict has already been declared on this assignment.', {
       internalMessage: `second declaration on assignment ${assignmentId}`,
       severity: 'warn',
     });
   }
 
+  /*
+   * A CLEARED CONFLICT CAN BE DECLARED AGAIN. New information arrives -- the
+   * reviewer reads the application and recognises a name they did not
+   * recognise at assignment. Refusing the second declaration because the first
+   * was resolved would mean the only way to disclose it is a recusal, which is
+   * the trap 0023 exists to remove.
+   *
+   * The note is APPENDED, never replaced. What was disclosed the first time
+   * and what was decided about it are the record; a conflict-of-interest trail
+   * that keeps only the latest sentence answers nothing.
+   */
+  const combined = before.conflict_note ? `${before.conflict_note}\n\n${text}` : text;
+
   const now = nowIso();
   await db.batch([
     db
       .prepare(
         `UPDATE review_assignments
-            SET conflict_note = ?, conflict_declared_at = ?, updated_at = ?
-          WHERE id = ? AND conflict_declared_at IS NULL AND deleted_at IS NULL`,
+            SET conflict_note = ?, conflict_declared_at = ?, updated_at = ?,
+                -- Re-opened, so the earlier resolution no longer applies. The
+                -- audit row above it keeps the fact that it once did.
+                conflict_cleared_at = NULL, conflict_cleared_by = NULL
+          WHERE id = ? AND deleted_at IS NULL
+            AND (conflict_declared_at IS NULL OR conflict_cleared_at IS NOT NULL)`,
       )
-      .bind(text, now, now, assignmentId),
+      .bind(combined, now, now, assignmentId),
     auditStatement(
       db,
       ctx,
@@ -310,7 +358,13 @@ export async function declareConflict(
         entityType: 'review_assignment',
         entityId: assignmentId,
         before,
-        after: { ...before, conflict_note: text, conflict_declared_at: now },
+        after: {
+          ...before,
+          conflict_note: combined,
+          conflict_declared_at: now,
+          conflict_cleared_at: null,
+          conflict_cleared_by: null,
+        },
       },
       {
         guard: {
@@ -321,6 +375,121 @@ export async function declareConflict(
       },
     ),
   ]);
+}
+
+/**
+ * An admin records that a declared conflict is not one.
+ *
+ * WHY THIS EXISTS. Before it, a declaration was irreversible: scoring on the
+ * assignment was refused from that moment, and the only ways out were recusal
+ * -- which loses the reviewer for that application -- or leaving the
+ * assignment blocked while the coverage screen counted it as covered. The
+ * incentive that creates is for a reviewer to stay quiet until they are sure,
+ * which is exactly the late disclosure that declaring at assignment is meant
+ * to prevent.
+ *
+ * ADMIN ONLY. A reviewer clearing their own declaration is the one thing a
+ * conflict policy exists to prevent, and "or the reviewer themselves" is the
+ * kind of convenience that gets added later by somebody who has not read this.
+ *
+ * THE RESOLUTION IS APPENDED TO THE NOTE, and the declaration is untouched.
+ * What was disclosed and what was decided about it are both the record. This
+ * is not an undo and there is nothing here that erases the first event.
+ *
+ * A RECUSED ASSIGNMENT CANNOT BE CLEARED. The reviewer has already stepped
+ * away; clearing the conflict would not put them back, and a cleared flag on a
+ * recused row reads as though it did.
+ */
+export async function clearConflict(
+  db: D1Database,
+  ctx: RequestContext,
+  session: Session,
+  assignmentId: string,
+  resolution: string,
+): Promise<void> {
+  if (session.role !== 'admin') throw notFound('assignment');
+
+  const text = resolution.trim();
+  if (text.length < 3) {
+    throw new AppError('VALIDATION_FAILED', 'Say what was decided, and by whom.', {
+      internalMessage: 'conflict cleared with an empty or near-empty resolution',
+      severity: 'warn',
+    });
+  }
+
+  const before = await db
+    .prepare(`SELECT * FROM review_assignments WHERE id = ? AND deleted_at IS NULL`)
+    .bind(assignmentId)
+    .first<AssignmentRow>();
+  if (!before) throw notFound('assignment');
+
+  if (before.conflict_declared_at === null) {
+    throw new AppError('CONFLICT', 'No conflict has been declared on this assignment.', {
+      internalMessage: `clearConflict on assignment ${assignmentId} with no declaration`,
+      severity: 'warn',
+    });
+  }
+  if (before.conflict_cleared_at !== null) {
+    throw new AppError('CONFLICT', 'This conflict has already been resolved.', {
+      internalMessage: `second clear on assignment ${assignmentId}`,
+      severity: 'warn',
+    });
+  }
+  if (before.recused_at !== null) {
+    throw new AppError('CONFLICT', 'This reviewer has already stepped away from it.', {
+      internalMessage: `clearConflict on recused assignment ${assignmentId}`,
+      severity: 'warn',
+    });
+  }
+
+  const now = nowIso();
+  const note = `${before.conflict_note ?? ''}\n\nResolved ${now.slice(0, 10)}: ${text}`.trim();
+
+  const [write] = await db.batch([
+    db
+      .prepare(
+        `UPDATE review_assignments
+            SET conflict_cleared_at = ?, conflict_cleared_by = ?,
+                conflict_note = ?, updated_at = ?
+          WHERE id = ? AND deleted_at IS NULL
+            AND conflict_declared_at IS NOT NULL
+            AND conflict_cleared_at IS NULL
+            AND recused_at IS NULL`,
+      )
+      .bind(now, session.userId, note, now, assignmentId),
+    auditStatement(
+      db,
+      ctx,
+      {
+        action: 'review.conflict_cleared',
+        entityType: 'review_assignment',
+        entityId: assignmentId,
+        before,
+        after: {
+          ...before,
+          conflict_cleared_at: now,
+          conflict_cleared_by: session.userId,
+          conflict_note: note,
+        },
+      },
+      {
+        guard: {
+          sql: `EXISTS (SELECT 1 FROM review_assignments
+                         WHERE id = ? AND conflict_cleared_at = ? AND deleted_at IS NULL)`,
+          binds: [assignmentId, now],
+        },
+      },
+    ),
+  ]);
+
+  // Somebody recused the reviewer, or cleared it, between the read and the
+  // write. Saying so beats reporting a resolution that did not land.
+  if ((write?.meta?.changes ?? 0) === 0) {
+    throw new AppError('CONFLICT', 'Somebody else changed this assignment first.', {
+      internalMessage: `clearConflict on ${assignmentId} matched no row`,
+      severity: 'warn',
+    });
+  }
 }
 
 /**
@@ -424,7 +593,10 @@ export async function reviewCoverage(
               a.project_title,
               o.legal_name AS organization_name,
               COUNT(ra.id) AS reviewers,
-              COALESCE(SUM(CASE WHEN ra.conflict_declared_at IS NOT NULL THEN 1 ELSE 0 END), 0) AS conflicts,
+              -- Outstanding, not ever-declared. A coverage screen that counts
+              -- a resolved disclosure as a conflict sends an admin back to an
+              -- assignment they have already dealt with, every time they look.
+              COALESCE(SUM(CASE WHEN ${conflictOutstandingSql('ra')} THEN 1 ELSE 0 END), 0) AS conflicts,
               COALESCE(SUM(CASE WHEN ra.completed_at IS NOT NULL THEN 1 ELSE 0 END), 0) AS completed
          FROM applications a
          LEFT JOIN organizations o ON o.id = a.organization_id
@@ -448,6 +620,61 @@ export async function reviewCoverage(
     rows,
     under: rows.filter((r) => Number(r.reviewers) < target).length,
   };
+}
+
+export interface OutstandingConflict {
+  assignmentId: string;
+  applicationId: string;
+  projectTitle: string | null;
+  organizationName: string | null;
+  reviewerEmail: string;
+  declaredAt: string;
+  /** What the reviewer said. Internal, and an admin-only screen shows it. */
+  note: string | null;
+}
+
+/**
+ * The disclosures somebody has to act on, for a whole cycle.
+ *
+ * WHY IT IS A LIST AND NOT A COUNT. The coverage grid says an application has
+ * one conflict; it cannot say whose, about what, or offer anything to do about
+ * it. So the only way to act on a declaration was to know the assignment id,
+ * which nothing on any screen showed. A disclosure nobody can find is a
+ * disclosure that sits there until the deadline, blocking a reviewer who
+ * did the right thing by making it.
+ *
+ * ADMIN ONLY. The note is a reviewer's own words about a third party -- "my
+ * spouse works there", "I sat on that board until last year" -- and is
+ * internal in the sense CLAUDE.md means: it is never in an applicant or
+ * grantee payload, and it is not another reviewer's business either.
+ */
+export async function outstandingConflicts(
+  db: D1Database,
+  session: Session,
+  cycleId: string,
+): Promise<OutstandingConflict[]> {
+  if (session.role !== 'admin') throw notFound('cycle');
+  const { results } = await db
+    .prepare(
+      `SELECT ra.id AS assignmentId, a.id AS applicationId,
+              a.project_title AS projectTitle,
+              o.legal_name AS organizationName,
+              u.email AS reviewerEmail,
+              ra.conflict_declared_at AS declaredAt,
+              ra.conflict_note AS note
+         FROM review_assignments ra
+         JOIN applications a   ON a.id = ra.application_id AND a.deleted_at IS NULL
+         JOIN users u          ON u.id = ra.reviewer_user_id
+         LEFT JOIN organizations o ON o.id = a.organization_id
+        WHERE a.cycle_id = ?
+          AND ra.deleted_at IS NULL
+          AND ra.recused_at IS NULL
+          AND ${conflictOutstandingSql('ra')}
+        ORDER BY ra.conflict_declared_at`,
+    )
+    .bind(cycleId)
+    .all<OutstandingConflict>();
+  return results ?? [];
 }
 
 export interface DistributionResult {

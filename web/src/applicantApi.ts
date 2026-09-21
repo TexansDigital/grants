@@ -91,6 +91,25 @@ export const applicantApi = {
       body: { answers, ...(guidelinesVersion ? { guidelinesVersion } : {}) },
     }),
 
+  /**
+   * Authorize one read of a file this organization uploaded.
+   *
+   * SAME CALL ON BOTH SURFACES, because it is scoped by the session's
+   * organization rather than by which page asked. An applicant checking a
+   * draft attachment and a grantee re-reading what they filed with a report
+   * are the same exchange.
+   *
+   * The URL that comes back is a CREDENTIAL with a few minutes on it. Hand it
+   * straight to the browser and do not keep it: anything that holds it -- a
+   * log, a state store that survives navigation, a retry buffer -- is holding
+   * a live handle on somebody's audited accounts.
+   */
+  downloadUrl: (attachmentId: string) =>
+    request<{ attachmentId: string; filename: string; url: string; expiresAt: string }>(
+      `/api/portal/attachments/${enc(attachmentId)}/download-url`,
+      { method: 'POST' },
+    ),
+
   /** Authorize one upload. Same exchange on both surfaces; only the path differs. */
   presignUploadAt: (
     path: string,

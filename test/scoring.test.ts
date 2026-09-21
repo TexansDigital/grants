@@ -24,7 +24,7 @@ import { createRubric, replaceCriteria, publishRubric, attachRubricToCycle } fro
 import {
   loadScoringSheet, saveScores, completeReview, reopenReview, scoreSummary, formatScore,
 } from '../src/lib/scoring';
-import { assignReviewer, declareConflict, recuse } from '../src/lib/reviewAssign';
+import { assignReviewer, declareConflict, clearConflict, recuse } from '../src/lib/reviewAssign';
 import { decideApplication } from '../src/lib/decisions';
 import { assertNoInternalFields } from '../src/lib/scope';
 import type { Session } from '../src/types';
@@ -183,6 +183,57 @@ describe('a reviewer never sees other reviewers scores', () => {
     const s = await scored();
     expect((await appErrorFrom(scoreSummary(db, s.reviewer, s.applicationId))).code)
       .toBe('NOT_FOUND');
+  });
+});
+
+describe('a conflict, and a conflict that was resolved', () => {
+  it('blocks the sheet while the declaration stands', async () => {
+    const s = await scored();
+    await declareConflict(db, ctx(), s.reviewer, s.assignmentId, 'I know their director.');
+    const sheet = await loadScoringSheet(db, s.reviewer, s.assignmentId);
+    expect(sheet.editable).toBe(false);
+    const ids = sheet.criteria.map((c) => c.id);
+    expect(
+      (await appErrorFrom(
+        saveScores(db, ctx(), s.reviewer, s.assignmentId, [{ criterionId: ids[0]!, score: 5 }]),
+      )).code,
+    ).toBe('CONFLICT');
+  });
+
+  it('unblocks it once an admin records that it is not one', async () => {
+    /*
+     * THE BUG THIS PREVENTS. "A conflict is outstanding" is asked in seven
+     * places -- the scoring guard, the sheet's editable flag, the scorecard
+     * export, the scorecard planner, the two conflict counts, and the
+     * reviewer's queue -- and every one of them used to mean "was ever
+     * declared". Missing any one when 0023 made a declaration resolvable
+     * leaves a reviewer locked out of a sheet the coverage screen reports as
+     * fine, which is the worst of both: blocked, and invisible.
+     */
+    const s = await scored();
+    await declareConflict(db, ctx(), s.reviewer, s.assignmentId, 'I know their director.');
+    await clearConflict(db, ctx(), admin, s.assignmentId, 'Different organization entirely.');
+
+    const sheet = await loadScoringSheet(db, s.reviewer, s.assignmentId);
+    expect(sheet.editable).toBe(true);
+    expect(sheet.conflictDeclaredAt).not.toBeNull();
+    expect(sheet.conflictClearedAt).not.toBeNull();
+
+    const ids = sheet.criteria.map((c) => c.id);
+    const result = await saveScores(db, ctx(), s.reviewer, s.assignmentId, [
+      { criterionId: ids[0]!, score: 5 },
+    ]);
+    expect(result.saved).toBe(1);
+  });
+
+  it('blocks it again if the reviewer discloses something new', async () => {
+    const s = await scored();
+    await declareConflict(db, ctx(), s.reviewer, s.assignmentId, 'Possible overlap.');
+    await clearConflict(db, ctx(), admin, s.assignmentId, 'Checked, not a conflict.');
+    await declareConflict(db, ctx(), s.reviewer, s.assignmentId, 'Their new chair is my cousin.');
+
+    const sheet = await loadScoringSheet(db, s.reviewer, s.assignmentId);
+    expect(sheet.editable).toBe(false);
   });
 });
 

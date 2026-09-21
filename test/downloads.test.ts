@@ -15,7 +15,9 @@
 
 import { env as testEnv } from 'cloudflare:test';
 import { describe, it, expect, beforeEach } from 'vitest';
-import { db, ctxFor, adminSession, reviewerSession, appErrorFrom } from './helpers';
+import {
+  db, ctxFor, adminSession, reviewerSession, applicantSession, appErrorFrom,
+} from './helpers';
 import { seedProgram } from '../src/seed/seedProgram';
 import { INSPIRE_CHANGE } from '../src/seed/inspireChange';
 import { newId } from '../src/lib/ids';
@@ -23,6 +25,7 @@ import { nowIso } from '../src/lib/time';
 import { objectKey } from '../src/lib/uploads';
 import {
   presignDownloadForStaff,
+  presignDownloadForExternal,
   contentDisposition,
   DOWNLOAD_TTL_SECONDS,
 } from '../src/lib/downloads';
@@ -340,5 +343,191 @@ describe('filenames an applicant chose', () => {
 
   it('never produces an empty filename', async () => {
     expect(contentDisposition('   ')).toContain('filename="download"');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The applicant's and grantee's own files
+// ---------------------------------------------------------------------------
+
+describe('an organization reading back its own upload', () => {
+  /** A session for the organization that owns the fixture. */
+  const asOwner = (orgId: string) => applicantSession(orgId);
+
+  it('lets the organization that uploaded it read it', async () => {
+    /*
+     * WHAT THIS CLOSES. A nonprofit handed over its audited accounts, its
+     * operating budget and an itemized spending budget in order to be
+     * considered, and could never look at any of them again -- not to check
+     * the right file went up, not after submitting. The filenames were on the
+     * review screen and nothing would open.
+     */
+    const { orgId, attachmentId } = await applicationWithFile();
+    const session = asOwner(orgId);
+    const grant = await presignDownloadForExternal(
+      r2Env(), ctxFor(session), session, attachmentId,
+    );
+    expect(grant.url).toContain('X-Amz-Signature=');
+    expect(grant.filename).toBe('audited-2025.pdf');
+    expect(grant.url).toContain(`X-Amz-Expires=${DOWNLOAD_TTL_SECONDS}`);
+  });
+
+  it('404s for a different organization', async () => {
+    // The non-negotiable: scoped by organization_id from the SESSION, never
+    // from the request. Changing an id in a URL returns 404.
+    const { attachmentId } = await applicationWithFile();
+    const stranger = applicantSession(newId());
+    expect(
+      (await appErrorFrom(
+        presignDownloadForExternal(r2Env(), ctxFor(stranger), stranger, attachmentId),
+      )).code,
+    ).toBe('NOT_FOUND');
+  });
+
+  it('404s when the attachment row says one organization and the parent says another', async () => {
+    /*
+     * THE POINT OF CHECKING TWICE. A mis-stamped organization_id -- a bad
+     * import, a merge that moved applications and not attachments, a
+     * hand-written repair -- would otherwise hand somebody another
+     * nonprofit's audited accounts on the strength of one column.
+     */
+    const { attachmentId, orgId } = await applicationWithFile();
+    const intruderOrg = newId();
+    const now = nowIso();
+    await db
+      .prepare(
+        `INSERT INTO organizations (id, legal_name, ein, status, created_at, updated_at)
+         VALUES (?,?,?,'active',?,?)`,
+      )
+      .bind(intruderOrg, `Invented Other ${++n}`, String(710000000 + n), now, now)
+      .run();
+    // The attachment now claims to belong to the intruder; the application it
+    // hangs off still belongs to the real organization.
+    await db
+      .prepare(`UPDATE attachments SET organization_id = ? WHERE id = ?`)
+      .bind(intruderOrg, attachmentId)
+      .run();
+
+    const intruder = applicantSession(intruderOrg);
+    expect(
+      (await appErrorFrom(
+        presignDownloadForExternal(r2Env(), ctxFor(intruder), intruder, attachmentId),
+      )).code,
+    ).toBe('NOT_FOUND');
+    // And the real owner is refused too, because the row no longer says so.
+    const owner = asOwner(orgId);
+    expect(
+      (await appErrorFrom(
+        presignDownloadForExternal(r2Env(), ctxFor(owner), owner, attachmentId),
+      )).code,
+    ).toBe('NOT_FOUND');
+  });
+
+  it('lets them read an upload that has not been claimed by an application yet', async () => {
+    // The normal state between the presigned PUT and submitting. Its
+    // organization_id is the only thing tying it to anybody, and this is the
+    // case an applicant meets first: "did the right file go up?"
+    const { orgId, attachmentId } = await applicationWithFile();
+    await db
+      .prepare(`UPDATE attachments SET parent_id = NULL WHERE id = ?`)
+      .bind(attachmentId)
+      .run();
+    const session = asOwner(orgId);
+    const grant = await presignDownloadForExternal(
+      r2Env(), ctxFor(session), session, attachmentId,
+    );
+    expect(grant.attachmentId).toBe(attachmentId);
+  });
+
+  it('refuses a parent type an external user has no business with', async () => {
+    // A rubric's source spreadsheet is the scoring instrument. Even with the
+    // organization_id somehow matching, it is not theirs to read.
+    const { orgId, attachmentId } = await applicationWithFile();
+    await db
+      .prepare(`UPDATE attachments SET parent_type = 'rubric', parent_id = NULL WHERE id = ?`)
+      .bind(attachmentId)
+      .run();
+    const session = asOwner(orgId);
+    expect(
+      (await appErrorFrom(
+        presignDownloadForExternal(r2Env(), ctxFor(session), session, attachmentId),
+      )).code,
+    ).toBe('NOT_FOUND');
+  });
+
+  it('refuses a staff session outright rather than treating it as ownerless', async () => {
+    // sessionOrgId throws for an internal role. Staff have their own path,
+    // with its own scoping; this one must not become a second door into it.
+    const { attachmentId } = await applicationWithFile();
+    expect(
+      (await appErrorFrom(
+        presignDownloadForExternal(r2Env(), ctxFor(admin), admin, attachmentId),
+      )).code,
+    ).toBe('FORBIDDEN');
+  });
+
+  it('says plainly when retention has already destroyed the file', async () => {
+    const { orgId, attachmentId } = await applicationWithFile();
+    await db
+      .prepare(`UPDATE attachments SET purged_at = ? WHERE id = ?`)
+      .bind(nowIso(), attachmentId)
+      .run();
+    const session = asOwner(orgId);
+    const err = await appErrorFrom(
+      presignDownloadForExternal(r2Env(), ctxFor(session), session, attachmentId),
+    );
+    expect(err.code).toBe('CONFLICT');
+    expect(err.publicMessage).toMatch(/no longer held here/i);
+  });
+
+  it('writes an audit row, and does NOT touch the retention counters', async () => {
+    /*
+     * THE BUG THIS PREVENTS, and it is not obvious. The retention screen's
+     * "Asked for" column reads download_url_first_issued_at, and it answers
+     * one question: has anybody AT THE FOUNDATION taken a copy before these
+     * documents are destroyed. An applicant fetching their own file says
+     * nothing about that. Stamping it here would mark the file as retrieved,
+     * silence the nightly warning, and the file would be destroyed with no
+     * copy anywhere.
+     */
+    const { orgId, attachmentId } = await applicationWithFile();
+    const session = asOwner(orgId);
+    await presignDownloadForExternal(r2Env(), ctxFor(session), session, attachmentId);
+
+    const row = await db
+      .prepare(
+        `SELECT download_url_first_issued_at AS first, download_url_issue_count AS n
+           FROM attachments WHERE id = ?`,
+      )
+      .bind(attachmentId)
+      .first<{ first: string | null; n: number }>();
+    expect(row?.first).toBeNull();
+    expect(row?.n).toBe(0);
+
+    const audit = await db
+      .prepare(
+        `SELECT after_json FROM audit_log
+          WHERE action = 'attachment.download_url_issued' AND entity_id = ?`,
+      )
+      .bind(attachmentId)
+      .first<{ after_json: string }>();
+    expect(audit).not.toBeNull();
+    expect((JSON.parse(audit!.after_json) as Record<string, unknown>).issued_to).toBe('external');
+  });
+
+  it('and a staff read of the same file DOES stamp them', async () => {
+    // The other half of the pair, so "does not stamp" cannot pass because
+    // nothing ever stamps.
+    const { attachmentId } = await applicationWithFile();
+    await presignDownloadForStaff(r2Env(), ctxFor(admin), admin, attachmentId);
+    const row = await db
+      .prepare(
+        `SELECT download_url_first_issued_at AS first, download_url_issue_count AS n
+           FROM attachments WHERE id = ?`,
+      )
+      .bind(attachmentId)
+      .first<{ first: string | null; n: number }>();
+    expect(row?.first).not.toBeNull();
+    expect(row?.n).toBe(1);
   });
 });

@@ -13,7 +13,7 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { db, ctxFor, adminSession, reviewerSession } from './helpers';
+import { db, ctxFor, adminSession, reviewerSession, appErrorFrom } from './helpers';
 import { seedProgram } from '../src/seed/seedProgram';
 import { INSPIRE_CHANGE } from '../src/seed/inspireChange';
 import { newId } from '../src/lib/ids';
@@ -22,6 +22,7 @@ import {
   assignReviewer,
   unassignReviewer,
   declareConflict,
+  clearConflict,
   recuse,
   reviewCoverage,
   distributeReviewers,
@@ -341,6 +342,166 @@ describe('conflict of interest', () => {
     const rev = await reviewer('l');
     const a = await assignReviewer(db, ctx(), admin, applications[0]!, rev.id);
     await expect(recuse(db, ctx(), rev.session, a.id, '')).rejects.toThrow();
+  });
+});
+
+describe('a declared conflict that turns out not to be one', () => {
+  /*
+   * WHY THIS EXISTS AT ALL. Before it, a declaration was irreversible:
+   * scoring was refused from that moment and the only exits were recusal --
+   * which loses the reviewer for that application -- or leaving the
+   * assignment blocked while the coverage screen counted it as covered. The
+   * incentive that creates is for a reviewer to stay quiet until they are
+   * sure, which is the late disclosure that declaring at assignment is meant
+   * to prevent.
+   */
+
+  it('records a resolution beside the declaration, never instead of it', async () => {
+    const { applications } = await cycleWithApplications(1);
+    const rev = await reviewer('ca');
+    const a = await assignReviewer(db, ctx(), admin, applications[0]!, rev.id);
+    await declareConflict(db, ctx(), rev.session, a.id, 'I think I know a board member.');
+    await clearConflict(db, ctx(), admin, a.id, 'Different person. Checked the board list.');
+
+    const row = await db
+      .prepare(
+        `SELECT conflict_note, conflict_declared_at AS declared,
+                conflict_cleared_at AS cleared, conflict_cleared_by AS by
+           FROM review_assignments WHERE id=?`,
+      )
+      .bind(a.id)
+      .first<{ conflict_note: string; declared: string; cleared: string; by: string }>();
+
+    // The declaration is untouched. This is not an undo.
+    expect(row?.declared).not.toBeNull();
+    expect(row?.conflict_note).toContain('I think I know a board member.');
+    expect(row?.conflict_note).toContain('Different person.');
+    expect(row?.cleared).not.toBeNull();
+    expect(row?.by).toBe(adminId);
+
+    const audited = await db
+      .prepare(
+        `SELECT COUNT(*) AS n FROM audit_log
+          WHERE action='review.conflict_cleared' AND entity_id=?`,
+      )
+      .bind(a.id)
+      .first<{ n: number }>();
+    expect(audited?.n).toBe(1);
+  });
+
+  it('will not let the reviewer clear their own declaration', async () => {
+    // The one act a conflict policy exists to prevent.
+    const { applications } = await cycleWithApplications(1);
+    const rev = await reviewer('cb');
+    const a = await assignReviewer(db, ctx(), admin, applications[0]!, rev.id);
+    await declareConflict(db, ctx(), rev.session, a.id, 'My spouse works there.');
+    expect(
+      (await appErrorFrom(clearConflict(db, ctx(), rev.session, a.id, 'It is fine.'))).code,
+    ).toBe('NOT_FOUND');
+
+    const row = await db
+      .prepare(`SELECT conflict_cleared_at AS cleared FROM review_assignments WHERE id=?`)
+      .bind(a.id)
+      .first<{ cleared: string | null }>();
+    expect(row?.cleared).toBeNull();
+  });
+
+  it('refuses a resolution with nothing in it', async () => {
+    const { applications } = await cycleWithApplications(1);
+    const rev = await reviewer('cc');
+    const a = await assignReviewer(db, ctx(), admin, applications[0]!, rev.id);
+    await declareConflict(db, ctx(), rev.session, a.id, 'Possible overlap.');
+    expect((await appErrorFrom(clearConflict(db, ctx(), admin, a.id, '  '))).code)
+      .toBe('VALIDATION_FAILED');
+  });
+
+  it('refuses to clear a conflict nobody declared', async () => {
+    const { applications } = await cycleWithApplications(1);
+    const rev = await reviewer('cd');
+    const a = await assignReviewer(db, ctx(), admin, applications[0]!, rev.id);
+    expect((await appErrorFrom(clearConflict(db, ctx(), admin, a.id, 'Nothing to resolve.'))).code)
+      .toBe('CONFLICT');
+  });
+
+  it('refuses to clear it twice', async () => {
+    const { applications } = await cycleWithApplications(1);
+    const rev = await reviewer('ce');
+    const a = await assignReviewer(db, ctx(), admin, applications[0]!, rev.id);
+    await declareConflict(db, ctx(), rev.session, a.id, 'Possible overlap.');
+    await clearConflict(db, ctx(), admin, a.id, 'Checked, not a conflict.');
+    expect((await appErrorFrom(clearConflict(db, ctx(), admin, a.id, 'Again.'))).code)
+      .toBe('CONFLICT');
+  });
+
+  it('refuses to clear one the reviewer has already stepped away from', async () => {
+    // Clearing would not put them back, and a cleared flag on a recused row
+    // reads as though it did.
+    const { applications } = await cycleWithApplications(1);
+    const rev = await reviewer('cf');
+    const a = await assignReviewer(db, ctx(), admin, applications[0]!, rev.id);
+    await declareConflict(db, ctx(), rev.session, a.id, 'Possible overlap.');
+    await recuse(db, ctx(), rev.session, a.id, 'Safer to step back.');
+    expect((await appErrorFrom(clearConflict(db, ctx(), admin, a.id, 'It was fine.'))).code)
+      .toBe('CONFLICT');
+  });
+
+  it('lets a resolved conflict be declared again, and appends rather than replaces', async () => {
+    /*
+     * New information arrives: the reviewer reads the application and
+     * recognises a name they did not recognise at assignment. Refusing the
+     * second declaration because the first was resolved would mean the only
+     * way to disclose it is a recusal -- the trap this whole feature exists
+     * to remove.
+     */
+    const { applications } = await cycleWithApplications(1);
+    const rev = await reviewer('cg');
+    const a = await assignReviewer(db, ctx(), admin, applications[0]!, rev.id);
+    await declareConflict(db, ctx(), rev.session, a.id, 'Possible overlap.');
+    await clearConflict(db, ctx(), admin, a.id, 'Checked, not a conflict.');
+    await declareConflict(db, ctx(), rev.session, a.id, 'Their new chair is my former boss.');
+
+    const row = await db
+      .prepare(
+        `SELECT conflict_note, conflict_cleared_at AS cleared,
+                conflict_cleared_by AS by FROM review_assignments WHERE id=?`,
+      )
+      .bind(a.id)
+      .first<{ conflict_note: string; cleared: string | null; by: string | null }>();
+    expect(row?.cleared).toBeNull();
+    expect(row?.by).toBeNull();
+    for (const fragment of ['Possible overlap.', 'Checked, not a conflict.', 'former boss']) {
+      expect(row?.conflict_note).toContain(fragment);
+    }
+  });
+
+  it('will not accept a clear the database has no declaration for', async () => {
+    // The library refuses it; so does 0023, because a hand-written repair is
+    // the case a library check cannot cover.
+    const { applications } = await cycleWithApplications(1);
+    const rev = await reviewer('ch');
+    const a = await assignReviewer(db, ctx(), admin, applications[0]!, rev.id);
+    await expect(
+      db
+        .prepare(
+          `UPDATE review_assignments SET conflict_cleared_at = ?, conflict_cleared_by = ?
+            WHERE id = ?`,
+        )
+        .bind(nowIso(), adminId, a.id)
+        .run(),
+    ).rejects.toThrow(/cleared before it is declared/);
+  });
+
+  it('will not accept a clear with no actor', async () => {
+    const { applications } = await cycleWithApplications(1);
+    const rev = await reviewer('ci');
+    const a = await assignReviewer(db, ctx(), admin, applications[0]!, rev.id);
+    await declareConflict(db, ctx(), rev.session, a.id, 'Possible overlap.');
+    await expect(
+      db
+        .prepare(`UPDATE review_assignments SET conflict_cleared_at = ? WHERE id = ?`)
+        .bind(nowIso(), a.id)
+        .run(),
+    ).rejects.toThrow(/who cleared it and when/);
   });
 });
 

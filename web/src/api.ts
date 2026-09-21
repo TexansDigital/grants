@@ -174,7 +174,36 @@ export interface ScoringSheet {
   totalSoFarBp: number;
   completedAt: string | null;
   conflictDeclaredAt: string | null;
+  /** When an admin recorded it is not a conflict. Null while it still blocks. */
+  conflictClearedAt: string | null;
   editable: boolean;
+}
+
+export interface CoverageRow {
+  application_id: string;
+  project_title: string | null;
+  organization_name: string | null;
+  reviewers: number;
+  conflicts: number;
+  completed: number;
+}
+
+export interface Coverage {
+  cycleId: string;
+  target: number;
+  rows: CoverageRow[];
+  /** Applications with fewer live reviewers than the target. */
+  under: number;
+}
+
+export interface OutstandingConflict {
+  assignmentId: string;
+  applicationId: string;
+  projectTitle: string | null;
+  organizationName: string | null;
+  reviewerEmail: string;
+  declaredAt: string;
+  note: string | null;
 }
 
 export interface ReviewerTotal {
@@ -211,6 +240,7 @@ export interface QueueRow {
   assigned_at: string;
   completed_at: string | null;
   conflict_declared_at: string | null;
+  conflict_cleared_at: string | null;
 }
 
 export interface PendingRow {
@@ -685,6 +715,23 @@ export const api = {
     request<{ assignmentId: string }>(
       `/api/review/assignments/${encodeURIComponent(assignmentId)}/reopen`,
       { method: 'POST', body: {} },
+    ),
+  reviewCoverage: (cycleId: string, signal?: AbortSignal) =>
+    get<Coverage>(`/api/cycles/${encodeURIComponent(cycleId)}/review-coverage`, signal),
+  cycleConflicts: (cycleId: string, signal?: AbortSignal) =>
+    get<{ conflicts: OutstandingConflict[] }>(
+      `/api/cycles/${encodeURIComponent(cycleId)}/conflicts`,
+      signal,
+    ),
+  clearConflict: (assignmentId: string, resolution: string) =>
+    request<{ ok: true }>(
+      `/api/review/assignments/${encodeURIComponent(assignmentId)}/conflict/clear`,
+      { method: 'POST', body: { resolution } },
+    ),
+  recuse: (assignmentId: string, reason: string) =>
+    request<{ ok: true }>(
+      `/api/review/assignments/${encodeURIComponent(assignmentId)}/recuse`,
+      { method: 'POST', body: { reason } },
     ),
   scoreSummary: (applicationId: string, signal?: AbortSignal) =>
     get<ScoreSummary>(`/api/applications/${encodeURIComponent(applicationId)}/scores`, signal),

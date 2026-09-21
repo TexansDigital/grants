@@ -35,6 +35,7 @@
     "dev:applicant": "wrangler dev --env=\"\" --var APPLICANT_BASE_URL:http://grants.houstontexansfoundation.org",
     "sql:apply": "node scripts/apply-sql.mjs",
     "e2e:rubric": "node scripts/e2e-rubric.mjs",
+    "e2e:coverage": "node scripts/e2e-coverage.mjs",
     "e2e:scoring": "node scripts/e2e-scoring.mjs",
     "e2e:letters": "node scripts/e2e-letters.mjs",
     "e2e:scorecards": "node scripts/e2e-scorecards.mjs",

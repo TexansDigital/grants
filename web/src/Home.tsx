@@ -26,6 +26,8 @@ interface Props {
   onOpenLetters: (cycleId: string) => void;
   /** The offline scorecard fallback for one cycle. */
   onOpenScorecards: (cycleId: string) => void;
+  /** Reviewer coverage, and the disclosures waiting on somebody. */
+  onOpenCoverage: (cycleId: string) => void;
   /** Reload the configuration after a form is built or published. */
   onChanged: () => void;
 }
@@ -39,6 +41,7 @@ export function Home({
   onOpenRubrics,
   onOpenLetters,
   onOpenScorecards,
+  onOpenCoverage,
   onChanged,
 }: Props): ReactElement {
   const cyclesByProgram = new Map<string, CycleRow[]>();
@@ -139,7 +142,7 @@ export function Home({
                         <td className="num">
                           {c.draft_grace_hours === null ? '—' : `${c.draft_grace_hours} h`}
                         </td>
-                        <td className="actions">
+                        <td className="row-actions">
                           {isAdmin && <CycleStatusButton cycle={c} onChanged={onChanged} />}
                           {isAdmin && (
                             // The decision-letter desk for this cycle. Reached
@@ -161,6 +164,20 @@ export function Home({
                               onClick={() => onOpenScorecards(c.id)}
                             >
                               Scorecards<span className="sr-only"> for {c.name}</span>
+                            </button>
+                          )}
+                          {isAdmin && (
+                            // Coverage, and the conflict disclosures waiting on
+                            // an admin. Both endpoints existed with no door,
+                            // so an application short of reviewers and a
+                            // reviewer blocked by their own disclosure were
+                            // equally invisible until the deadline.
+                            <button
+                              type="button"
+                              className="btn secondary small"
+                              onClick={() => onOpenCoverage(c.id)}
+                            >
+                              Coverage<span className="sr-only"> for {c.name}</span>
                             </button>
                           )}
                         </td>

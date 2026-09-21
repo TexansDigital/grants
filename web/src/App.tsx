@@ -41,6 +41,7 @@ import { ReviewQueue } from './ReviewQueue';
 import { ScoringSheet } from './ScoringSheet';
 import { Communications } from './Communications';
 import { Scorecards } from './Scorecards';
+import { ReviewCoverage } from './ReviewCoverage';
 import { Dashboard } from './Dashboard';
 import { AwardOffer } from './AwardOffer';
 import { ApplicationDetail } from './ApplicationDetail';
@@ -68,6 +69,7 @@ type Route =
   | { name: 'scoringSheet'; assignmentId: string }
   | { name: 'communications'; cycleId: string }
   | { name: 'scorecards'; cycleId: string }
+  | { name: 'coverage'; cycleId: string }
   | { name: 'dashboard' }
   | { name: 'openCycles' }
   | { name: 'publicGrants' }
@@ -101,6 +103,9 @@ function parseRoute(pathname: string): Route | null {
   if (parts.length === 1 && parts[0] === 'my-reviews') return { name: 'reviewQueue' };
   if (parts.length === 3 && parts[0] === 'cycles' && parts[2] === 'letters' && parts[1]) {
     return { name: 'communications', cycleId: parts[1] };
+  }
+  if (parts.length === 3 && parts[0] === 'cycles' && parts[2] === 'coverage' && parts[1]) {
+    return { name: 'coverage', cycleId: parts[1] };
   }
   if (parts.length === 3 && parts[0] === 'cycles' && parts[2] === 'scorecards' && parts[1]) {
     return { name: 'scorecards', cycleId: parts[1] };
@@ -330,6 +335,7 @@ export function App(): ReactElement {
           route?.name === 'scoringSheet' ||
           route?.name === 'communications' ||
           route?.name === 'scorecards' ||
+          route?.name === 'coverage' ||
           route?.name === 'dashboard'
         ) {
           const [s, p, c, f] = await Promise.all([
@@ -672,6 +678,17 @@ export function App(): ReactElement {
     return shell(<Dashboard />);
   }
 
+  if (route.name === 'coverage') {
+    const cycle = home.cycles.find((c) => c.id === route.cycleId);
+    const program = home.programs.find((p) => p.id === cycle?.program_id);
+    return shell(
+      <ReviewCoverage
+        cycleId={route.cycleId}
+        cycleName={cycle ? `${program?.name ?? ''} ${cycle.name}`.trim() : 'This cycle'}
+      />,
+    );
+  }
+
   if (route.name === 'scorecards') {
     return shell(
       <Scorecards cycleId={route.cycleId} onBack={() => navigate('/configuration')} />,
@@ -749,6 +766,7 @@ export function App(): ReactElement {
       onOpenRubrics={(id) => navigate(`/programs/${encodeURIComponent(id)}/rubrics`)}
       onOpenLetters={(id) => navigate(`/cycles/${encodeURIComponent(id)}/letters`)}
       onOpenScorecards={(id) => navigate(`/cycles/${encodeURIComponent(id)}/scorecards`)}
+      onOpenCoverage={(id: string) => navigate(`/cycles/${encodeURIComponent(id)}/coverage`)}
     />,
   );
 }

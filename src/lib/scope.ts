@@ -397,7 +397,10 @@ export async function listApplicationsForReviewer(
       `SELECT a.id, a.cycle_id, a.stage_id, a.organization_id, a.status,
               a.project_title, a.requested_amount_cents, a.submitted_at,
               ra.id AS review_assignment_id, ra.assigned_at, ra.completed_at,
-              ra.conflict_declared_at
+              ra.conflict_declared_at,
+              -- Both stamps, so the queue can show "disclosed, resolved"
+              -- rather than a row that looks permanently blocked. 0023.
+              ra.conflict_cleared_at
          FROM applications a
          JOIN review_assignments ra
            ON ra.application_id = a.id

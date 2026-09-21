@@ -200,6 +200,8 @@ export function ScoringSheet({ assignmentId, onBack }: Props): ReactElement {
   }
 
   const unscored = sheet.criteria.filter((c) => c.score === null).length;
+  /** Declared and not yet resolved. A resolved disclosure does not block. */
+  const blocked = sheet.conflictDeclaredAt !== null && sheet.conflictClearedAt === null;
 
   return (
     <>
@@ -211,18 +213,30 @@ export function ScoringSheet({ assignmentId, onBack }: Props): ReactElement {
           {' '}&middot; scored out of {formatScore(sheet.rubric.maxTotalScoreBp)}
         </p>
 
-        {sheet.conflictDeclaredAt && (
+        {blocked && (
           <p className="banner danger" role="alert">
             You declared a conflict on this application, so it cannot be scored. An administrator
-            will recuse you or reassign it. Nothing you enter here would count.
+            will look at it and either record that it is not a conflict, recuse you, or reassign
+            it. Nothing you enter here would count in the meantime.
           </p>
         )}
-        {sheet.completedAt && !sheet.conflictDeclaredAt && (
+        {sheet.conflictDeclaredAt && sheet.conflictClearedAt && (
+          // Kept on screen after it is resolved. The reviewer disclosed
+          // something and is now being asked to score it anyway; being told
+          // that was a decision somebody made, rather than finding the block
+          // has quietly lifted, is the difference between a process and a
+          // glitch.
+          <p className="banner" role="status">
+            You disclosed a possible conflict here and an administrator recorded that it is not
+            one. You can score it.
+          </p>
+        )}
+        {sheet.completedAt && !blocked && (
           <p className="banner" role="status">
             You submitted this review. It can still be reopened until the application is decided.
           </p>
         )}
-        {!sheet.editable && !sheet.conflictDeclaredAt && !sheet.completedAt && (
+        {!sheet.editable && !blocked && !sheet.completedAt && (
           <p className="banner" role="status">
             This application has been decided, so its scores are settled.
           </p>
