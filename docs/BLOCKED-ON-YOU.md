@@ -4,12 +4,48 @@ One list, kept current. Everything here blocks work that is otherwise ready to
 start, or blocks the platform going live. Nothing here is something I can do
 myself, decide on your behalf, or work around.
 
-Last updated: 20 September 2026.
+Last updated: 21 September 2026.
+
+---
+
+## 0. Waiting on your terminal, not on a decision
+
+Two things, neither of which needs a judgement call. They are first because
+everything below assumes the preview environment matches the code.
+
+**Apply the migrations and redeploy.** Three are outstanding:
+
+```
+npm run whoami
+npm run migrate:preview
+npm run build:web && npx wrangler deploy --env=""
+```
+
+| Migration | What it adds |
+|---|---|
+| `0022_retention_notice_stamp` | Records which files have already been warned about, so a missed cron night delays the month-out retention warning instead of losing it. |
+| `0023_conflict_cleared` | Lets an admin record that a declared conflict is not one, instead of the reviewer being blocked until somebody recuses them. |
+| `0024_award_amendments` | The amendments table 0012 has been pointing at since Phase 0. Until it is applied, an award recorded at the wrong amount still cannot be corrected. |
+
+**Then look at the Turnstile widget on `apply.`, on a real browser.** The
+Worker's Content-Security-Policy said `script-src 'self'`, which blocked
+Turnstile's script and its challenge iframe outright: the widget could not have
+rendered on the sign-in page or the eligibility screen, and no token was ever
+produced. That is fixed and tested, but the fix can only be confirmed where
+there is a real network route to `challenges.cloudflare.com`, which the build
+environment does not have. Open the sign-in page and confirm you see the
+checkbox.
+
+**Nothing here touches production.** `migrate:preview` runs against the preview
+database, which is what `npm run whoami` prints before you commit to anything.
+
+---
 
 **The short version, in the order it unblocks things:**
 
 | | What | Blocks |
 |---|---|---|
+| 0 | Apply migrations 0022–0024, redeploy, eyeball Turnstile (§0) | The three features above, and confirming bot protection works at all |
 | 1 | ~~`apply.` DNS record, and Resend's DNS records~~ | **DONE 20 Sep.** Both hostnames live, domain verified, SPF/DKIM/DMARC published. |
 | 2 | ~~Resend API key, as a Wrangler secret~~ | **DONE 20 Sep.** A sign-in link was sent, delivered, and used to reach the grantee portal. |
 | 3 | R2 key + secret, `steward-staging-backups`, bucket CORS | Every file upload. (Account id and `steward-preview-backups` are done.) |

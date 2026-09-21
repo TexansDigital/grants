@@ -2,7 +2,14 @@
 
 Revised after adversarial review. This is a proposed **revision** to the phase
 plan in CLAUDE.md, not a restatement of it. Where it differs, the reason is
-stated. Nothing here has been built.
+stated.
+
+**"Nothing here has been built" was true when this line was written and has
+not been true for months.** Most of it is built; "Where we actually are" below
+is the part kept current, and the rest of the file is the original plan and
+its reasoning, preserved because the reasoning still holds even where the
+status has moved on. Struck-through items are done or reversed, with what
+replaced them.
 
 ## Where we actually are
 
@@ -10,8 +17,9 @@ stated. Nothing here has been built.
 being true; the rest of the file is the original plan and its reasoning, kept
 because the reasoning still holds even where the status has moved on.
 
-**Built and reachable: 1,427 tests, migrations 0001-0019.** Seven browser
-harnesses drive real Chromium against the built bundle.
+**Built and reachable: 1,539 tests, migrations 0001-0024.** Ten browser
+harnesses drive real Chromium against the built bundle: three against a real
+local Worker, seven against the built bundle with a stubbed API.
 
 **An applicant can complete an application end to end.** Eligibility screen,
 magic-link sign-in, draft creation, server-backed autosave, direct-to-R2
@@ -28,10 +36,18 @@ organizations with an undo.
 **Reviewers can** see their own queue, score against the cycle's rubric with
 autosave, declare a conflict, and submit or reopen a review. **Admins can**
 build and publish a versioned rubric, read every reviewer's scores side by
-side, record a decision, create the award record from it, send award and
-decline letters with the acceptances-first rule enforced, export and re-import
-an offline scorecard for a consultant, and read a dashboard whose CSV is the
-export executives receive.
+side, record a decision, create the award record from it, amend it afterwards
+with a reason and a permanent history, record receipt of the W-9, the signed
+agreement and the media release, send award and decline letters with the
+acceptances-first rule enforced, export and re-import an offline scorecard for
+a consultant, work a coverage screen that shows which applications are short
+of reviewers, resolve a declared conflict without recusing anybody, and read a
+dashboard whose CSV is the export executives receive.
+
+**Applicants and grantees can read their own uploads back.** Every file a
+nonprofit sends -- audited accounts on an application, a budget filed with a
+report -- can be opened again from the page it was attached on, through a
+five-minute signed URL scoped to the session's organization.
 
 **An applicant is never told by the portal.** An awarded or declined
 application reads as still under review to the applicant until somebody
@@ -43,11 +59,18 @@ the Formstack/awards importer, the nightly D1 export to R2, and a retention
 policy that destroys applicants' financial documents 90 days after their
 application is decided.
 
-**Not built:** the public grantee page, the Eloqua opt-in sync, a payment
-ledger (so "committed versus disbursed" cannot be computed and the dashboard
-says so), a generated PDF (the CSV plus the browser's print-to-PDF is what
-exists), and bulk sending of decision letters — each one goes individually,
-which at 250 declines is a long afternoon.
+**Not built:** the Eloqua opt-in sync, a generated PDF (the CSV plus the
+browser's print-to-PDF is what exists), EIN verification against the IRS file
+(`src/lib/ein.ts` has the result type and nothing behind it, pending decision
+#3 below), and award documents as FILES rather than dates -- receipt is
+recorded, the document itself still arrives by email. Declines now send in
+rounds rather than one at a time.
+
+The public grantee page IS built, contrary to "Not proposed" at the foot of
+this file: a read-only list gated on an admin marking an award public, the
+grantee having been told, and the embargo date having passed. The payment
+ledger is built too, so "committed versus disbursed" is a number rather than
+an apology.
 
 **Never yet exercised for real,** and this is the honest gap between "works"
 and "works in production":
@@ -61,7 +84,14 @@ and "works in production":
   performing it is a human step that has not happened.
 - **No human security review.** See `docs/BLOCKED-ON-YOU.md`.
 
-**Still owed by the Foundation:** the impact metrics CSV, decline wording (the
+- **The Turnstile widget has never rendered.** The Worker's CSP blocked its
+  script and its iframe outright, so bot protection on the public endpoints has
+  never actually run. The policy is fixed and tested; confirming the widget
+  appears needs a browser with a real route to Cloudflare, which the build
+  environment does not have. See `BLOCKED-ON-YOU.md` §0.
+
+**Still owed by the Foundation:** three migrations applied and a redeploy
+(`BLOCKED-ON-YOU.md` §0), the impact metrics CSV, decline wording (the
 machinery does not need it; the first real send does), the security review, the
 backup restore test, and answers to CLAUDE.md's open decisions #1, #2, #5 and
 #7. Decision #4 is answered — see DECISIONS §37.
@@ -70,12 +100,30 @@ backup restore test, and answers to CLAUDE.md's open decisions #1, #2, #5 and
 
 This matters for sequencing:
 
-- `cycles.rubric_id` is a dangling `TEXT` with no FK (`0002:102`).
-- `attachments.parent_type` already admits `'award'`, `'report_submission'` and
-  `'rubric'` (`0004:207`).
-- `getApplicationForStaff` **fails closed for every reviewer today**, because
-  `review_assignments` does not exist (`src/lib/scope.ts:229`). A reviewer
-  session currently 404s on every application in the system.
+*(Written before Phase 1. Kept because the pattern it names kept recurring --
+a schema that commits to something no code can reach -- and each instance was
+found only by reading the migration rather than by any test.)*
+
+- ~~`cycles.rubric_id` is a dangling `TEXT` with no FK.~~ Fixed in 0006.
+- ~~`attachments.parent_type` already admits `'award'`, `'report_submission'`
+  and `'rubric'`.~~ Both external-readable types are now reachable.
+- ~~`getApplicationForStaff` fails closed for every reviewer.~~ Fixed in 0006.
+
+**Later instances of the same pattern, all now closed:**
+
+- 0012's three award-document columns could not be written by anything for two
+  phases, while the data health check measured them.
+- 0012 refused to let an awarded amount be updated, pointing at an amendments
+  table Phase 4 never built -- so a wrong amount could not be corrected at all.
+  Fixed in 0024.
+- 0020's `award.accepted` audit action and `status = 'active'` had no writer.
+- `reviewCoverage` and the conflict declaration both existed with no screen.
+
+**Still open, and the same shape:** `award_amendments` now exists, but nothing
+generates a REVISED payment schedule after an amount is cut -- the ledger says
+in words that the schedule overruns the award and leaves the rebuild to a
+person. That is deliberate for now and is recorded here so it is not mistaken
+for finished.
 
 ## Changes to the phase plan
 
@@ -192,4 +240,7 @@ numbers are ordering, not reservations.)
 - No production deploy in any item here, pending decision 1.
 - No public endpoint before item 13.
 - Offline scoring stays a fallback, never the default path.
-- The public grantee page (Module 8) is deliberately dropped for now.
+- ~~The public grantee page (Module 8) is deliberately dropped for now.~~
+  **Reversed.** It was built: every field on it was already recorded for
+  another reason, so it cost no extra data entry, and it partly serves the
+  external reporting that is manual today.
