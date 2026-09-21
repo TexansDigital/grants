@@ -179,6 +179,18 @@ export interface ScoringSheet {
   editable: boolean;
 }
 
+export interface AwardPaperwork {
+  awardId: string;
+  organizationName: string;
+  status: string;
+  acceptedAt: string | null;
+  declinedByGranteeAt: string | null;
+  granteeResponseNote: string | null;
+  documents: { key: 'w9' | 'agreement' | 'media_release'; label: string; receivedAt: string | null }[];
+  outstanding: number;
+  scheduledCents: number;
+}
+
 export interface CoverageRow {
   application_id: string;
   project_title: string | null;
@@ -715,6 +727,17 @@ export const api = {
     request<{ assignmentId: string }>(
       `/api/review/assignments/${encodeURIComponent(assignmentId)}/reopen`,
       { method: 'POST', body: {} },
+    ),
+  awardPaperwork: (awardId: string, signal?: AbortSignal) =>
+    get<AwardPaperwork>(`/api/awards/${encodeURIComponent(awardId)}/paperwork`, signal),
+  recordAwardDocument: (
+    awardId: string,
+    document: 'w9' | 'agreement' | 'media_release',
+    receivedAt: string | null,
+  ) =>
+    request<{ awardId: string; document: string; receivedAt: string | null }>(
+      `/api/awards/${encodeURIComponent(awardId)}/document`,
+      { method: 'POST', body: { document, receivedAt } },
     ),
   reviewCoverage: (cycleId: string, signal?: AbortSignal) =>
     get<Coverage>(`/api/cycles/${encodeURIComponent(cycleId)}/review-coverage`, signal),

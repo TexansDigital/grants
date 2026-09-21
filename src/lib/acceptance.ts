@@ -408,3 +408,100 @@ export async function recordAwardDocument(
 
   return { awardId, document, receivedAt: stamp };
 }
+
+/**
+ * The paperwork on one award: what has arrived and what has not.
+ *
+ * WHY IT IS SEPARATE FROM THE LEDGER. The ledger answers "what was agreed and
+ * what has gone out"; this answers "what are we still waiting on before any of
+ * it should". They are read side by side and written by different people --
+ * finance reports a payment, an admin confirms a document arrived -- and one
+ * function returning both would tie a screen about money to a screen about
+ * files forever.
+ *
+ * IT DOES NOT ENFORCE ANYTHING, deliberately. Nothing here refuses to schedule
+ * a payment because a W-9 is missing. The Foundation's own order of operations
+ * is its to run, this system does not disburse money, and a hard block would
+ * be this code deciding a finance question it does not have the facts for.
+ * What it does is say plainly, next to the schedule, what is outstanding --
+ * which is the thing nobody could see.
+ *
+ * ADMIN ONLY. Receipt of a grantee's W-9 is the Foundation's own record, and a
+ * reviewer has no business with an award's paperwork at all.
+ */
+export interface AwardPaperwork {
+  awardId: string;
+  organizationName: string;
+  status: string;
+  acceptedAt: string | null;
+  declinedByGranteeAt: string | null;
+  /** The grantee's own words, whichever way they answered. */
+  granteeResponseNote: string | null;
+  documents: { key: AwardDocument; label: string; receivedAt: string | null }[];
+  /** How many of the three are still missing. The number a list is sorted by. */
+  outstanding: number;
+  /** Money already scheduled against an award whose paperwork is incomplete. */
+  scheduledCents: number;
+}
+
+const DOCUMENT_LABEL: Record<AwardDocument, string> = {
+  w9: 'W-9',
+  agreement: 'Signed grant agreement',
+  media_release: 'Media release',
+};
+
+export async function awardPaperwork(
+  db: D1Database,
+  session: Session,
+  awardId: string,
+): Promise<AwardPaperwork> {
+  if (session.role !== 'admin') throw notFound('award');
+
+  const row = await db
+    .prepare(
+      `SELECT w.id, w.status, w.accepted_at AS acceptedAt,
+              w.declined_by_grantee_at AS declinedByGranteeAt,
+              w.grantee_response_note AS granteeResponseNote,
+              w.w9_received_at AS w9, w.agreement_signed_at AS agreement,
+              w.media_release_at AS mediaRelease,
+              o.legal_name AS organizationName,
+              COALESCE((
+                SELECT SUM(p.amount_cents) FROM payments p
+                 WHERE p.award_id = w.id AND p.deleted_at IS NULL
+                   AND p.status <> 'cancelled'
+              ), 0) AS scheduledCents
+         FROM awards w
+         JOIN organizations o ON o.id = w.organization_id
+        WHERE w.id = ? AND w.deleted_at IS NULL`,
+    )
+    .bind(awardId)
+    .first<{
+      id: string; status: string; acceptedAt: string | null;
+      declinedByGranteeAt: string | null; granteeResponseNote: string | null;
+      w9: string | null; agreement: string | null; mediaRelease: string | null;
+      organizationName: string; scheduledCents: number;
+    }>();
+  if (!row) throw notFound('award');
+
+  const documents = [
+    { key: 'w9' as const, label: DOCUMENT_LABEL.w9, receivedAt: row.w9 },
+    { key: 'agreement' as const, label: DOCUMENT_LABEL.agreement, receivedAt: row.agreement },
+    {
+      key: 'media_release' as const,
+      label: DOCUMENT_LABEL.media_release,
+      receivedAt: row.mediaRelease,
+    },
+  ];
+
+  return {
+    awardId,
+    organizationName: row.organizationName,
+    status: row.status,
+    acceptedAt: row.acceptedAt,
+    declinedByGranteeAt: row.declinedByGranteeAt,
+    granteeResponseNote: row.granteeResponseNote,
+    documents,
+    outstanding: documents.filter((d) => d.receivedAt === null).length,
+    scheduledCents: row.scheduledCents,
+  };
+}

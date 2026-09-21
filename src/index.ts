@@ -49,7 +49,7 @@ import {
 import { createAwardFromDecision, budgetByProgram } from './lib/awards';
 import { publicGrants, publishableAwards, setAwardPublic } from './lib/publicGrants';
 import {
-  awardsAwaitingResponse, acceptAward, declineAward, recordAwardDocument,
+  awardsAwaitingResponse, acceptAward, declineAward, recordAwardDocument, awardPaperwork,
   type AwardDocument,
 } from './lib/acceptance';
 import { buildDashboard, dashboardCsv } from './lib/dashboard';
@@ -1121,6 +1121,19 @@ const routes: readonly Route[] = [
         ctx,
       );
     },
+  },
+  {
+    /*
+     * What is outstanding on one award, and what the grantee said.
+     *
+     * ADMIN_ONLY. Receipt of a grantee's W-9 is the Foundation's own record,
+     * and a reviewer has no business with an award's paperwork at all.
+     */
+    method: 'GET',
+    path: '/api/awards/:id/paperwork',
+    roles: ADMIN_ONLY,
+    handler: async ({ env, ctx, params, session }) =>
+      json(await awardPaperwork(env.DB, session, params.id!), ctx),
   },
   {
     /*

@@ -22,6 +22,7 @@ import type { ReactElement } from 'react';
 import { ApiError, api } from './api';
 import { formatCents, parseCurrencyToCents, MoneyParseError } from '../../src/lib/money';
 import { PaymentLedger } from './PaymentLedger';
+import { AwardPaperwork } from './AwardPaperwork';
 import type { ScoreSummary } from './api';
 
 const WEIGHT_ONE_BP = 10000;
@@ -254,11 +255,17 @@ export function DecisionPanel({
       )}
 
       {/*
-        * The ledger, once an award exists. Below the reviews and the decision,
-        * because that is the order the work happens in: score, decide, record
-        * the award, then schedule the money.
-        */}
-      {awardId && <PaymentLedger awardId={awardId} />}
+        The paperwork and then the ledger, once an award exists. Below the
+        reviews and the decision, because that is the order the work happens
+        in: score, decide, record the award, collect what is needed before
+        funds move, then schedule the money.
+      */}
+      {awardId && (
+        <>
+          <AwardPaperwork awardId={awardId} />
+          <PaymentLedger awardId={awardId} />
+        </>
+      )}
 
       <h3>Decision</h3>
       {decidedAt ? (

@@ -16,7 +16,9 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { db, ctxFor, adminSession, applicantSession, appErrorFrom } from './helpers';
+import {
+  db, ctxFor, adminSession, applicantSession, reviewerSession, appErrorFrom,
+} from './helpers';
 import { seedProgram } from '../src/seed/seedProgram';
 import { INSPIRE_CHANGE } from '../src/seed/inspireChange';
 import { newId } from '../src/lib/ids';
@@ -24,7 +26,7 @@ import { nowIso } from '../src/lib/time';
 import { decideApplication } from '../src/lib/decisions';
 import { createAwardFromDecision, budgetByProgram } from '../src/lib/awards';
 import {
-  awardsAwaitingResponse, acceptAward, declineAward, recordAwardDocument,
+  awardsAwaitingResponse, acceptAward, declineAward, recordAwardDocument, awardPaperwork,
 } from '../src/lib/acceptance';
 import { schedulePayment, recordPayment } from '../src/lib/payments';
 import type { Session } from '../src/types';
@@ -444,5 +446,87 @@ describe('recording a document', () => {
       .bind(s.awardId)
       .first<{ n: number }>();
     expect(after?.n).toBe(0);
+  });
+});
+
+
+describe('what is outstanding on one award', () => {
+  /*
+   * WHY THIS EXISTS. The three document columns have been on `awards` since
+   * 0012 and nothing could write them; the data health screen has been
+   * checking active awards for a missing W-9 against columns no screen could
+   * fill. CLAUDE.md puts the W-9 and the media release at acceptance
+   * deliberately -- "collecting tax documents from 300 applicants to fund 50
+   * is waste and unnecessary custody of sensitive documents" -- which only
+   * works if there is somewhere to record them arriving.
+   */
+
+  it('lists all three, and counts what is missing', async () => {
+    const s = await offered();
+    const before = await awardPaperwork(db, admin, s.awardId);
+    expect(before.documents.map((d) => d.key)).toEqual(['w9', 'agreement', 'media_release']);
+    expect(before.outstanding).toBe(3);
+    expect(before.documents.every((d) => d.receivedAt === null)).toBe(true);
+
+    await recordAwardDocument(db, ctx(), admin, s.awardId, 'w9', nowIso());
+    const after = await awardPaperwork(db, admin, s.awardId);
+    expect(after.outstanding).toBe(2);
+    expect(after.documents.find((d) => d.key === 'w9')?.receivedAt).not.toBeNull();
+  });
+
+  it('says how much is scheduled against it, which is the sentence that matters', async () => {
+    /*
+     * Not a refusal. Steward does not disburse money and the Foundation's own
+     * order of operations is its to run -- but somebody about to record a
+     * payment should be able to see that $25,000 is scheduled against an
+     * award with no signed agreement, and nothing could say so.
+     */
+    const s = await offered();
+    await acceptAward(db, ctx(), s.grantee, s.awardId, { attestationText: ATTESTATION });
+    await schedulePayment(db, ctx(), admin, s.awardId, {
+      amountCents: 1_000_000,
+      scheduledDate: new Date(Date.now() + 30 * 86_400_000).toISOString(),
+    });
+
+    const paper = await awardPaperwork(db, admin, s.awardId);
+    expect(paper.scheduledCents).toBe(1_000_000);
+    expect(paper.outstanding).toBe(3);
+    expect(paper.acceptedAt).not.toBeNull();
+  });
+
+  it('does not count a cancelled payment as money scheduled', async () => {
+    /*
+     * A REFUSED AWARD MUST NOT READ AS "money scheduled against incomplete
+     * paperwork" forever, for a grant nobody took. `declineAward` cancels the
+     * scheduled payments; this proves the paperwork view agrees with that
+     * rather than summing every row on the award.
+     *
+     * The payment is scheduled BEFORE the refusal on purpose. An earlier
+     * version of this test declined an award with no payments on it at all,
+     * so it passed with the status filter removed -- a vacuous assertion that
+     * a mutant caught.
+     */
+    const s = await offered();
+    await schedulePayment(db, ctx(), admin, s.awardId, {
+      amountCents: 500_000,
+      scheduledDate: new Date(Date.now() + 30 * 86_400_000).toISOString(),
+    });
+    expect((await awardPaperwork(db, admin, s.awardId)).scheduledCents).toBe(500_000);
+
+    await declineAward(db, ctx(), s.grantee, s.awardId, 'Our other funding fell through.');
+    const paper = await awardPaperwork(db, admin, s.awardId);
+    expect(paper.scheduledCents).toBe(0);
+    expect(paper.declinedByGranteeAt).not.toBeNull();
+    expect(paper.granteeResponseNote).toContain('other funding');
+  });
+
+  it('refuses everyone but an admin', async () => {
+    // Receipt of a grantee's W-9 is the Foundation's own record, and a
+    // reviewer has no business with an award's paperwork at all.
+    const s = await offered();
+    expect((await appErrorFrom(awardPaperwork(db, reviewerSession(newId()), s.awardId))).code)
+      .toBe('NOT_FOUND');
+    expect((await appErrorFrom(awardPaperwork(db, s.grantee, s.awardId))).code)
+      .toBe('NOT_FOUND');
   });
 });

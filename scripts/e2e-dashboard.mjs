@@ -123,7 +123,7 @@ const DASHBOARD = {
 };
 
 function appState(status) {
-  return { status, awards: [], awardId: null, payments: [] };
+  return { status, awards: [], awardId: null, payments: [], documents: [] };
 }
 
 async function stubApi(page, s) {
@@ -165,6 +165,23 @@ async function stubApi(page, s) {
         applicationId: 'app1', rubric: null, reviewers: [], meanCompletedBp: null,
         byCriterion: [],
       });
+    }
+    if (p === '/api/awards/w1/paperwork') {
+      return json(route, {
+        awardId: 'w1', organizationName: 'Invented Collective', status: 'pending',
+        acceptedAt: null, declinedByGranteeAt: null, granteeResponseNote: null,
+        documents: [
+          { key: 'w9', label: 'W-9', receivedAt: null },
+          { key: 'agreement', label: 'Signed grant agreement', receivedAt: null },
+          { key: 'media_release', label: 'Media release', receivedAt: null },
+        ],
+        outstanding: 3,
+        scheduledCents: s.payments.reduce((t, x) => t + x.amountCents, 0),
+      });
+    }
+    if (p === '/api/awards/w1/document' && method === 'POST') {
+      s.documents.push(JSON.parse(route.request().postData() ?? '{}'));
+      return json(route, { awardId: 'w1', document: 'w9', receivedAt: null });
     }
     if (p === '/api/awards/w1/payments' && method === 'GET') {
       return json(route, {
@@ -340,6 +357,49 @@ async function main() {
       'the screen says the award is pending, not accepted',
       (await page.locator('body').innerText()).includes('pending acceptance'),
       true,
+    );
+
+    // ---- the paperwork, which had columns and no screen -------------------
+    /*
+     * The three document columns have been on `awards` since 0012 and nothing
+     * could write them; the data health screen has been checking active
+     * awards for a missing W-9 against columns no page could fill.
+     */
+    await page.getByRole('heading', { name: 'Before funds are released' }).waitFor();
+    // `.last()`, because the paperwork panel is nested inside the decision
+    // panel -- so the outer one matches the filter too.
+    const paperwork = await page
+      .locator('.panel', { has: page.getByRole('heading', { name: 'Before funds are released' }) })
+      .last()
+      .innerText();
+    check('all three documents are listed', [
+      paperwork.includes('W-9'),
+      paperwork.includes('Signed grant agreement'),
+      paperwork.includes('Media release'),
+    ], [true, true, true]);
+    check(
+      'and it says the grantee has not accepted yet, so none of it is due from them',
+      paperwork.includes('has not accepted this award yet'),
+      true,
+    );
+
+    /*
+     * THE DATE IS NOT HARD-CODED TO TODAY. The payment ledger learned this
+     * the hard way: a receipt field fixed to today is permanently wrong for
+     * anything recorded late, on the column that answers "when did we have
+     * it".
+     */
+    await page.getByRole('button', { name: /Record receipt/ }).first().click();
+    await page.locator('#document-date').waitFor();
+    await page.locator('#document-date').fill('2026-10-14');
+    await page.getByRole('button', { name: 'Record it' }).click();
+    await page.getByText('recorded as received').waitFor();
+    check('one document call went out', s.documents.length, 1);
+    check('it named the W-9', s.documents[0].document, 'w9');
+    check(
+      'and carried the date that was typed, not today',
+      s.documents[0].receivedAt.slice(0, 10),
+      '2026-10-14',
     );
 
     // ---- the payment ledger, once an award exists -------------------------
