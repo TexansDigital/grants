@@ -847,3 +847,34 @@ browser harness, so what is verified is the request's *shape* — a PUT, carryin
 no `Content-Type`, which is the rule R2 punishes with a 403 that does not
 reproduce in curl. Whether R2 accepts it needs real credentials and a real
 bucket. That test has a human in it.
+
+---
+
+## §32 — Inspire Change review is not blind
+
+**Decided 21 September 2026, by the Foundation.**
+
+`0015_review_blinding.sql` added `cycles.blind_review` to record a tension
+`CLAUDE.md` contains rather than to resolve it: an applicant-history panel at
+the point of review ("this org has applied three times, was funded once for
+$25,000, filed both reports on time") and anonymised narrative review cannot
+both be true of the same review.
+
+**Inspire Change takes the history.** Reviewers see who they are reading about,
+and the institutional memory that currently lives in one person's head is on the
+screen in front of them.
+
+**The column stays**, defaulting to 0, which is now both the default and the
+decision rather than a placeholder. A future program may choose otherwise —
+that is why it is per cycle — and `form_fields.conceal_in_review` stays for the
+same reason: marking which questions identify an applicant costs nothing now
+and cannot be retrofitted once reviewers have scored.
+
+**What this closes.** Nothing needs to hide a field, withhold the history panel,
+or ask an admin which mode a cycle is in. The scoring screen shows the
+application and its history together, which is the simpler thing to build and
+the one the Foundation asked for.
+
+**What would reopen it.** A program where the review pool includes people with
+standing relationships to the applicant pool, and where the history is the thing
+most likely to bias them rather than the thing most likely to inform them.
