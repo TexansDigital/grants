@@ -153,14 +153,33 @@ export async function presignDownloadForStaff(
 ): Promise<DownloadGrant> {
   const row = await env.DB.prepare(
     `SELECT id, parent_type, parent_id, organization_id, r2_key, filename,
-            mime_type, size_bytes
+            mime_type, size_bytes, purged_at
        FROM attachments WHERE id = ? AND deleted_at IS NULL`,
   )
     .bind(attachmentId)
-    .first<AttachmentRow>();
+    .first<AttachmentRow & { purged_at: string | null }>();
   if (!row) throw notFound('file');
 
   await assertStaffMayRead(env.DB, session, row);
+
+  /*
+   * Retention may already have destroyed the bytes.
+   *
+   * The row survives a purge on purpose -- what was uploaded, by whom, when,
+   * and when it was destroyed is a financial record -- so this is the one case
+   * where the attachment exists and the file does not. Checked AFTER the
+   * access check, so a purge does not become a way of learning that an
+   * attachment id was real.
+   *
+   * Said plainly rather than signing a URL that 404s at R2, which would read
+   * to the person clicking as a broken system rather than a policy working.
+   */
+  if (row.purged_at) {
+    throw new AppError('CONFLICT', 'This file was deleted under the retention policy.', {
+      internalMessage: `download requested for attachment ${attachmentId} purged at ${row.purged_at}`,
+      severity: 'warn',
+    });
+  }
 
   const origin = r2UploadOrigin(env);
   if (!origin) {

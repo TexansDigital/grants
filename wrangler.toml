@@ -119,6 +119,19 @@ EMAIL_REPLY_TO = "grants@houstontexansfoundation.org"
 # built from one would send an applicant to an address of the attacker's
 # choosing carrying a live token.
 APPLICANT_BASE_URL = "https://apply.houstontexansfoundation.org"
+# Where staff reach Steward. Used only for links INTO the app in notices sent
+# to staff, and configured for the same reason APPLICANT_BASE_URL is: a link
+# in an email cannot be built from a Host header.
+STAFF_BASE_URL = "https://grants.houstontexansfoundation.org"
+# How long an applicant's uploaded financial documents are kept after their
+# application is decided. Ninety days: long enough to answer a question about a
+# decision just made, short enough that a breach next year does not expose this
+# year's applicants.
+#
+# The clock does NOT start at upload, and an application that produced a
+# pending or active award has no clock at all -- the itemized budget is what
+# the award was made against. See migrations/0018_retention.sql.
+RETENTION_DAYS = "90"
 # Turnstile's SITE key is public by design -- it is in the HTML of every site
 # that uses Turnstile -- and is handed to the browser so the widget can render.
 # Empty until a human creates the widget in the Cloudflare dashboard. The
@@ -235,6 +248,9 @@ TURNSTILE_OPTIONAL = "1"
 EMAIL_FROM = ""
 EMAIL_REPLY_TO = ""
 APPLICANT_BASE_URL = ""
+# Staging has no staff hostname either. An empty value means a retention
+# notice carries no link rather than a link to nowhere.
+STAFF_BASE_URL = ""
 
 [[env.staging.d1_databases]]
 binding = "DB"
@@ -283,6 +299,19 @@ DISPLAY_TIMEZONE = "America/Chicago"
 EMAIL_FROM = "Houston Texans Foundation <grants@houstontexansfoundation.org>"
 EMAIL_REPLY_TO = "grants@houstontexansfoundation.org"
 APPLICANT_BASE_URL = "https://apply.houstontexansfoundation.org"
+# Where staff reach Steward. Used only for links INTO the app in notices sent
+# to staff, and configured for the same reason APPLICANT_BASE_URL is: a link
+# in an email cannot be built from a Host header.
+STAFF_BASE_URL = "https://grants.houstontexansfoundation.org"
+# How long an applicant's uploaded financial documents are kept after their
+# application is decided. Ninety days: long enough to answer a question about a
+# decision just made, short enough that a breach next year does not expose this
+# year's applicants.
+#
+# The clock does NOT start at upload, and an application that produced a
+# pending or active award has no clock at all -- the itemized budget is what
+# the award was made against. See migrations/0018_retention.sql.
+RETENTION_DAYS = "90"
 
 [[env.production.d1_databases]]
 binding = "DB"

@@ -110,6 +110,10 @@ export type AuditAction =
   | 'attachment.uploaded'
   | 'attachment.deleted'
   | 'attachment.download_url_issued'
+  // Retention: the BYTES were destroyed. The attachment row survives with a
+  // purged_at stamp, so this is not a delete -- it is the record of one.
+  | 'attachment.purged'
+  | 'attachment.retention_held'
   // the nightly D1 export
   | 'data.exported'
   | 'user.created'

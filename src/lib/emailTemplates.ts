@@ -588,9 +588,119 @@ export const REPORT_RECEIVED: EmailTemplate<ReportReceivedVars> = {
  * template that forgets a plain-text body, or reuses a key, fails the suite
  * rather than reaching a recipient.
  */
+// ---------------------------------------------------------------------------
+// files_due_for_deletion
+// ---------------------------------------------------------------------------
+
+export interface DueFileLine {
+  organization: string;
+  filename: string;
+  dueDisplay: string;
+}
+
+export interface FilesDueForDeletionVars {
+  fileCount: number;
+  soonestDueDisplay: string;
+  lines: DueFileLine[];
+  /** How many files were left off the list, when there are many. */
+  truncated: number;
+  /** Into the app. Empty when no staff hostname is configured. */
+  reviewUrl: string;
+}
+
+/**
+ * "These applicants' financial documents are about to be destroyed."
+ *
+ * THE DOCUMENTS ARE NOT ATTACHED, and that is the point of the design rather
+ * than an omission. Attaching them would multiply the copies the retention
+ * policy exists to reduce -- outbox, two mailboxes, the mail provider, its
+ * backups, every phone signed in, and anywhere the message is forwarded.
+ * Steward can destroy its own copy. It cannot destroy those. So the notice
+ * carries a link and the reader opens what they need inside the app, where the
+ * read is scoped, five minutes long, and audited.
+ *
+ * WHAT THE NOTICE CAREFULLY DOES NOT CLAIM. A file drops off this list once a
+ * download link has been ISSUED for it. Downloads go from the browser straight
+ * to R2, so this system never learns whether the bytes arrived. The copy says
+ * "asked for" rather than "downloaded", because the reader is deciding whether
+ * it is safe to let somebody else's audited accounts be destroyed and should
+ * not be told something the sender does not know.
+ *
+ * NO NAMES OF PEOPLE, no amounts, no narrative. An organization name and a
+ * filename are enough to act on, and an email about financial documents should
+ * not itself be a small copy of them.
+ */
+export const FILES_DUE_FOR_DELETION: EmailTemplate<FilesDueForDeletionVars> = {
+  key: 'files_due_for_deletion',
+  render(v) {
+    const count = v.fileCount === 1 ? '1 file' : `${v.fileCount} files`;
+    const lead =
+      `${count} uploaded by applicants will be permanently deleted from Steward, ` +
+      `the first on ${v.soonestDueDisplay}. None of them has been asked for yet.`;
+    const rows = v.lines.map((l) => `  ${l.organization} — ${l.filename} (${l.dueDisplay})`);
+    const more = v.truncated > 0 ? [`  …and ${v.truncated} more.`] : [];
+    const action = v.reviewUrl
+      ? 'Open Steward to read any of them, or to hold one longer:'
+      : 'Open Steward to read any of them, or to hold one longer.';
+
+    return {
+      subject:
+        v.fileCount === 1
+          ? 'A file is due to be deleted from Steward'
+          : `${v.fileCount} files are due to be deleted from Steward`,
+      text: textBlock([
+        lead,
+        '',
+        'These are financial documents belonging to the applicants, not to the',
+        'Foundation. They are deleted on a schedule so that the Foundation is not',
+        'holding other organizations\' audited accounts indefinitely.',
+        '',
+        ...rows,
+        ...more,
+        '',
+        action,
+        ...(v.reviewUrl ? ['', v.reviewUrl] : []),
+        '',
+        'Nothing is attached to this email on purpose. Opening a file inside',
+        'Steward is recorded; a copy in a mailbox is not, and cannot be deleted',
+        'by the policy this message is about.',
+      ]),
+      html: layout({
+        preview: lead,
+        heading: 'Files due to be deleted',
+        blocks: [
+          escapeHtml(lead),
+          'These are financial documents belonging to the applicants, not to the Foundation. ' +
+            'They are deleted on a schedule so that the Foundation is not holding other ' +
+            'organizations&rsquo; audited accounts indefinitely.',
+          `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%">` +
+            v.lines
+              .map(
+                (l) =>
+                  `<tr><td style="padding:4px 0;font-size:14px;line-height:1.5;">` +
+                  `<strong>${escapeHtml(l.organization)}</strong><br>` +
+                  `${escapeHtml(l.filename)} — deletes ${escapeHtml(l.dueDisplay)}</td></tr>`,
+              )
+              .join('') +
+            (v.truncated > 0
+              ? `<tr><td style="padding:4px 0;font-size:14px;">&hellip;and ${v.truncated} more.</td></tr>`
+              : '') +
+            `</table>`,
+        ],
+        ...(v.reviewUrl ? { action: { label: 'Open Steward', url: v.reviewUrl } } : {}),
+        footer:
+          'Nothing is attached to this email on purpose. Opening a file inside Steward is ' +
+          'recorded; a copy in a mailbox is not, and cannot be deleted by the policy this ' +
+          'message is about.',
+      }),
+    };
+  },
+};
+
 export const TEMPLATES = {
   [SIGN_IN_PROBLEM.key]: SIGN_IN_PROBLEM,
   [SIGN_IN_LINK.key]: SIGN_IN_LINK,
   [APPLICATION_RECEIVED.key]: APPLICATION_RECEIVED,
   [REPORT_RECEIVED.key]: REPORT_RECEIVED,
+  [FILES_DUE_FOR_DELETION.key]: FILES_DUE_FOR_DELETION,
 } as const;

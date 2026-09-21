@@ -30,6 +30,7 @@ import { listOpenCycles, readPublicForm } from './lib/publicRoutes';
 import { createApplication, readDraft, autosaveDraft, submitDraft } from './lib/applicantRoutes';
 import { presignUpload, presignReportUpload, r2UploadOrigin } from './lib/uploads';
 import { presignDownloadForStaff } from './lib/downloads';
+import { runRetention, holdAttachment, purgeAttachmentNow, retentionScreen } from './lib/retention';
 import {
   granteeHome, granteeMe, readReport, autosaveReport, fileReport,
 } from './lib/granteeRoutes';
@@ -868,6 +869,56 @@ const routes: readonly Route[] = [
       json(await presignDownloadForStaff(env, ctx, session, params.id!), ctx),
   },
 
+  {
+    /*
+     * What is about to be destroyed, and what already was.
+     *
+     * Admin-only, and not because the data is sensitive -- the filenames are
+     * the least of it -- but because the two actions on this screen, holding a
+     * file longer and deleting one early, are admin actions. A reviewer given
+     * the list could only watch.
+     */
+    method: 'GET',
+    path: '/api/retention',
+    roles: ADMIN_ONLY,
+    handler: async ({ env, ctx }) => json(await retentionScreen(env.DB, nowIso()), ctx),
+  },
+  {
+    method: 'POST',
+    path: '/api/attachments/:id/retention-hold',
+    roles: ADMIN_ONLY,
+    handler: async ({ request, env, ctx, params, session }) => {
+      const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+      return json(
+        await holdAttachment(
+          env.DB, ctx, session, params.id!,
+          String(body.until ?? ''), String(body.reason ?? ''),
+        ),
+        ctx,
+      );
+    },
+  },
+  {
+    /*
+     * Destroy one file now, ahead of its date.
+     *
+     * Not a DELETE, because nothing is deleted: the attachment row survives
+     * with a purged_at stamp and the audit trail is unbroken. What this
+     * destroys is the object in R2. Naming the method after the record would
+     * describe the wrong thing.
+     */
+    method: 'POST',
+    path: '/api/attachments/:id/purge',
+    roles: ADMIN_ONLY,
+    handler: async ({ request, env, ctx, params, session }) => {
+      const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+      return json(
+        await purgeAttachmentNow(env, ctx, session, params.id!, String(body.reason ?? '')),
+        ctx,
+      );
+    },
+  },
+
   // ---- search --------------------------------------------------------------
   {
     // "Have we ever funded youth mental health in Fort Bend County" as a query
@@ -1145,21 +1196,42 @@ export default {
       route: `cron:${event.cron}`,
       method: 'SCHEDULED',
     };
-    try {
-      // One job today. When there is a second, this becomes a switch on
-      // event.cron rather than a sequence -- a failing export must not stop
-      // whatever runs after it, and a shared try block would do exactly that.
-      await scheduledBackup(env, ctx);
-      return;
-    } catch (err) {
-      await logError(env, ctx, {
-        severity: 'error',
-        code: 'CRON_FAILED',
-        message: err instanceof Error ? err.message : String(err),
-        stack: err instanceof Error ? (err.stack ?? null) : null,
-        context: { cron: event.cron },
-      });
-      throw err;
+    /*
+     * TWO JOBS, EACH IN ITS OWN TRY, which is what the single-job version said
+     * to do when a second arrived. A shared try block means a failing export
+     * silently cancels retention, and the symptom -- financial documents
+     * quietly outliving the policy -- looks like nothing at all.
+     *
+     * The export runs FIRST. It is the only copy of the database that outlives
+     * the account, and retention destroys things; taking the snapshot before
+     * the destruction means a mistaken purge is recoverable from last night's
+     * export rather than from nothing.
+     */
+    const failures: string[] = [];
+
+    for (const job of [
+      { name: 'backup', run: () => scheduledBackup(env, ctx) },
+      { name: 'retention', run: () => runRetention(env, ctx) },
+    ]) {
+      try {
+        await job.run();
+      } catch (err) {
+        failures.push(job.name);
+        await logError(env, ctx, {
+          severity: 'error',
+          code: 'CRON_FAILED',
+          message: err instanceof Error ? err.message : String(err),
+          stack: err instanceof Error ? (err.stack ?? null) : null,
+          context: { cron: event.cron, job: job.name },
+        });
+      }
+    }
+
+    // Thrown AFTER both have had their turn, so Cloudflare records the run as
+    // failed and it is visible in the dashboard rather than only in a log
+    // table somebody has to think to read.
+    if (failures.length > 0) {
+      throw new Error(`scheduled job(s) failed: ${failures.join(', ')}`);
     }
   },
 };

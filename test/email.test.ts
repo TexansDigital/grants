@@ -17,6 +17,7 @@ import {
   APPLICATION_RECEIVED,
   TEMPLATES,
   escapeHtml,
+  FILES_DUE_FOR_DELETION,
   type EmailTemplate,
 } from '../src/lib/emailTemplates';
 import type { Env } from '../src/types';
@@ -774,6 +775,16 @@ describe('templates', () => {
       supportEmail: 'grants@example.org',
       destination: 'Inspire Change application',
     },
+    files_due_for_deletion: {
+      fileCount: 2,
+      soonestDueDisplay: 'October 3, 2026',
+      lines: [
+        { organization: 'Invented Trust', filename: 'audited-2025.pdf', dueDisplay: 'October 3, 2026' },
+        { organization: 'Invented Alliance', filename: 'budget.xlsx', dueDisplay: 'October 9, 2026' },
+      ],
+      truncated: 0,
+      reviewUrl: 'https://grants.example.org/retention',
+    },
   };
 
   it('every registered template renders a subject, a text body and HTML', () => {
@@ -798,6 +809,32 @@ describe('templates', () => {
         `${k}: contains an emoji`,
       ).toBe(false);
     }
+  });
+
+  it('the retention notice carries no document and does not claim one was read', () => {
+    /*
+     * TWO PROPERTIES, both of which are the point of the design rather than
+     * copy preferences.
+     *
+     * NO ATTACHMENT. Mailing the documents multiplies the copies the policy
+     * exists to reduce -- outbox, both mailboxes, the provider, its backups,
+     * every phone signed in, every forward. Steward can destroy its own copy.
+     * It can never destroy those. The template has no attachment field at all,
+     * and this test is what stops one being added because it seemed helpful.
+     *
+     * NO CLAIM OF DELIVERY. A file drops off the list when a download link was
+     * ISSUED, not when bytes arrived -- downloads go browser-to-R2 and this
+     * system never sees them. The reader is deciding whether it is safe to let
+     * somebody else's audited accounts be destroyed, so the wording must not
+     * tell them something the sender does not know.
+     */
+    const r = FILES_DUE_FOR_DELETION.render(
+      FIXTURES.files_due_for_deletion as Parameters<typeof FILES_DUE_FOR_DELETION.render>[0],
+    );
+    expect(r.text).toMatch(/asked for/i);
+    expect(r.text).not.toMatch(/\bdownloaded\b/i);
+    expect(r.html).not.toMatch(/\bdownloaded\b/i);
+    expect(r.text).toMatch(/[Nn]othing is attached/);
   });
 
   it('names the destination in the subject, for a shared inbox', () => {

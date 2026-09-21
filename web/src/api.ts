@@ -95,6 +95,22 @@ export interface DownloadGrant {
   expiresAt: string;
 }
 
+export interface RetentionDueFile {
+  id: string;
+  filename: string;
+  organization_name: string;
+  project_title: string | null;
+  application_id: string;
+  effective_due_at: string;
+  /** When a download LINK was issued. Not proof the bytes were fetched. */
+  download_url_first_issued_at: string | null;
+}
+
+export interface RetentionScreen {
+  upcoming: RetentionDueFile[];
+  purged: Record<string, unknown>[];
+}
+
 export interface SearchHit {
   application_id: string;
   rank: number;
@@ -316,6 +332,17 @@ export const api = {
    * row -- and because a GET would let a link prefetcher issue live download
    * credentials for every financial statement on a page nobody clicked.
    */
+  retention: (signal?: AbortSignal) => get<RetentionScreen>('/api/retention', signal),
+  holdAttachment: (attachmentId: string, until: string, reason: string) =>
+    request<{ attachmentId: string; holdUntil: string }>(
+      `/api/attachments/${encodeURIComponent(attachmentId)}/retention-hold`,
+      { method: 'POST', body: { until, reason } },
+    ),
+  purgeAttachment: (attachmentId: string, reason: string) =>
+    request<{ attachmentId: string; purgedAt: string }>(
+      `/api/attachments/${encodeURIComponent(attachmentId)}/purge`,
+      { method: 'POST', body: { reason } },
+    ),
   downloadUrl: (attachmentId: string) =>
     request<DownloadGrant>(
       `/api/attachments/${encodeURIComponent(attachmentId)}/download-url`,

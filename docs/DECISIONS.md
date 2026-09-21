@@ -913,3 +913,69 @@ an address. Nothing in the test suite can establish this: the suite exercises
 a hostname mismatch, a secret belonging to a different widget -- live entirely
 in Cloudflare's configuration. Every future change to the widget config needs
 the same browser check.
+
+## §34 — Uploaded financial documents are destroyed 90 days after the decision
+
+**Date:** 2026-09-21
+**Status:** In force
+
+Applicants' uploaded financial statements, operating budgets and itemized
+spending budgets are destroyed from R2 on a schedule. The `attachments` row
+survives with a `purged_at` stamp; the bytes do not.
+
+**Why not the scheme that was proposed.** The original idea was to email the
+documents to the key admins and remind them daily to delete their copies.
+Emailing multiplies the copies the policy exists to reduce -- outbox, both
+mailboxes, the mail provider, its backups, every phone those accounts are
+signed into, every forward. Steward can destroy its own copy on day 90. It can
+never destroy those. A daily reminder to delete is a request, not a control,
+and it is filtered within a week. So the files never leave R2 and the notice
+carries a link.
+
+**Reconciled with "nothing is hard-deleted".** That rule is about records. The
+record here is what was uploaded, by whom, when, and when it was destroyed, and
+all of it survives, append-only, with an audit row. What is destroyed is the
+liability. Deleting the row would lose the trail; keeping the bytes keeps the
+exposure. The schema refuses to clear or restamp `purged_at`.
+
+**The clock starts at the decision, not the upload.** A cycle runs for months.
+A clock from upload would destroy a budget in the middle of the review that
+needs it, and would punish whoever applied first.
+
+**A live award suspends it entirely.** An application that produced a pending
+or active award has no deletion date at all. The itemized budget is what the
+award was made against and what the grantee's spending is checked against;
+destroying it would mean holding a grantee to a document the Foundation threw
+away.
+
+**The date is recomputed nightly, not stamped once.** Decisions get reversed,
+awards get created weeks later, terms get extended. An admin's hold is a
+separate column for exactly this reason: written into `purge_due_at` it would
+be silently undone by the next night's run, and the file would be destroyed on
+the original date with an audit row saying it had been held.
+
+**The notices say "asked for", never "downloaded".** A file drops off the
+nightly digest once a download URL has been issued for it. Downloads go from
+the browser straight to R2, so this system does not know whether the bytes were
+fetched. Somebody deciding whether it is safe to let another organization's
+audited accounts be destroyed must not be told "you have a copy" by a system
+that cannot know that. The column is named `download_url_first_issued_at` for
+the same reason.
+
+**Schedule.** One notice when a file enters the 30-day horizon, then one every
+day through the last seven, and nothing in between -- twenty identical daily
+emails in the middle is how the last one gets filtered. A digest with nothing
+outstanding is not sent at all. One message per admin per day, guaranteed by the
+`email_messages` unique index rather than by an assumption about the cron.
+
+**Ninety days is the Foundation's number and lives in `wrangler.toml`.** An
+unparseable or sub-one value falls back to the built-in default rather than
+being obeyed, because a typo there would destroy documents on the day of the
+decision. Per-program retention is the eventual home, alongside compliance
+policy; one number for every program is where this has got to.
+
+**Known gaps.** Grantee report attachments are not covered -- they are part of
+the award record and are a different question. Applicants and grantees still
+cannot re-read their own uploads. Nobody has yet watched a real file be
+destroyed on a real schedule; the first purge on preview data is a human
+verification step that has not happened.

@@ -80,6 +80,22 @@ export interface Env {
    * token. Configured, not inferred.
    */
   APPLICANT_BASE_URL?: string;
+  /**
+   * Origin staff reach, e.g. https://grants.houstontexansfoundation.org.
+   *
+   * Configured for the same reason APPLICANT_BASE_URL is: a link in an email
+   * cannot be built from a Host header. Only used for links INTO the app in
+   * notices sent to staff, which is why it is optional -- an environment with
+   * no staff hostname sends notices carrying no link rather than failing.
+   */
+  STAFF_BASE_URL?: string;
+  /**
+   * How many days after a decision an applicant's uploaded financial
+   * documents are destroyed. Read as an integer; anything unparseable or
+   * below one falls back to the built-in default rather than being obeyed --
+   * a typo here would otherwise destroy documents on the day of the decision.
+   */
+  RETENTION_DAYS?: string;
   EMAIL_FROM?: string;
   EMAIL_REPLY_TO?: string;
   /**

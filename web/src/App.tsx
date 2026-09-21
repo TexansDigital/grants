@@ -29,6 +29,7 @@ import { FormRenderer } from './FormRenderer';
 import { Pipeline } from './Pipeline';
 import { Reports } from './Reports';
 import { DataHealth } from './DataHealth';
+import { Retention } from './Retention';
 import { ApplicationDetail } from './ApplicationDetail';
 import { Shell } from './Shell';
 import {
@@ -48,6 +49,7 @@ type Route =
   | { name: 'apply'; id: string }
   | { name: 'reporting' }
   | { name: 'dataHealth' }
+  | { name: 'retention' }
   | { name: 'openCycles' }
   | { name: 'signIn' }
   | { name: 'eligibility'; cycleId: string }
@@ -70,6 +72,9 @@ function parseRoute(pathname: string): Route | null {
   // two different audiences must never share a path.
   if (parts.length === 1 && parts[0] === 'reporting') return { name: 'reporting' };
   if (parts.length === 1 && parts[0] === 'data-health') return { name: 'dataHealth' };
+  // Linked from the nightly retention notice. If this path did not exist,
+  // that email would send admins to a 404 on the night it matters most.
+  if (parts.length === 1 && parts[0] === 'retention') return { name: 'retention' };
   if (parts.length === 2 && parts[0] === 'applications' && parts[1]) {
     return { name: 'application', id: parts[1] };
   }
@@ -535,6 +540,10 @@ export function App(): ReactElement {
         onNavigate={(path) => navigate(path)}
       />,
     );
+  }
+
+  if (route.name === 'retention') {
+    return shell(<Retention isAdmin={home.user.role === 'admin'} />);
   }
 
   if (route.name === 'reporting') {
