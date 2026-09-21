@@ -111,6 +111,44 @@ export interface RetentionScreen {
   purged: Record<string, unknown>[];
 }
 
+export interface RubricRow {
+  id: string;
+  program_id: string;
+  name: string;
+  rubric_key: string;
+  version: number;
+  status: string;
+  /** Score-BASIS-POINTS, like cents. Divide by 10000 at the display edge. */
+  max_total_score: number | null;
+  published_at: string | null;
+}
+
+export interface RubricCriterionRow {
+  id: string;
+  criterion_key: string;
+  label: string;
+  description: string | null;
+  /** Basis points. 10000 is a weight of 1.0. */
+  weight_bp: number;
+  max_score: number;
+  sort_order: number;
+}
+
+export interface RubricDetail {
+  rubric: RubricRow;
+  criteria: RubricCriterionRow[];
+  maxTotalScoreBp: number;
+  cyclesUsing: { id: string; name: string; status: string }[];
+}
+
+export interface CriterionInput {
+  criterionKey: string;
+  label: string;
+  description: string | null;
+  weightBp: number;
+  maxScore: number;
+}
+
 export interface SearchHit {
   application_id: string;
   rank: number;
@@ -332,6 +370,38 @@ export const api = {
    * row -- and because a GET would let a link prefetcher issue live download
    * credentials for every financial statement on a page nobody clicked.
    */
+  rubrics: (programId: string, signal?: AbortSignal) =>
+    get<{ rubrics: RubricRow[] }>(
+      `/api/programs/${encodeURIComponent(programId)}/rubrics`,
+      signal,
+    ),
+  rubric: (rubricId: string, signal?: AbortSignal) =>
+    get<RubricDetail>(`/api/rubrics/${encodeURIComponent(rubricId)}`, signal),
+  createRubric: (programId: string, name: string, rubricKey: string) =>
+    request<{ rubricId: string; version: number }>(
+      `/api/programs/${encodeURIComponent(programId)}/rubrics`,
+      { method: 'POST', body: { name, rubricKey } },
+    ),
+  saveRubricCriteria: (rubricId: string, criteria: CriterionInput[]) =>
+    request<{ rubricId: string; criteria: number; maxTotalScoreBp: number }>(
+      `/api/rubrics/${encodeURIComponent(rubricId)}/criteria`,
+      { method: 'PATCH', body: { criteria } },
+    ),
+  publishRubric: (rubricId: string) =>
+    request<{ rubricId: string; version: number; maxTotalScoreBp: number; retiredRubricId: string | null }>(
+      `/api/rubrics/${encodeURIComponent(rubricId)}/publish`,
+      { method: 'POST', body: {} },
+    ),
+  newRubricVersion: (rubricId: string) =>
+    request<{ rubricId: string; version: number }>(
+      `/api/rubrics/${encodeURIComponent(rubricId)}/new-version`,
+      { method: 'POST', body: {} },
+    ),
+  attachRubric: (cycleId: string, rubricId: string) =>
+    request<{ cycleId: string; rubricId: string }>(
+      `/api/cycles/${encodeURIComponent(cycleId)}/rubric`,
+      { method: 'POST', body: { rubricId } },
+    ),
   retention: (signal?: AbortSignal) => get<RetentionScreen>('/api/retention', signal),
   holdAttachment: (attachmentId: string, until: string, reason: string) =>
     request<{ attachmentId: string; holdUntil: string }>(

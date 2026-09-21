@@ -32,6 +32,10 @@ import { presignUpload, presignReportUpload, r2UploadOrigin } from './lib/upload
 import { presignDownloadForStaff } from './lib/downloads';
 import { runRetention, holdAttachment, purgeAttachmentNow, retentionScreen } from './lib/retention';
 import {
+  listRubrics, getRubric, createRubric, replaceCriteria, publishRubric,
+  newDraftFrom, attachRubricToCycle,
+} from './lib/rubrics';
+import {
   granteeHome, granteeMe, readReport, autosaveReport, fileReport,
 } from './lib/granteeRoutes';
 import { requireStaffSession } from './lib/auth';
@@ -844,6 +848,105 @@ const routes: readonly Route[] = [
     roles: ['admin', 'reviewer'],
     handler: async ({ env, ctx, params, session }) =>
       json(await getApplicationDetailForStaff(env.DB, session, params.id!), ctx),
+  },
+
+  // ---- rubrics -------------------------------------------------------------
+  //
+  // ADMIN-ONLY, all of them, including the reads. A rubric is the instrument a
+  // funding decision is made with; a reviewer sees it through the scoring
+  // screen, against the one application in front of them, rather than as a
+  // document they can study and optimise against.
+  {
+    method: 'GET',
+    path: '/api/programs/:id/rubrics',
+    roles: ADMIN_ONLY,
+    handler: async ({ env, ctx, params }) =>
+      json({ rubrics: await listRubrics(env.DB, params.id!) }, ctx),
+  },
+  {
+    method: 'POST',
+    path: '/api/programs/:id/rubrics',
+    roles: ADMIN_ONLY,
+    handler: async ({ request, env, ctx, params, session }) => {
+      const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+      const created = await createRubric(env.DB, ctx, session, {
+        programId: params.id!,
+        name: String(body.name ?? ''),
+        rubricKey: String(body.rubricKey ?? ''),
+      });
+      return json(created, ctx, 201);
+    },
+  },
+  {
+    method: 'GET',
+    path: '/api/rubrics/:id',
+    roles: ADMIN_ONLY,
+    handler: async ({ env, ctx, params }) => json(await getRubric(env.DB, params.id!), ctx),
+  },
+  {
+    /*
+     * The whole criterion list in one request.
+     *
+     * PUT semantics under PATCH, because the builder holds the rubric as one
+     * object and the person edits it as one: reorder two rows, retitle a
+     * third, change a weight, then save. Six independent requests can land
+     * half-applied, and a half-applied rubric is one whose weights no longer
+     * mean what the screen showed.
+     */
+    method: 'PATCH',
+    path: '/api/rubrics/:id/criteria',
+    roles: ADMIN_ONLY,
+    handler: async ({ request, env, ctx, params, session }) => {
+      const body = (await request.json().catch(() => ({}))) as { criteria?: unknown };
+      const criteria = Array.isArray(body.criteria) ? body.criteria : [];
+      return json(
+        await replaceCriteria(
+          env.DB, ctx, session, params.id!,
+          criteria.map((raw) => {
+            const c = (raw ?? {}) as Record<string, unknown>;
+            return {
+              criterionKey: String(c.criterionKey ?? ''),
+              label: String(c.label ?? ''),
+              description: c.description == null ? null : String(c.description),
+              // Number(), not parseInt(): parseInt('25.5') is 25, which would
+              // accept a float by silently truncating it. validateCriteria
+              // refuses a non-integer, and it can only do that if it sees one.
+              weightBp: Number(c.weightBp),
+              maxScore: Number(c.maxScore),
+            };
+          }),
+        ),
+        ctx,
+      );
+    },
+  },
+  {
+    method: 'POST',
+    path: '/api/rubrics/:id/publish',
+    roles: ADMIN_ONLY,
+    handler: async ({ env, ctx, params, session }) =>
+      json(await publishRubric(env.DB, ctx, session, params.id!), ctx),
+  },
+  {
+    // The only way to change a published rubric: copy it forward. Editing one
+    // in place would rewrite what a closed cycle was scored against.
+    method: 'POST',
+    path: '/api/rubrics/:id/new-version',
+    roles: ADMIN_ONLY,
+    handler: async ({ env, ctx, params, session }) =>
+      json(await newDraftFrom(env.DB, ctx, session, params.id!), ctx, 201),
+  },
+  {
+    method: 'POST',
+    path: '/api/cycles/:id/rubric',
+    roles: ADMIN_ONLY,
+    handler: async ({ request, env, ctx, params, session }) => {
+      const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+      return json(
+        await attachRubricToCycle(env.DB, ctx, session, params.id!, String(body.rubricId ?? '')),
+        ctx,
+      );
+    },
   },
 
   // ---- files ---------------------------------------------------------------

@@ -20,6 +20,8 @@ interface Props {
   forms: FormSummary[];
   isAdmin: boolean;
   onOpenForm: (id: string) => void;
+  /** The rubric builder for one program. */
+  onOpenRubrics: (programId: string) => void;
   /** Reload the configuration after a form is built or published. */
   onChanged: () => void;
 }
@@ -30,6 +32,7 @@ export function Home({
   forms,
   isAdmin,
   onOpenForm,
+  onOpenRubrics,
   onChanged,
 }: Props): ReactElement {
   const cyclesByProgram = new Map<string, CycleRow[]>();
@@ -71,6 +74,25 @@ export function Home({
                 <span className={`badge badge-${p.status}`}>{p.status}</span>
                 {p.fiscal_year !== null && <span className="meta">FY{p.fiscal_year}</span>}
                 <span className="meta">overdue reports: {p.compliance_policy}</span>
+                {isAdmin && (
+                  /*
+                   * A button, not an <a href>, and deliberately.
+                   *
+                   * Staff paths are not served by the Worker -- only the
+                   * public shells are listed there -- so a real page load on
+                   * /programs/:id/rubrics 404s. Every staff navigation in this
+                   * app goes through the client router, and this one has to as
+                   * well. Making these deep-linkable is its own change and is
+                   * recorded as a gap rather than half-done here.
+                   */
+                  <button
+                    type="button"
+                    className="btn secondary small"
+                    onClick={() => onOpenRubrics(p.id)}
+                  >
+                    Scoring rubrics<span className="sr-only"> for {p.name}</span>
+                  </button>
+                )}
               </div>
 
               <h3>Cycles</h3>

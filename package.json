@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Steward — multi-program grantmaking platform on Cloudflare",
+  "description": "Steward \u2014 multi-program grantmaking platform on Cloudflare",
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
@@ -33,7 +33,8 @@
     "spike": "wrangler dev --config wrangler.spike.toml --port 8788",
     "e2e:signin": "node scripts/e2e-signin.mjs",
     "dev:applicant": "wrangler dev --env=\"\" --var APPLICANT_BASE_URL:http://grants.houstontexansfoundation.org",
-    "sql:apply": "node scripts/apply-sql.mjs"
+    "sql:apply": "node scripts/apply-sql.mjs",
+    "e2e:rubric": "node scripts/e2e-rubric.mjs"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.12.21",

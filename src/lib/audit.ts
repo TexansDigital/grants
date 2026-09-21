@@ -133,6 +133,8 @@ export type EntityType =
   | 'program_stage'
   | 'cycle'
   | 'form_definition'
+  | 'rubric'
+  | 'rubric_criterion'
   | 'review_assignment'
   | 'review_score'
   | 'award'

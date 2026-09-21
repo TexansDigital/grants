@@ -30,6 +30,7 @@ import { Pipeline } from './Pipeline';
 import { Reports } from './Reports';
 import { DataHealth } from './DataHealth';
 import { Retention } from './Retention';
+import { RubricBuilder } from './RubricBuilder';
 import { ApplicationDetail } from './ApplicationDetail';
 import { Shell } from './Shell';
 import {
@@ -50,6 +51,7 @@ type Route =
   | { name: 'reporting' }
   | { name: 'dataHealth' }
   | { name: 'retention' }
+  | { name: 'rubrics'; programId: string }
   | { name: 'openCycles' }
   | { name: 'signIn' }
   | { name: 'eligibility'; cycleId: string }
@@ -75,6 +77,9 @@ function parseRoute(pathname: string): Route | null {
   // Linked from the nightly retention notice. If this path did not exist,
   // that email would send admins to a 404 on the night it matters most.
   if (parts.length === 1 && parts[0] === 'retention') return { name: 'retention' };
+  if (parts.length === 3 && parts[0] === 'programs' && parts[2] === 'rubrics' && parts[1]) {
+    return { name: 'rubrics', programId: parts[1] };
+  }
   if (parts.length === 2 && parts[0] === 'applications' && parts[1]) {
     return { name: 'application', id: parts[1] };
   }
@@ -269,7 +274,19 @@ export function App(): ReactElement {
           route?.name === 'pipeline' ||
           route?.name === 'application' ||
           route?.name === 'reporting' ||
-          route?.name === 'dataHealth'
+          route?.name === 'dataHealth' ||
+          /*
+           * EVERY STAFF SCREEN GOES IN THIS LIST. Both of these were added
+           * without it, and the symptom is not an error -- `home` stays null
+           * and the screen shows "Loading…" forever, on a page whose own unit
+           * tests were entirely green. The browser harness found it in the
+           * first second of the first run, which is what the harness is for.
+           *
+           * Retention needs `home.user` for the admin check; the rubric
+           * builder needs `home.programs` as well, to name the program.
+           */
+          route?.name === 'retention' ||
+          route?.name === 'rubrics'
         ) {
           const [s, p, c, f] = await Promise.all([
             api.session(signal),
@@ -542,6 +559,16 @@ export function App(): ReactElement {
     );
   }
 
+  if (route.name === 'rubrics') {
+    const program = home.programs.find((p) => p.id === route.programId);
+    return shell(
+      <RubricBuilder
+        programId={route.programId}
+        programName={program?.name ?? 'this program'}
+      />,
+    );
+  }
+
   if (route.name === 'retention') {
     return shell(<Retention isAdmin={home.user.role === 'admin'} />);
   }
@@ -577,6 +604,7 @@ export function App(): ReactElement {
       onChanged={() => setReloadKey((n) => n + 1)}
       forms={home.forms}
       onOpenForm={(id) => navigate(`/forms/${encodeURIComponent(id)}`)}
+      onOpenRubrics={(id) => navigate(`/programs/${encodeURIComponent(id)}/rubrics`)}
     />,
   );
 }

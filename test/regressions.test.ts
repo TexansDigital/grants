@@ -807,4 +807,37 @@ describe('the database vocabulary and the code agree', () => {
       'toMatchObject now enforces regexes: use them freely and drop appErrorFrom',
     ).toBe(false);
   });
+
+  /*
+   * The second canary, on the same class of trap.
+   *
+   * `expect(row?.deleted_at).not.toBeNull()` is how you would naturally write
+   * "this row was soft-deleted". It asserts nothing about a row that is not
+   * there: D1's `.first()` returns null, optional chaining yields `undefined`,
+   * and `undefined` is not `null`. A test in rubrics.test.ts was written that
+   * way to prove nothing is hard-deleted, and a mutant replacing the soft
+   * delete with `DELETE FROM` passed it.
+   *
+   * The fix, wherever this pattern appears against a row that could be gone,
+   * is to count the row first and then check the stamp's TYPE.
+   */
+  it('optional chaining makes not.toBeNull vacuous on a missing row', () => {
+    type Row = { deleted_at: string | null };
+    // Typed through a function so TypeScript does not narrow it to `never`
+    // and rob the canary of the shape it is about.
+    const missing = ((): Row | null => null)();
+    let threw = false;
+    try {
+      expect(missing?.deleted_at).not.toBeNull();
+    } catch {
+      threw = true;
+    }
+    expect(
+      threw,
+      'not.toBeNull now rejects undefined: the count-then-type pattern can be simplified',
+    ).toBe(false);
+
+    // What to write instead.
+    expect(typeof missing?.deleted_at).not.toBe('string');
+  });
 });

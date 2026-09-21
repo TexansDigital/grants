@@ -979,3 +979,64 @@ the award record and are a different question. Applicants and grantees still
 cannot re-read their own uploads. Nobody has yet watched a real file be
 destroyed on a real schedule; the first purge on preview data is a human
 verification step that has not happened.
+
+## §35 — Rubrics are built in the app, not uploaded and parsed
+
+**Date:** 2026-09-21
+**Status:** In force
+
+A scoring rubric is composed by an admin on a builder screen, saved as a draft,
+and frozen when published. Uploading a spreadsheet and having a model turn it
+into criteria was considered and rejected.
+
+**Why not the upload.** It works once and is unaccountable afterwards. Nobody
+can say what the weights were in a cycle that has already been decided. A
+re-upload silently rewrites a rubric applications were scored against. A merged
+cell or a stray row produces criteria nobody intended, and the first sign of it
+is a ranking. Uploaded scorecards are still supported as the offline fallback
+for a consultant, per CLAUDE.md, and that remains the exception rather than the
+path.
+
+**Weights are basis points, and the field takes a decimal.** 10000 is a weight
+of 1.0. A weighted total is `SUM(score × weight_bp)` and the ceiling is
+`SUM(max_score × weight_bp)`; both are exact integers, and dividing by 10000 is
+a display concern. Same discipline as cents, for the same reason: three
+criteria weighted a third each in floats gives two identical applications
+different totals and ranks one above the other. The input reads "3" and the
+wire carries 30000 — the conversion happens once, at the edge, and rounds
+rather than truncates, because 0.15 in binary floating point is 0.1499999… and
+truncating would store a weight one basis point below what was typed.
+
+**Publishing freezes it; the way forward is a new version.** Editing a
+published rubric would rewrite the criteria a closed cycle was already scored
+against, and the scores would quietly start meaning something else. The
+database enforces this with triggers from 0006; the application says it in
+words an admin can act on, because the trigger's message would reach them as an
+internal error.
+
+**Versions are per rubric key, not per program**, and criterion keys are
+carried across versions. That is what makes "how did we score community need
+over three years" a question with an answer.
+
+**A rubric cannot be swapped once scoring has started.** 0006 refuses a score
+against a criterion outside the cycle's rubric, so a mid-cycle swap leaves every
+score already entered in the table and unreachable — a silent loss of the
+reviewers' work. Refusing the swap is the cheaper failure.
+
+**Reads are admin-only, not staff-wide.** A reviewer meets the rubric through
+the scoring screen, against the one application in front of them, rather than
+as a document to study and optimise against.
+
+**Two faults were found by opening the page, not by the suite.** Neither new
+route was in the list that loads session data, so both screens hung on
+"Loading…" forever with every unit test green; and the save confirmation was
+cleared by the re-read that followed it, so saving appeared to do nothing. Both
+are recorded in `scripts/e2e-rubric.mjs`, which now drives the arithmetic a
+person actually sees.
+
+**Known gaps.** Staff deep links are not served by the Worker — only the public
+shells are listed there — so `/programs/:id/rubrics` and `/retention` are
+reachable by in-app navigation but not by typing the address or following a
+link from an email. The retention notice links to `/retention` and will land on
+a 404 until that is fixed. No scoring screen consumes a rubric yet; that is the
+third phase and is not built.
