@@ -149,6 +149,68 @@ export interface CriterionInput {
   maxScore: number;
 }
 
+export interface ScoringCriterion {
+  id: string;
+  criterion_key: string;
+  label: string;
+  description: string | null;
+  weight_bp: number;
+  max_score: number;
+  sort_order: number;
+  /** THIS reviewer's own score. Another reviewer's is never sent. */
+  score: number | null;
+  comment: string | null;
+}
+
+export interface ScoringSheet {
+  assignmentId: string;
+  applicationId: string;
+  projectTitle: string | null;
+  organizationName: string;
+  rubric: { id: string; name: string; version: number; maxTotalScoreBp: number };
+  criteria: ScoringCriterion[];
+  totalSoFarBp: number;
+  completedAt: string | null;
+  conflictDeclaredAt: string | null;
+  editable: boolean;
+}
+
+export interface ReviewerTotal {
+  assignmentId: string;
+  reviewerUserId: string;
+  reviewerEmail: string;
+  completedAt: string | null;
+  totalBp: number;
+  scored: number;
+  criteriaCount: number;
+}
+
+/** Admin only. A reviewer must never receive this shape. */
+export interface ScoreSummary {
+  applicationId: string;
+  rubric: { id: string; name: string; version: number; maxTotalScoreBp: number } | null;
+  reviewers: ReviewerTotal[];
+  meanCompletedBp: number | null;
+  byCriterion: {
+    criterionId: string;
+    label: string;
+    maxScore: number;
+    weightBp: number;
+    scores: { assignmentId: string; score: number | null; comment: string | null }[];
+  }[];
+}
+
+export interface QueueRow {
+  id: string;
+  project_title: string | null;
+  status: string;
+  requested_amount_cents: number | null;
+  review_assignment_id: string;
+  assigned_at: string;
+  completed_at: string | null;
+  conflict_declared_at: string | null;
+}
+
 export interface SearchHit {
   application_id: string;
   rank: number;
@@ -370,6 +432,38 @@ export const api = {
    * row -- and because a GET would let a link prefetcher issue live download
    * credentials for every financial statement on a page nobody clicked.
    */
+  reviewQueue: (signal?: AbortSignal) =>
+    get<{ assignments: QueueRow[] }>('/api/review/queue', signal),
+  scoringSheet: (assignmentId: string, signal?: AbortSignal) =>
+    get<ScoringSheet>(
+      `/api/review/assignments/${encodeURIComponent(assignmentId)}/sheet`,
+      signal,
+    ),
+  saveScores: (
+    assignmentId: string,
+    scores: { criterionId: string; score: number | null; comment: string | null }[],
+  ) =>
+    request<{ assignmentId: string; saved: number; totalSoFarBp: number }>(
+      `/api/review/assignments/${encodeURIComponent(assignmentId)}/scores`,
+      { method: 'PATCH', body: { scores } },
+    ),
+  completeReview: (assignmentId: string) =>
+    request<{ assignmentId: string; completedAt: string; totalBp: number }>(
+      `/api/review/assignments/${encodeURIComponent(assignmentId)}/complete`,
+      { method: 'POST', body: {} },
+    ),
+  reopenReview: (assignmentId: string) =>
+    request<{ assignmentId: string }>(
+      `/api/review/assignments/${encodeURIComponent(assignmentId)}/reopen`,
+      { method: 'POST', body: {} },
+    ),
+  scoreSummary: (applicationId: string, signal?: AbortSignal) =>
+    get<ScoreSummary>(`/api/applications/${encodeURIComponent(applicationId)}/scores`, signal),
+  decide: (applicationId: string, status: string, notes: string | null) =>
+    request<{ applicationId: string; status: string; decidedAt: string; decidedBy: string }>(
+      `/api/applications/${encodeURIComponent(applicationId)}/decision`,
+      { method: 'POST', body: { status, notes } },
+    ),
   rubrics: (programId: string, signal?: AbortSignal) =>
     get<{ rubrics: RubricRow[] }>(
       `/api/programs/${encodeURIComponent(programId)}/rubrics`,

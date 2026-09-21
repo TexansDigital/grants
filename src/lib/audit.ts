@@ -90,6 +90,11 @@ export type AuditAction =
   | 'review.recused'
   | 'review.score_saved'
   | 'review.completed'
+  // A reviewer taking their own submitted review back, before any decision.
+  | 'review.reopened'
+  // An admin recording the outcome. The application's own status changes with
+  // it; this names the act rather than the field.
+  | 'application.decided'
   // awards and payments
   | 'award.created'
   | 'award.amended'

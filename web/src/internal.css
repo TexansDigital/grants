@@ -764,3 +764,24 @@ th.num {
   opacity: 0.7;
   cursor: pointer;
 }
+
+/*
+ * The score input and what it is worth, side by side.
+ *
+ * The weight note sits NEXT TO the box rather than under the label, because
+ * what a reviewer needs while typing an 8 is "and this criterion counts triple"
+ * -- read at the moment of the judgement, not before it.
+ */
+.score-row {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-2);
+}
+
+.score-row input {
+  /* Wide enough for three digits and the browser's spinner, narrow enough that
+     it reads as a score rather than as a text field. */
+  width: 7rem;
+}

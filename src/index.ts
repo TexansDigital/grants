@@ -36,6 +36,10 @@ import {
   newDraftFrom, attachRubricToCycle,
 } from './lib/rubrics';
 import {
+  loadScoringSheet, saveScores, completeReview, reopenReview, scoreSummary,
+} from './lib/scoring';
+import { decideApplication, type DecisionStatus } from './lib/decisions';
+import {
   granteeHome, granteeMe, readReport, autosaveReport, fileReport,
 } from './lib/granteeRoutes';
 import { requireStaffSession } from './lib/auth';
@@ -458,6 +462,11 @@ const routes: readonly Route[] = [
       '/retention',
       '/applications/:id',
       '/programs/:id/rubrics',
+      // A reviewer's own queue and one scoring sheet. Separate from /pipeline
+      // on purpose: "everything" and "mine" are different questions and must
+      // not share a path.
+      '/my-reviews',
+      '/my-reviews/:id/score',
     ] as const
   ).map(
     (path) =>
@@ -886,6 +895,108 @@ const routes: readonly Route[] = [
     roles: ['admin', 'reviewer'],
     handler: async ({ env, ctx, params, session }) =>
       json(await getApplicationDetailForStaff(env.DB, session, params.id!), ctx),
+  },
+
+  // ---- scoring -------------------------------------------------------------
+  //
+  // Reviewers reach all of these, and are scoped in SQL to their OWN
+  // assignment. An assignment belonging to anybody else is a 404 -- not a 403,
+  // which would confirm it exists.
+  //
+  // Admins reach them too, because recording a scorecard a consultant phoned
+  // in is ordinary work. The audit row names the person who typed it
+  // separately from the reviewer it belongs to.
+  {
+    method: 'GET',
+    path: '/api/review/assignments/:id/sheet',
+    roles: ['admin', 'reviewer'],
+    handler: async ({ env, ctx, params, session }) =>
+      json(await loadScoringSheet(env.DB, session, params.id!), ctx),
+  },
+  {
+    /*
+     * PARTIAL SAVES ARE THE NORMAL CASE, which is why this is a PATCH taking
+     * whichever criteria changed rather than the whole sheet. A reviewer reads
+     * a forty-field application over an hour; requiring the full set would
+     * mean losing that hour to a closed laptop.
+     */
+    method: 'PATCH',
+    path: '/api/review/assignments/:id/scores',
+    roles: ['admin', 'reviewer'],
+    handler: async ({ request, env, ctx, params, session }) => {
+      const body = (await request.json().catch(() => ({}))) as { scores?: unknown };
+      const raw = Array.isArray(body.scores) ? body.scores : [];
+      return json(
+        await saveScores(
+          env.DB, ctx, session, params.id!,
+          raw.map((item) => {
+            const s = (item ?? {}) as Record<string, unknown>;
+            return {
+              criterionId: String(s.criterionId ?? ''),
+              // null CLEARS a score and is not zero. Coercing a missing value
+              // to 0 would turn "not yet scored" into a judgement.
+              score: s.score === null || s.score === undefined ? null : Number(s.score),
+              comment: s.comment == null ? null : String(s.comment),
+            };
+          }),
+        ),
+        ctx,
+      );
+    },
+  },
+  {
+    method: 'POST',
+    path: '/api/review/assignments/:id/complete',
+    roles: ['admin', 'reviewer'],
+    handler: async ({ env, ctx, params, session }) =>
+      json(await completeReview(env.DB, ctx, session, params.id!), ctx),
+  },
+  {
+    // A reviewer taking their own submitted review back, while the application
+    // is still undecided. The alternative is a review nobody can correct.
+    method: 'POST',
+    path: '/api/review/assignments/:id/reopen',
+    roles: ['admin', 'reviewer'],
+    handler: async ({ env, ctx, params, session }) =>
+      json(await reopenReview(env.DB, ctx, session, params.id!), ctx),
+  },
+  {
+    /*
+     * Every reviewer's scores side by side. ADMIN ONLY.
+     *
+     * CLAUDE.md's access table: a reviewer may never see another reviewer's
+     * scores. The enforcement is that no reviewer-reachable query selects
+     * another assignment's rows at all -- this endpoint is the only one that
+     * does, and it refuses a non-admin in scoring.ts as well as here.
+     */
+    method: 'GET',
+    path: '/api/applications/:id/scores',
+    roles: ADMIN_ONLY,
+    handler: async ({ env, ctx, params, session }) =>
+      json(await scoreSummary(env.DB, session, params.id!), ctx),
+  },
+  {
+    /*
+     * Recording the outcome.
+     *
+     * RECORDS ONLY. No award is created, no payment scheduled, and nothing is
+     * emailed -- CLAUDE.md requires that a decline is never sent
+     * automatically, and the cheapest way to keep that true is for this path
+     * to have no way to send anything at all.
+     */
+    method: 'POST',
+    path: '/api/applications/:id/decision',
+    roles: ADMIN_ONLY,
+    handler: async ({ request, env, ctx, params, session }) => {
+      const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+      return json(
+        await decideApplication(env.DB, ctx, session, params.id!, {
+          status: String(body.status ?? '') as DecisionStatus,
+          notes: body.notes == null ? null : String(body.notes),
+        }),
+        ctx,
+      );
+    },
   },
 
   // ---- rubrics -------------------------------------------------------------

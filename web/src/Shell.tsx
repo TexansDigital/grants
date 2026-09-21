@@ -22,6 +22,9 @@ interface Props {
 
 const NAV: { path: string; label: string; route: string; adminOnly?: boolean }[] = [
   { path: '/pipeline', label: 'Pipeline', route: 'pipeline' },
+  // Shown to everyone with a staff session, admins included: an admin who
+  // is also assigned as a reviewer needs somewhere to do that work.
+  { path: '/my-reviews', label: 'My reviews', route: 'reviewQueue' },
   { path: '/reporting', label: 'Reporting', route: 'reporting' },
   // Admin only, and hidden rather than shown-and-refused. The route is guarded
   // server-side regardless; this is so a reviewer is not offered a door that

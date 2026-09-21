@@ -204,6 +204,23 @@ describe('the route table', () => {
     'POST /api/review/assignments/:id/conflict',
     'POST /api/review/assignments/:id/recuse',
     'POST /api/attachments/:id/download-url',
+    /*
+     * The scoring path. A reviewer entering their own scores is the one thing
+     * the role exists to do, so these are writes a reviewer must reach.
+     *
+     * The scoping is in scoring.ts and is not a role check: the reviewer's own
+     * user id is a BIND in the query that loads the assignment, so an
+     * assignment belonging to anybody else is a 404 before any write happens.
+     * `reopen` is narrower still -- it refuses once the application is
+     * decided, because a settled decision is not rescored.
+     *
+     * Notably NOT here: the decision itself, and the side-by-side score
+     * summary. A reviewer scores; they do not decide, and they never see
+     * another reviewer's numbers.
+     */
+    'PATCH /api/review/assignments/:id/scores',
+    'POST /api/review/assignments/:id/complete',
+    'POST /api/review/assignments/:id/reopen',
   ]);
 
   it('STAFF writes are admin-only in the table itself, not only at runtime', () => {

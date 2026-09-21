@@ -34,7 +34,8 @@
     "e2e:signin": "node scripts/e2e-signin.mjs",
     "dev:applicant": "wrangler dev --env=\"\" --var APPLICANT_BASE_URL:http://grants.houstontexansfoundation.org",
     "sql:apply": "node scripts/apply-sql.mjs",
-    "e2e:rubric": "node scripts/e2e-rubric.mjs"
+    "e2e:rubric": "node scripts/e2e-rubric.mjs",
+    "e2e:scoring": "node scripts/e2e-scoring.mjs"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.12.21",

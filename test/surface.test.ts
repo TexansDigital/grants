@@ -79,6 +79,8 @@ describe('staff deep links', () => {
     '/retention',
     '/applications/:id',
     '/programs/:id/rubrics',
+    '/my-reviews',
+    '/my-reviews/:id/score',
   ];
 
   it('every staff screen has a route, so a typed address reaches the app', () => {

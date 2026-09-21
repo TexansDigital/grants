@@ -1046,3 +1046,84 @@ Access, so a stranger gets an empty frame and a 401.
 
 **Known gap.** No scoring screen consumes a rubric yet; that is the third phase
 and is not built.
+
+## §36 — Scoring, and the decision that follows it
+
+**Date:** 2026-09-21
+**Status:** In force
+
+Reviewers score in the app against the cycle's published rubric; admins read
+the scores side by side and record the outcome. This completes Phase 3 except
+for the offline export/import fallback.
+
+**A reviewer never sees another reviewer's scores, and the enforcement is that
+they are never fetched.** No reviewer-reachable query selects another
+assignment's rows — not a filter in the UI, not a column dropped at
+serialization. The scoping is a bind in the query that loads the assignment,
+so an assignment belonging to anyone else is a 404 before any work happens. The
+side-by-side comparison has its own admin-only endpoint and refuses a non-admin
+in the library as well as at the route.
+
+**Null is not zero.** An empty score box clears a score; zero is a judgement
+that the application does nothing on that criterion. Collapsing them would let
+an unfinished review pass the completeness check and carry scores nobody gave
+into a weighted total. The UI sends `null` for an emptied box, the API
+soft-deletes the row, and a test at each layer holds it.
+
+**Every criterion must be scored before a review can be submitted.** A review
+with two of three criteria blank produces a total lower than the reviewer meant
+and is compared directly against colleagues who filled all three. It looks like
+a judgement; it is an omission.
+
+**Only submitted reviews count toward the average.** A half-finished sheet is
+low because it is half finished. The screen says how many are outstanding
+rather than letting the number be quietly partial.
+
+**A declared conflict stops scoring.** CLAUDE.md puts disclosure at assignment
+rather than at scoring because a conflict discovered while scoring has already
+contaminated the score; the same reasoning applies afterwards. The admin's move
+is to recuse or reassign, both recorded. **Gap:** there is no way to resolve a
+declaration the Foundation judges immaterial without recusing and reassigning.
+
+**A reviewer can reopen their own submitted review until the application is
+decided.** The alternative — finding an admin at 9pm, or a review nobody can
+correct — puts the wrong number into the decision.
+
+**Recording a decision creates no award and sends nothing.** Not every declared
+intent survives acceptance, and CLAUDE.md puts W-9 and the media release at
+acceptance rather than application, which cannot be true if an award springs
+into existence at the decision. Decline emails are never automatic, and the
+surest way to keep that true is for this path to have no way to send one. A
+test asserts that no message row appears.
+
+**A decline cannot be recorded without a reason.** 250 of them go out in a week
+and one gets screenshotted; whoever writes that letter needs to know why months
+later. The rationale is written to the append-only audit log as well as to the
+row, because the row can in principle be edited.
+
+**One decision per application.** A second is either a double-click or one
+person overwriting a colleague's call, and both deserve to be told. Changing a
+settled decision is a deliberate act that does not exist yet.
+
+**No score normalisation, deliberately.** Adjusting for a systematically harsh
+scorer means showing a decision-maker a number no reviewer gave. At this volume
+the per-reviewer weighted totals make a harsh scorer visible without inventing
+figures. This confirms §32's finding rather than revisiting it.
+
+**Fourteen mutants, all killed.** Including: reviewer scoping dropped, recused
+reviewers still scoring, another reviewer's scores joined into the sheet, null
+treated as zero, the completeness check removed, conflicts no longer blocking,
+unfinished sheets in the average, the summary reachable by a reviewer, a
+reviewer deciding, a decline needing no reason, and `INSERT OR REPLACE` in
+place of the update-then-insert pair.
+
+**One fault found by opening the page, again.** An incomplete history fixture
+threw inside the applicant-history panel, the error boundary replaced the whole
+page, and three reviewer assertions — all of the form "this count is zero" —
+passed against it. The harness now proves the page rendered before asserting
+what is absent from it. This is the same vacuous-assertion trap as §35's
+`not.toBeNull()` on a missing row.
+
+**Known gaps.** The offline export/import fallback for consultants is not
+built. There is no bulk view ranking a whole cycle by score — the comparison is
+per application. Nothing yet writes an award from an awarded decision.

@@ -31,6 +31,8 @@ import { Reports } from './Reports';
 import { DataHealth } from './DataHealth';
 import { Retention } from './Retention';
 import { RubricBuilder } from './RubricBuilder';
+import { ReviewQueue } from './ReviewQueue';
+import { ScoringSheet } from './ScoringSheet';
 import { ApplicationDetail } from './ApplicationDetail';
 import { Shell } from './Shell';
 import {
@@ -52,6 +54,8 @@ type Route =
   | { name: 'dataHealth' }
   | { name: 'retention' }
   | { name: 'rubrics'; programId: string }
+  | { name: 'reviewQueue' }
+  | { name: 'scoringSheet'; assignmentId: string }
   | { name: 'openCycles' }
   | { name: 'signIn' }
   | { name: 'eligibility'; cycleId: string }
@@ -77,6 +81,12 @@ function parseRoute(pathname: string): Route | null {
   // Linked from the nightly retention notice. If this path did not exist,
   // that email would send admins to a 404 on the night it matters most.
   if (parts.length === 1 && parts[0] === 'retention') return { name: 'retention' };
+  // A reviewer's own queue. NOT /pipeline, which is the admin's view of
+  // everything -- two different questions must not share a path.
+  if (parts.length === 1 && parts[0] === 'my-reviews') return { name: 'reviewQueue' };
+  if (parts.length === 3 && parts[0] === 'my-reviews' && parts[2] === 'score' && parts[1]) {
+    return { name: 'scoringSheet', assignmentId: parts[1] };
+  }
   if (parts.length === 3 && parts[0] === 'programs' && parts[2] === 'rubrics' && parts[1]) {
     return { name: 'rubrics', programId: parts[1] };
   }
@@ -286,7 +296,9 @@ export function App(): ReactElement {
            * builder needs `home.programs` as well, to name the program.
            */
           route?.name === 'retention' ||
-          route?.name === 'rubrics'
+          route?.name === 'rubrics' ||
+          route?.name === 'reviewQueue' ||
+          route?.name === 'scoringSheet'
         ) {
           const [s, p, c, f] = await Promise.all([
             api.session(signal),
@@ -545,6 +557,7 @@ export function App(): ReactElement {
     return shell(
       <ApplicationDetail
         applicationId={route.id}
+        isAdmin={home.user.role === 'admin'}
         onBack={() => navigate(toPipeline())}
       />,
     );
@@ -555,6 +568,23 @@ export function App(): ReactElement {
       <DataHealth
         isAdmin={home.user.role === 'admin'}
         onNavigate={(path) => navigate(path)}
+      />,
+    );
+  }
+
+  if (route.name === 'reviewQueue') {
+    return shell(
+      <ReviewQueue
+        onOpenSheet={(id) => navigate(`/my-reviews/${encodeURIComponent(id)}/score`)}
+      />,
+    );
+  }
+
+  if (route.name === 'scoringSheet') {
+    return shell(
+      <ScoringSheet
+        assignmentId={route.assignmentId}
+        onBack={() => navigate('/my-reviews')}
       />,
     );
   }

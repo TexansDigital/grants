@@ -17,6 +17,7 @@
 import { useEffect, useState } from 'react';
 import type { ReactElement } from 'react';
 import { ApiError, api } from './api';
+import { DecisionPanel } from './DecisionPanel';
 import type { ApplicationDetail as Detail, OrganizationHistory, StoredAnswer } from './api';
 import type { FieldDef } from '../../src/lib/fieldTypes';
 import type { FormDefinition } from '../../src/lib/forms';
@@ -26,6 +27,7 @@ import type { StoredValue } from '../../src/lib/fieldTypes';
 
 interface Props {
   applicationId: string;
+  isAdmin: boolean;
   onBack: () => void;
 }
 
@@ -84,7 +86,7 @@ function readAnswer(field: FieldDef, stored: StoredAnswer | undefined): string |
   }
 }
 
-export function ApplicationDetail({ applicationId, onBack }: Props): ReactElement {
+export function ApplicationDetail({ applicationId, isAdmin, onBack }: Props): ReactElement {
   const [detail, setDetail] = useState<Detail | null>(null);
   const [form, setForm] = useState<FormDefinition | null>(null);
   const [history, setHistory] = useState<OrganizationHistory | null>(null);
@@ -93,6 +95,8 @@ export function ApplicationDetail({ applicationId, onBack }: Props): ReactElemen
   /** Which attachment is mid-request, so its button cannot be double-fired. */
   const [fetching, setFetching] = useState<string | null>(null);
   const [downloadError, setDownloadError] = useState<string | null>(null);
+  /** Bumped after a decision, so the detail re-reads its new status. */
+  const [reloadKey, setReloadKey] = useState(0);
 
   /*
    * Ask for a signed URL, then navigate to it.
@@ -156,7 +160,7 @@ export function ApplicationDetail({ applicationId, onBack }: Props): ReactElemen
     })();
 
     return () => controller.abort();
-  }, [applicationId]);
+  }, [applicationId, reloadKey]);
 
   if (loading) return <p className="meta">Loading…</p>;
 
@@ -341,6 +345,24 @@ export function ApplicationDetail({ applicationId, onBack }: Props): ReactElemen
             </section>
           )}
         </div>
+
+        {/*
+          * Reviews and the decision, for an admin only.
+          *
+          * The component renders nothing at all when the score summary comes
+          * back 404 -- which is what a reviewer gets -- so a reviewer sees no
+          * trace that a comparison exists rather than an error saying they
+          * may not have it.
+          */}
+        {isAdmin && (
+          <DecisionPanel
+            applicationId={applicationId}
+            decidedAt={
+              (detail.application as unknown as { decided_at?: string | null }).decided_at ?? null
+            }
+            onDecided={() => setReloadKey((k) => k + 1)}
+          />
+        )}
 
         {/* ---- applicant history ------------------------------------------- */}
         <aside className="detail-side">
