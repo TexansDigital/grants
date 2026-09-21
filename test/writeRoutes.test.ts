@@ -185,9 +185,25 @@ describe('the route table', () => {
    * Listed by exact path, so a new reviewer-writable route has to be added here
    * deliberately rather than inheriting the exemption.
    */
+/*
+   * The third exception is a READ that had to be a POST.
+   *
+   * Issuing a download URL changes state -- it stamps the attachment and
+   * writes an audit row -- so it cannot be a GET without letting a browser's
+   * link prefetcher mint live credentials for files nobody opened. That makes
+   * it a "write" by this test's definition while being, in substance, a
+   * reviewer reading the budget attached to an application they were assigned.
+   *
+   * Refusing it to reviewers would mean a reviewer who cannot open the
+   * itemized spending budget scoring an application against a rubric that
+   * asks about it. The scoping is in downloads.ts, against the same
+   * review_assignments rows scope.ts reads: an attachment on anyone else's
+   * application is a 404.
+   */
   const REVIEWER_WRITABLE = new Set([
     'POST /api/review/assignments/:id/conflict',
     'POST /api/review/assignments/:id/recuse',
+    'POST /api/attachments/:id/download-url',
   ]);
 
   it('STAFF writes are admin-only in the table itself, not only at runtime', () => {

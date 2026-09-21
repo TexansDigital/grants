@@ -29,6 +29,7 @@ import { submitEligibility } from './lib/eligibility';
 import { listOpenCycles, readPublicForm } from './lib/publicRoutes';
 import { createApplication, readDraft, autosaveDraft, submitDraft } from './lib/applicantRoutes';
 import { presignUpload, presignReportUpload, r2UploadOrigin } from './lib/uploads';
+import { presignDownloadForStaff } from './lib/downloads';
 import {
   granteeHome, granteeMe, readReport, autosaveReport, fileReport,
 } from './lib/granteeRoutes';
@@ -842,6 +843,29 @@ const routes: readonly Route[] = [
     roles: ['admin', 'reviewer'],
     handler: async ({ env, ctx, params, session }) =>
       json(await getApplicationDetailForStaff(env.DB, session, params.id!), ctx),
+  },
+
+  // ---- files ---------------------------------------------------------------
+  {
+    /*
+     * A credential to read one uploaded file.
+     *
+     * POST, NOT GET, although it reads. Two reasons, and the second is the one
+     * that decided it. It MUTATES: a download grant bumps the counters on the
+     * attachment and writes an audit row, and a GET that changes state is a GET
+     * a browser, a link prefetcher, or a crawler behind Access may fire without
+     * anyone clicking. That would issue live credentials for every financial
+     * statement on a page merely because somebody hovered the list, and would
+     * fill the audit log with reads that never happened.
+     *
+     * Reviewers are admitted, and are then scoped in SQL to the applications
+     * assigned to them. An id belonging to anyone else's application is a 404.
+     */
+    method: 'POST',
+    path: '/api/attachments/:id/download-url',
+    roles: ['admin', 'reviewer'],
+    handler: async ({ env, ctx, params, session }) =>
+      json(await presignDownloadForStaff(env, ctx, session, params.id!), ctx),
   },
 
   // ---- search --------------------------------------------------------------

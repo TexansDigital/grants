@@ -56,7 +56,14 @@ export interface PresignedUpload {
   headers: Record<string, string>;
 }
 
-function r2Client(env: Env): AwsClient {
+/**
+ * The signing client, shared by the upload and download paths.
+ *
+ * Exported so downloads.ts signs with the same credentials and the same
+ * library. Two copies of "how do we talk to R2" is how one of them ends up
+ * using the AWS SDK, or signing a header it must not sign.
+ */
+export function r2Client(env: Env): AwsClient {
   const id = (env.R2_ACCESS_KEY_ID ?? '').trim();
   const secret = (env.R2_SECRET_ACCESS_KEY ?? '').trim();
   if (!id || !secret) {

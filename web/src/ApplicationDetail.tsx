@@ -90,6 +90,36 @@ export function ApplicationDetail({ applicationId, onBack }: Props): ReactElemen
   const [history, setHistory] = useState<OrganizationHistory | null>(null);
   const [error, setError] = useState<ApiError | null>(null);
   const [loading, setLoading] = useState(true);
+  /** Which attachment is mid-request, so its button cannot be double-fired. */
+  const [fetching, setFetching] = useState<string | null>(null);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
+
+  /*
+   * Ask for a signed URL, then navigate to it.
+   *
+   * NOT an <a href> with the signed URL rendered into the page. Rendering it
+   * would put a live credential for somebody's audited accounts into the DOM,
+   * into the browser's history, and into anything that scrapes the page --
+   * for every file at once, whether or not anyone opens them. The URL is
+   * fetched at the moment of the click and is never held anywhere.
+   *
+   * The Content-Disposition R2 returns is what makes this a save rather than
+   * a navigation, so the tab the browser opens closes itself.
+   */
+  async function download(attachmentId: string): Promise<void> {
+    setFetching(attachmentId);
+    setDownloadError(null);
+    try {
+      const grant = await api.downloadUrl(attachmentId);
+      window.location.assign(grant.url);
+    } catch (e) {
+      setDownloadError(
+        e instanceof ApiError ? e.message : 'That file could not be opened. Try again.',
+      );
+    } finally {
+      setFetching(null);
+    }
+  }
 
   useEffect(() => {
     const controller = new AbortController();
@@ -272,6 +302,9 @@ export function ApplicationDetail({ applicationId, onBack }: Props): ReactElemen
                     <th scope="col" className="num">
                       Size
                     </th>
+                    <th scope="col">
+                      <span className="sr-only">Download</span>
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -280,14 +313,30 @@ export function ApplicationDetail({ applicationId, onBack }: Props): ReactElemen
                       <th scope="row">{a.filename}</th>
                       <td>{a.mime_type}</td>
                       <td className="num">{Math.ceil(a.size_bytes / 1024).toLocaleString('en-US')} KB</td>
+                      <td>
+                        <button
+                          type="button"
+                          className="btn secondary small"
+                          disabled={fetching === a.id}
+                          onClick={() => void download(a.id)}
+                        >
+                          {fetching === a.id ? 'Preparing…' : 'Download'}
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
               </div>
+              {downloadError && (
+                <p className="banner danger" role="alert">
+                  {downloadError}
+                </p>
+              )}
               <p className="meta">
-                Downloads are not available yet. Files will be served through short-lived signed
-                links that are audited when issued.
+                Each download is a five-minute signed link, recorded against your name in the
+                audit log. These are another organization's financial documents; do not forward
+                the link, and do not keep copies longer than you need them.
               </p>
             </section>
           )}

@@ -85,6 +85,16 @@ export interface ApplicationDetail {
   attachments: { id: string; filename: string; mime_type: string; size_bytes: number }[];
 }
 
+/** A short-lived signed URL. Treat it as a credential and do not store it. */
+export interface DownloadGrant {
+  attachmentId: string;
+  filename: string;
+  mimeType: string;
+  sizeBytes: number;
+  url: string;
+  expiresAt: string;
+}
+
 export interface SearchHit {
   application_id: string;
   rank: number;
@@ -298,6 +308,18 @@ export const api = {
     get<OrganizationHistory>(
       `/api/organizations/${encodeURIComponent(organizationId)}/history`,
       signal,
+    ),
+  /*
+   * A credential to read one uploaded file.
+   *
+   * POST because it mutates -- it stamps the attachment and writes an audit
+   * row -- and because a GET would let a link prefetcher issue live download
+   * credentials for every financial statement on a page nobody clicked.
+   */
+  downloadUrl: (attachmentId: string) =>
+    request<DownloadGrant>(
+      `/api/attachments/${encodeURIComponent(attachmentId)}/download-url`,
+      { method: 'POST', body: {} },
     ),
   buildReportForm: (programId: string) =>
     request<{ formDefinitionId: string; version: number; fieldCount: number }>(
