@@ -800,3 +800,137 @@ th.num {
      it reads as a score rather than as a text field. */
   width: 7rem;
 }
+
+/* ---- print ---------------------------------------------------------------
+ *
+ * THE EXPORT IS THE PRODUCT FOR EXECUTIVES, and CLAUDE.md asks for "a PDF
+ * built for board and league reporting". There is no PDF generator here and
+ * building one would mean carrying a rendering library into a Worker for a
+ * document produced a handful of times a year. What exists instead is the
+ * browser's own print-to-PDF -- which produced, until now, a dark-themed page
+ * with a navigation bar, a theme toggle and a "Download the summary" button
+ * across the top of a board paper.
+ *
+ * So these rules are the PDF. They are not a nicety: the difference between a
+ * page that prints and a page somebody can hand to a board is entirely here.
+ *
+ * WHAT IT DOES. Forces the light palette regardless of the viewer's theme,
+ * because a dark page wastes a cartridge and reads as a screenshot. Removes
+ * every control -- a printed button is a lie about what the reader can do.
+ * Unwraps the scrolling table containers, which otherwise clip every column
+ * past the first screenful. Keeps a table's header with its rows, and stops a
+ * heading stranding itself at the foot of a page.
+ */
+@media print {
+  /*
+   * The full token set, redeclared at the highest specificity this stylesheet
+   * uses. The theme is stamped on the root element, so a plain `:root` block
+   * would lose to `:root[data-theme="dark"]` and the page would print black.
+   */
+  :root,
+  :root[data-theme='dark'],
+  :root[data-theme='light'] {
+    --bg: #ffffff;
+    --surface: #ffffff;
+    --surface-2: #ffffff;
+    --surface-3: #f4f5f6;
+    --ink: #021018;
+    --ink-2: #33414a;
+    --ink-3: #5b6871;
+    --line: #c9ced2;
+    --line-2: #e4e7e9;
+    color-scheme: light;
+  }
+
+  html,
+  body {
+    background: #ffffff;
+    color: #021018;
+  }
+
+  /* Controls, navigation and anything that only makes sense on a screen. */
+  .masthead,
+  .mainnav,
+  .theme-toggle,
+  .skip-link,
+  .btn,
+  .linklike,
+  .row-actions,
+  .actions,
+  .panel-decide,
+  button {
+    display: none !important;
+  }
+
+  main.wide {
+    max-width: none;
+    padding: 0;
+  }
+
+  /*
+   * A panel is a card on screen and a section in a document. Borders and
+   * shadows around every block on paper read as a form to fill in.
+   */
+  .panel {
+    border: 0;
+    box-shadow: none;
+    padding: 0;
+    margin: 0 0 18pt;
+    break-inside: auto;
+  }
+
+  /* The scroll container clips every column past the first screenful when it
+     is printed. Unwrapped, the table sets its own width. */
+  .table-scroll {
+    overflow: visible !important;
+    max-height: none !important;
+    border: 0;
+  }
+
+  table {
+    width: 100%;
+    font-size: 9pt;
+    border-collapse: collapse;
+  }
+  /* Repeat the header on every page. A second page of a funding table with no
+     column names is a page nobody can read. */
+  thead {
+    display: table-header-group;
+  }
+  tr {
+    break-inside: avoid;
+  }
+  th,
+  td {
+    border-bottom: 0.5pt solid #c9ced2;
+    padding: 3pt 6pt;
+  }
+  /* Sticky headers are a screen affordance and print as an overlap. */
+  thead th {
+    position: static !important;
+    background: #f4f5f6 !important;
+  }
+
+  h2,
+  h3 {
+    break-after: avoid;
+    color: #021018;
+  }
+
+  /* A banner is a screen alert; on paper the sentence is the content, and the
+     tinted box around it reads as a warning about the document itself. */
+  .banner {
+    border: 0;
+    border-left: 2pt solid #c9ced2;
+    background: transparent;
+    padding: 0 0 0 8pt;
+  }
+  .banner.danger::before {
+    /* "Error: " on a board paper is about the screen, not the figures. */
+    content: none;
+  }
+
+  .meta {
+    color: #5b6871;
+  }
+}

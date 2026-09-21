@@ -1056,3 +1056,84 @@ td.row-actions .btn {
   min-height: 44px;
   text-align: left;
 }
+
+/* ---- print ---------------------------------------------------------------
+ *
+ * THE ONE PAGE APPLICANTS ACTUALLY PRINT is the confirmation read-back. It
+ * exists because "the confirmation email can take a minute to arrive and can
+ * land in spam, and somebody who has just spent an hour on this wants to see
+ * that what they wrote is what was received" -- and the next thing a lot of
+ * people do with a page like that is press Ctrl-P, because a nonprofit's file
+ * copy of a grant application is a real document in their records.
+ *
+ * Without these rules that document came out with a brand band across the top,
+ * a "Clear every answer" button in the middle of it, and the privacy notice
+ * eating a page of its own. The grantee portal prints for the same reason: a
+ * program director forwarding "what we filed" to a finance officer.
+ */
+@media print {
+  .masthead,
+  .skip-link,
+  .btn,
+  .linklike,
+  .actions,
+  .save-state,
+  .form-nav,
+  .section-nav,
+  button {
+    display: none !important;
+  }
+
+  body {
+    background: #ffffff;
+  }
+
+  .page,
+  .shell,
+  .card {
+    max-width: none;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    box-shadow: none;
+    background: #ffffff;
+  }
+
+  /*
+   * The confirmation code is the thing somebody quotes on the phone, so it
+   * survives the trip to paper and keeps its emphasis. Everything else loses
+   * its tint: a printed form with shaded blocks reads as a form to fill in.
+   */
+  .confirmation {
+    border: 1pt solid #c9ced2;
+    background: transparent;
+    padding: 8pt;
+    break-inside: avoid;
+  }
+
+  /* One answer should not straddle a page break. A label at the foot of one
+     page and its answer at the head of the next is how a read-back gets
+     misread. */
+  .review-row,
+  .review-section {
+    break-inside: avoid;
+  }
+
+  .review-list {
+    border: 0;
+  }
+
+  h1,
+  h2,
+  h3 {
+    break-after: avoid;
+    color: #021018;
+  }
+
+  /* Last, and small. It is a notice, not part of the record. */
+  .privacy {
+    break-before: auto;
+    font-size: 8pt;
+    color: #5b6871;
+  }
+}

@@ -328,6 +328,32 @@ note('submitted line', submittedLine);
 check('the time carries the Foundation timezone, not the browser one',
   /\b(CST|CDT)\b/.test(submittedLine), true);
 
+/*
+ * AND IT PRINTS AS A DOCUMENT.
+ *
+ * This read-back exists because the confirmation email can take a minute and
+ * can land in spam, and a nonprofit's file copy of its own grant application
+ * is a real record. The next thing many people do with a page like this is
+ * press Ctrl-P -- which, until the print stylesheet existed, produced a brand
+ * band across the top, a "Clear every answer" button in the middle, and the
+ * privacy notice taking a page of its own.
+ */
+await page.emulateMedia({ media: 'print' });
+const printed = await page.evaluate(() => ({
+  chromeShown: [...document.querySelectorAll('.masthead, .btn, button')]
+    .some((el) => getComputedStyle(el).display !== 'none'),
+  codeKept: !!document.querySelector('.confirmation .code'),
+  answersKept: document.querySelectorAll('.review-row').length,
+  rowsStayWhole: document.querySelector('.review-row')
+    ? getComputedStyle(document.querySelector('.review-row')).breakInside
+    : null,
+}));
+check('printing drops the masthead and every control', printed.chromeShown, false);
+check('and keeps the confirmation code, which is what gets quoted', printed.codeKept, true);
+check('and every answer', printed.answersKept > 10, true);
+check('an answer does not straddle a page break', printed.rowsStayWhole, 'avoid');
+await page.emulateMedia({ media: 'screen' });
+
 const second = await ctx.newPage();
 await second.goto(`${WEB}/apply/${ids.app}`, { waitUntil: 'networkidle' });
 await second.waitForTimeout(400);

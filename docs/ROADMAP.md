@@ -59,8 +59,9 @@ the Formstack/awards importer, the nightly D1 export to R2, and a retention
 policy that destroys applicants' financial documents 90 days after their
 application is decided.
 
-**Not built:** the Eloqua opt-in sync, a generated PDF (the CSV plus the
-browser's print-to-PDF is what exists), EIN verification against the IRS file
+**Not built:** the Eloqua opt-in sync, a server-generated PDF -- the browser's
+own print-to-PDF is what exists, and the print stylesheet is now its design
+rather than an afterthought -- EIN verification against the IRS file
 (`src/lib/ein.ts` has the result type and nothing behind it, pending decision
 #3 below), and award documents as FILES rather than dates -- receipt is
 recorded, the document itself still arrives by email. Declines now send in

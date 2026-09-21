@@ -353,6 +353,58 @@ async function main() {
       '/api/dashboard.csv',
     );
 
+    // ---- what it looks like printed, which is the executives' PDF ---------
+    /*
+     * CLAUDE.md: "Executives never log in, so the export is the product for
+     * them and must stand alone", and asks for a PDF for board and league
+     * reporting. There is no PDF generator here -- carrying a rendering
+     * library into a Worker for a document produced a handful of times a year
+     * is not a trade worth making -- so the browser's print-to-PDF IS the PDF,
+     * and the print stylesheet is the whole of its design.
+     *
+     * Until it existed, printing this page produced a dark-themed screenshot
+     * with a navigation bar, a theme toggle and a "Download the summary"
+     * button across the top of a board paper, and every table clipped at the
+     * first screenful because its scroll container printed as-is.
+     */
+    await page.emulateMedia({ media: 'print', colorScheme: 'dark' });
+    await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'dark'));
+
+    const printed = await page.evaluate(() => {
+      const rgb = (el) => getComputedStyle(el).backgroundColor;
+      const scroll = document.querySelector('.table-scroll');
+      const head = document.querySelector('thead th');
+      return {
+        bodyBackground: rgb(document.body),
+        navShown: [...document.querySelectorAll('.mainnav, .theme-toggle')]
+          .some((el) => getComputedStyle(el).display !== 'none'),
+        buttonsShown: [...document.querySelectorAll('.btn')]
+          .some((el) => getComputedStyle(el).display !== 'none'),
+        tableOverflow: scroll ? getComputedStyle(scroll).overflowX : null,
+        headerRepeats: document.querySelector('thead')
+          ? getComputedStyle(document.querySelector('thead')).display
+          : null,
+        stickyHeader: head ? getComputedStyle(head).position : null,
+        stillHasFigures: document.body.innerText.includes('$63,500'),
+      };
+    });
+
+    check('a printed page is white, whatever theme the viewer had',
+      printed.bodyBackground, 'rgb(255, 255, 255)');
+    check('the navigation and the theme toggle are gone', printed.navShown, false);
+    check('and so is every button, because a printed button is a lie',
+      printed.buttonsShown, false);
+    check('the table is not clipped at the first screenful',
+      printed.tableOverflow, 'visible');
+    check('the column headings repeat on every page',
+      printed.headerRepeats, 'table-header-group');
+    check('and they are not sticky, which prints as an overlap',
+      printed.stickyHeader, 'static');
+    check('the figures are still there', printed.stillHasFigures, true);
+
+    await page.emulateMedia({ media: 'screen' });
+    await page.evaluate(() => document.documentElement.removeAttribute('data-theme'));
+
     // ---- the award record -------------------------------------------------
     const s = appState('awarded');
     await page.unroute('**/api/**');
