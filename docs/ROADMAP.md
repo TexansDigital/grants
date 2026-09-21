@@ -10,7 +10,7 @@ stated. Nothing here has been built.
 being true; the rest of the file is the original plan and its reasoning, kept
 because the reasoning still holds even where the status has moved on.
 
-**Built and reachable: 1,403 tests, migrations 0001-0019.** Six browser
+**Built and reachable: 1,427 tests, migrations 0001-0019.** Seven browser
 harnesses drive real Chromium against the built bundle.
 
 **An applicant can complete an application end to end.** Eligibility screen,
@@ -28,9 +28,10 @@ organizations with an undo.
 **Reviewers can** see their own queue, score against the cycle's rubric with
 autosave, declare a conflict, and submit or reopen a review. **Admins can**
 build and publish a versioned rubric, read every reviewer's scores side by
-side, record a decision, send award and decline letters with the acceptances-
-first rule enforced, and export and re-import an offline scorecard for a
-consultant.
+side, record a decision, create the award record from it, send award and
+decline letters with the acceptances-first rule enforced, export and re-import
+an offline scorecard for a consultant, and read a dashboard whose CSV is the
+export executives receive.
 
 **An applicant is never told by the portal.** An awarded or declined
 application reads as still under review to the applicant until somebody
@@ -42,9 +43,11 @@ the Formstack/awards importer, the nightly D1 export to R2, and a retention
 policy that destroys applicants' financial documents 90 days after their
 application is decided.
 
-**Not built:** the dashboard and exports, the public grantee page, the Eloqua
-opt-in sync, and anything that creates an award record from an awarded
-decision — that step is still manual.
+**Not built:** the public grantee page, the Eloqua opt-in sync, a payment
+ledger (so "committed versus disbursed" cannot be computed and the dashboard
+says so), a generated PDF (the CSV plus the browser's print-to-PDF is what
+exists), and bulk sending of decision letters — each one goes individually,
+which at 250 declines is a long afternoon.
 
 **Never yet exercised for real,** and this is the honest gap between "works"
 and "works in production":
