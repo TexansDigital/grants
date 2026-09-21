@@ -25,6 +25,7 @@
 import type { Session } from '../types';
 import { notFound } from './errors';
 import { formatCents } from './money';
+import { disbursementByProgram, type DisbursementLine } from './payments';
 
 function assertAdmin(session: Session): void {
   // Executives have no in-app access by design and reviewers have no business
@@ -266,10 +267,16 @@ export interface Dashboard {
   funnel: FunnelRow[];
   compliance: ComplianceRow[];
   metrics: MetricRow[];
+  /** Committed, scheduled and paid, per program. */
+  disbursement: DisbursementLine[];
   /**
-   * What this dashboard cannot answer, carried in the payload rather than
-   * left for somebody to notice. CLAUDE.md asks for committed versus
-   * disbursed; there is no payments table, so the second half does not exist.
+   * What this dashboard cannot answer, carried in the payload rather than left
+   * for somebody to notice.
+   *
+   * It used to name disbursement, because there was no payment ledger. There
+   * is one now, and this list is empty -- kept rather than removed, because an
+   * export that can state its own gaps is worth more than one that has none
+   * today and quietly grows some later.
    */
   notAvailable: string[];
 }
@@ -280,11 +287,12 @@ export async function buildDashboard(
   nowIsoStr: string,
 ): Promise<Dashboard> {
   assertAdmin(session);
-  const [totals, funnel, compliance, metrics] = await Promise.all([
+  const [totals, funnel, compliance, metrics, disbursement] = await Promise.all([
     awardTotals(db, session),
     applicationFunnel(db, session),
     reportCompliance(db, session, nowIsoStr),
     impactMetrics(db, session),
+    disbursementByProgram(db, session),
   ]);
   return {
     generatedAt: nowIsoStr,
@@ -292,10 +300,8 @@ export async function buildDashboard(
     funnel,
     compliance,
     metrics,
-    notAvailable: [
-      'Disbursement. Steward records what was committed, not what finance has paid — ' +
-        'there is no payment ledger in it yet.',
-    ],
+    disbursement,
+    notAvailable: [],
   };
 }
 
@@ -347,6 +353,31 @@ export function dashboardCsv(d: Dashboard): string {
   row('');
   // Excluded rules travel WITH the numbers, not in a covering email.
   row('Cancelled awards are excluded. Awards not yet accepted are included.');
+  row('');
+
+  row('MONEY OUT');
+  row('Program', 'Committed', 'Scheduled', 'Paid', 'Not yet scheduled',
+      'Scheduled, not paid', 'Committed (cents)', 'Paid (cents)');
+  for (const r of d.disbursement) {
+    row(
+      r.programName,
+      formatCents(r.committedCents), formatCents(r.scheduledCents), formatCents(r.paidCents),
+      formatCents(Math.max(0, r.committedCents - r.scheduledCents)),
+      formatCents(Math.max(0, r.scheduledCents - r.paidCents)),
+      r.committedCents, r.paidCents,
+    );
+  }
+  row('');
+  /*
+   * THREE NUMBERS, NOT TWO, and the reason is on the row beneath them. Money
+   * nobody has scheduled and money scheduled but unpaid are different problems
+   * for different people, and one "outstanding" figure sends the wrong one
+   * after it.
+   */
+  row(
+    'Steward records payment schedules and what finance reports as paid. It does not ' +
+      'move money. Cancelled payments are listed on an award but not counted here.',
+  );
   row('');
 
   row('APPLICATIONS');

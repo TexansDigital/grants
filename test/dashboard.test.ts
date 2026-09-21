@@ -22,6 +22,7 @@ import { newId } from '../src/lib/ids';
 import { nowIso } from '../src/lib/time';
 import { decideApplication } from '../src/lib/decisions';
 import { createAwardFromDecision, budgetByProgram } from '../src/lib/awards';
+import { schedulePayment, recordPayment } from '../src/lib/payments';
 import {
   awardTotals, applicationFunnel, reportCompliance, impactMetrics,
   buildDashboard, dashboardCsv, formatRate,
@@ -530,13 +531,48 @@ describe('the export, which is the product for executives', () => {
     expect(csv).toContain('Only accepted reports are counted');
   });
 
-  it('says plainly what it cannot answer', async () => {
-    // CLAUDE.md asks for committed versus disbursed. There is no payment
-    // ledger, so the second half does not exist -- and showing committed
-    // twice under two headings would be worse than saying so.
+  it('now answers committed versus disbursed, which it used to say it could not', async () => {
+    /*
+     * THIS TEST USED TO ASSERT THE OPPOSITE. There was no payment ledger, so
+     * the dashboard named disbursement in `notAvailable` and the CSV said so
+     * rather than showing committed twice under two headings. The ledger
+     * exists now, and the gap it announced is closed.
+     *
+     * `notAvailable` is kept rather than deleted: an export that can state its
+     * own gaps is worth more than one that has none today and quietly grows
+     * some later.
+     */
+    const p = await program();
+    const a = await submitted(p);
+    await decideApplication(db, ctx(), admin, a.applicationId, { status: 'awarded' });
+    const award = await createAwardFromDecision(db, ctx(), admin, a.applicationId, {
+      awardedAmountCents: 2_500_000,
+    });
+    const first = await schedulePayment(db, ctx(), admin, award.awardId, {
+      amountCents: 1_000_000,
+      scheduledDate: nowIso(),
+    });
+    await schedulePayment(db, ctx(), admin, award.awardId, {
+      amountCents: 1_500_000,
+      scheduledDate: nowIso(),
+    });
+    await recordPayment(db, ctx(), admin, first.id, {
+      paidDate: nowIso(),
+      referenceNumber: 'CHQ-10412',
+    });
+
     const d = await buildDashboard(db, admin, nowIso());
-    expect(d.notAvailable.some((s) => /Disbursement/.test(s))).toBe(true);
-    expect(dashboardCsv(d)).toContain('Disbursement');
+    expect(d.notAvailable).toEqual([]);
+
+    const line = d.disbursement.find((r) => r.programId === p.programId)!;
+    expect(line.committedCents).toBe(2_500_000);
+    expect(line.scheduledCents).toBe(2_500_000);
+    expect(line.paidCents).toBe(1_000_000);
+
+    const csv = dashboardCsv(d);
+    expect(csv).toContain('MONEY OUT');
+    // The rule travels with the numbers, like every other section's does.
+    expect(csv).toContain('It does not move money');
   });
 
   it('writes money formatted AND in raw cents', async () => {

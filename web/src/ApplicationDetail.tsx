@@ -361,6 +361,7 @@ export function ApplicationDetail({ applicationId, isAdmin, onBack }: Props): Re
               (detail.application as unknown as { decided_at?: string | null }).decided_at ?? null
             }
             decidedStatus={detail.application.status ?? null}
+            existingAwardId={detail.award?.id ?? null}
             onDecided={() => setReloadKey((k) => k + 1)}
           />
         )}

@@ -53,6 +53,9 @@ import {
 } from './lib/acceptance';
 import { buildDashboard, dashboardCsv } from './lib/dashboard';
 import {
+  awardLedger, schedulePayment, recordPayment, cancelPayment,
+} from './lib/payments';
+import {
   granteeHome, granteeMe, readReport, autosaveReport, fileReport,
 } from './lib/granteeRoutes';
 import { requireStaffSession } from './lib/auth';
@@ -1114,6 +1117,72 @@ const routes: readonly Route[] = [
         notes: body.notes == null ? null : String(body.notes),
       });
       return json(result, ctx, 201);
+    },
+  },
+
+  // ---- payments ------------------------------------------------------------
+  //
+  // CLAUDE.md: "The system does not disburse money. It records schedules and
+  // status. Disbursement stays with finance." Nothing here moves a cent. A
+  // payment is `scheduled` when the Foundation has agreed it and `paid` when
+  // FINANCE SAYS SO, which is why the reference number is required -- it is
+  // what makes somebody else's fact checkable.
+  //
+  // ADMIN ONLY, including the read. When a cheque was cut and under what
+  // reference is internal bookkeeping, and a grantee reading a "paid" date the
+  // bank has not honoured yet would chase it.
+  {
+    method: 'GET',
+    path: '/api/awards/:id/payments',
+    roles: ADMIN_ONLY,
+    handler: async ({ env, ctx, params, session }) =>
+      json(await awardLedger(env.DB, session, params.id!), ctx),
+  },
+  {
+    method: 'POST',
+    path: '/api/awards/:id/payments',
+    roles: ADMIN_ONLY,
+    handler: async ({ request, env, ctx, params, session }) => {
+      const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+      const created = await schedulePayment(env.DB, ctx, session, params.id!, {
+        // CENTS on the wire; the browser parses dollars at the edge, like
+        // every other money path in this system.
+        amountCents: Number(body.amountCents),
+        scheduledDate: String(body.scheduledDate ?? ''),
+        method: body.method == null ? null : String(body.method),
+        note: body.note == null ? null : String(body.note),
+      });
+      return json(created, ctx, 201);
+    },
+  },
+  {
+    method: 'POST',
+    path: '/api/payments/:id/record',
+    roles: ADMIN_ONLY,
+    handler: async ({ request, env, ctx, params, session }) => {
+      const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+      return json(
+        await recordPayment(env.DB, ctx, session, params.id!, {
+          paidDate: String(body.paidDate ?? ''),
+          referenceNumber: String(body.referenceNumber ?? ''),
+          method: body.method == null ? null : String(body.method),
+        }),
+        ctx,
+      );
+    },
+  },
+  {
+    // NOT a delete. "We promised this and then did not" is a question an
+    // auditor asks, and a deleted row cannot answer it.
+    method: 'POST',
+    path: '/api/payments/:id/cancel',
+    roles: ADMIN_ONLY,
+    handler: async ({ request, env, ctx, params, session }) => {
+      const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+      return json(
+        await cancelPayment(env.DB, ctx, session, params.id!, String(body.reason ?? '')),
+        ctx,
+      );
     },
   },
 

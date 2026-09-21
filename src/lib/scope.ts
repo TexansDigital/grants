@@ -646,6 +646,22 @@ export async function getApplicationDetailForStaff(
     .bind(applicationId)
     .all<Record<string, unknown>>();
 
+  /*
+   * The award, if one exists.
+   *
+   * ID AND STATUS ONLY. The detail screen needs to know whether to offer the
+   * "create the award" form or the payment ledger, and that is the whole
+   * question. Amounts and terms live on their own screens, and copying them
+   * here would give two places to read them from and one to forget to update.
+   */
+  const award = await db
+    .prepare(
+      `SELECT id, status FROM awards
+        WHERE application_id = ? AND deleted_at IS NULL LIMIT 1`,
+    )
+    .bind(applicationId)
+    .first<{ id: string; status: string }>();
+
   return {
     application: projected,
     organization: organization ?? null,
@@ -653,6 +669,7 @@ export async function getApplicationDetailForStaff(
     // Metadata only. The object key is never sent; a download goes through a
     // separate endpoint that issues a short-lived signed URL and audits it.
     attachments: attachments ?? [],
+    award: award ?? null,
   };
 }
 

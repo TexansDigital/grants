@@ -1485,3 +1485,67 @@ individual box is the better tool and "Send to all 1" is a silly button.
 **Six mutants, five killed on the first run.** The survivor — removing the round
 cap — was alive because the test queued three declines and asked for 10,000,
 where capped and uncapped give the same answer. It now queues more than the cap.
+
+## §44 — The payment ledger, and the gap the dashboard used to announce
+
+**Date:** 2026-09-21
+**Status:** In force
+
+**Steward does not disburse money.** CLAUDE.md: "It records schedules and
+status. Disbursement stays with finance." Nothing in this ledger moves a cent,
+and the screen says so above the controls. The button reads **Record as paid**,
+not **Pay**, because what an admin is doing is writing down somebody else's
+fact.
+
+**Why it was deferred and why now.** 0012 deliberately left payments out: the
+vocabulary was a guess and the schema had taught nobody anything. It has since.
+Awards have terms, acceptance is a real event, and the dashboard had a hole
+shaped exactly like this table — it named disbursement in `notAvailable` on
+every screen and in every export. That list is now empty, and kept rather than
+deleted: an export that can state its own gaps is worth more than one that has
+none today and quietly grows some later.
+
+**The reference number is required to record a payment.** "Paid" with nothing
+to look it up by is a claim this system cannot support when a grantee says the
+money never arrived — and that conversation is exactly when somebody opens this
+screen.
+
+**A schedule cannot exceed its award.** Instalments summing to more than the
+award is always an error — a typed extra zero, or a second person adding a
+schedule that already existed — and the consequence is a payment run that pays
+a grantee more than the Foundation agreed. An amendment raises the award first.
+
+**A paid payment is settled.** It cannot be re-recorded, cancelled, or have its
+amount changed — the schema refuses the last — because all three rewrite a
+figure finance has already sent and the disbursed total with it. A genuine
+correction is a new row.
+
+**Cancelling is not deleting.** "We promised this and then did not" is a
+question an auditor asks, and a deleted row cannot answer it. A cancelled
+payment stays listed with its reason, stops counting toward the scheduled
+total, and frees the amount to be scheduled again.
+
+**Three numbers, not two.** Committed, scheduled and paid. The gap between
+committed and paid is two different problems wearing the same trousers: money
+nobody has scheduled is a planning question, money scheduled and unpaid is a
+finance question, and one "outstanding" figure sends the wrong person after it.
+
+**Paid does not follow the award's status, and committed and scheduled do.** A
+mutant exposed this rather than a test: excluding cancelled awards from all
+three meant a grant paid and *then* rescinded vanished from the disbursed
+total. Committed and scheduled are statements about intent, and a rescinded
+award has none; a paid payment is a statement about money that left the
+building, and it left whatever happened afterwards. The consequence is that
+paid can exceed committed for such a program. That looks wrong on a dashboard
+and is true, and it is precisely the case somebody should be able to see rather
+than one the arithmetic should quietly absorb. The "remaining" columns are
+clamped at zero so the anomaly does not read as a calculation error.
+
+**Nine mutants, eight killed on the first run**, and the survivor produced the
+design change above rather than just a new assertion.
+
+**Known gaps.** No payment run — each is recorded individually, which is right
+at this volume and would not be at ten times it. Nothing reconciles against a
+finance export. Grantees cannot see their own payment schedule, which is
+defensible while "paid" means "finance says so" and arguable once it means
+"the bank honoured it".

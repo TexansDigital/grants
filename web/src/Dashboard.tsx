@@ -141,6 +141,59 @@ export function Dashboard(): ReactElement {
       </section>
 
       <section className="panel">
+        <h3>Money out</h3>
+        {data.disbursement.length === 0 ? (
+          <p className="meta">No programs yet.</p>
+        ) : (
+          <div className="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th scope="col">Program</th>
+                  <th scope="col" className="num">Committed</th>
+                  <th scope="col" className="num">Scheduled</th>
+                  <th scope="col" className="num">Paid</th>
+                  <th scope="col" className="num">Not yet scheduled</th>
+                  <th scope="col" className="num">Scheduled, not paid</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.disbursement.map((r) => (
+                  <tr key={r.programId}>
+                    <th scope="row">{r.programName}</th>
+                    <td className="num">{formatCents(r.committedCents)}</td>
+                    <td className="num">{formatCents(r.scheduledCents)}</td>
+                    <td className="num">{formatCents(r.paidCents)}</td>
+                    {/*
+                      * THREE NUMBERS, NOT TWO. Money nobody has scheduled is a
+                      * planning question; money scheduled and unpaid is a
+                      * finance question. One "outstanding" figure sends the
+                      * wrong person after it.
+                      *
+                      * Clamped at zero because paid can legitimately exceed
+                      * committed — a grant paid and later rescinded — and a
+                      * negative in a "remaining" column reads as an error
+                      * rather than as the anomaly it is.
+                      */}
+                    <td className="num">
+                      {formatCents(Math.max(0, r.committedCents - r.scheduledCents))}
+                    </td>
+                    <td className="num">
+                      {formatCents(Math.max(0, r.scheduledCents - r.paidCents))}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        <p className="meta">
+          Steward records payment schedules and what finance reports as paid. It does not move
+          money. Cancelled payments are listed on an award but not counted here.
+        </p>
+      </section>
+
+      <section className="panel">
         <h3>Against budget</h3>
         {data.budget.length === 0 ? (
           <p className="meta">No programs yet.</p>

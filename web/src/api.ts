@@ -83,6 +83,8 @@ export interface ApplicationDetail {
   organization: Record<string, unknown> | null;
   answers: Record<string, StoredAnswer>;
   attachments: { id: string; filename: string; mime_type: string; size_bytes: number }[];
+  /** The award made from this application, if one exists. Id and status only. */
+  award: { id: string; status: string } | null;
 }
 
 /** A short-lived signed URL. Treat it as a credential and do not store it. */
@@ -307,6 +309,14 @@ export interface DashboardData {
     reports: number;
     total: number | null;
   }[];
+  disbursement: {
+    programId: string;
+    programName: string;
+    fiscalYear: number | null;
+    committedCents: number;
+    scheduledCents: number;
+    paidCents: number;
+  }[];
   budget: {
     programId: string;
     programName: string;
@@ -331,6 +341,29 @@ export interface DeclineBatchResult {
     ok: boolean;
     reason: string | null;
   }[];
+}
+
+export interface PaymentRow {
+  id: string;
+  awardId: string;
+  amountCents: number;
+  scheduledDate: string;
+  paidDate: string | null;
+  status: string;
+  method: string | null;
+  referenceNumber: string | null;
+  note: string | null;
+}
+
+export interface AwardLedger {
+  awardId: string;
+  organizationName: string;
+  awardedAmountCents: number;
+  scheduledCents: number;
+  paidCents: number;
+  /** Awarded minus scheduled. */
+  unscheduledCents: number;
+  payments: PaymentRow[];
 }
 
 export interface SearchHit {
@@ -555,6 +588,26 @@ export const api = {
    * credentials for every financial statement on a page nobody clicked.
    */
   dashboard: (signal?: AbortSignal) => get<DashboardData>('/api/dashboard', signal),
+  payments: (awardId: string, signal?: AbortSignal) =>
+    get<AwardLedger>(`/api/awards/${encodeURIComponent(awardId)}/payments`, signal),
+  schedulePayment: (
+    awardId: string,
+    body: { amountCents: number; scheduledDate: string; note?: string | null },
+  ) =>
+    request<PaymentRow>(`/api/awards/${encodeURIComponent(awardId)}/payments`, {
+      method: 'POST',
+      body,
+    }),
+  recordPayment: (paymentId: string, body: { paidDate: string; referenceNumber: string }) =>
+    request<PaymentRow>(`/api/payments/${encodeURIComponent(paymentId)}/record`, {
+      method: 'POST',
+      body,
+    }),
+  cancelPayment: (paymentId: string, reason: string) =>
+    request<{ paymentId: string; status: string }>(
+      `/api/payments/${encodeURIComponent(paymentId)}/cancel`,
+      { method: 'POST', body: { reason } },
+    ),
   createAward: (
     applicationId: string,
     body: {

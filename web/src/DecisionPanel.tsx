@@ -21,6 +21,7 @@ import { useCallback, useEffect, useState } from 'react';
 import type { ReactElement } from 'react';
 import { ApiError, api } from './api';
 import { formatCents } from '../../src/lib/money';
+import { PaymentLedger } from './PaymentLedger';
 import type { ScoreSummary } from './api';
 
 const WEIGHT_ONE_BP = 10000;
@@ -31,6 +32,8 @@ interface Props {
   decidedAt: string | null;
   /** The application's own status, so an awarded one can be given its award. */
   decidedStatus: string | null;
+  /** The award already on this application, if one was created earlier. */
+  existingAwardId: string | null;
   onDecided: () => void;
 }
 
@@ -47,6 +50,7 @@ export function DecisionPanel({
   applicationId,
   decidedAt,
   decidedStatus,
+  existingAwardId,
   onDecided,
 }: Props): ReactElement | null {
   const [summary, setSummary] = useState<ScoreSummary | null>(null);
@@ -61,6 +65,8 @@ export function DecisionPanel({
   const [termStart, setTermStart] = useState('');
   const [termEnd, setTermEnd] = useState('');
   const [awardNotice, setAwardNotice] = useState<string | null>(null);
+  /** Set once an award exists, so its payment ledger can be shown. */
+  const [awardId, setAwardId] = useState<string | null>(existingAwardId);
 
   /*
    * Dollars in, CENTS on the wire.
@@ -89,6 +95,7 @@ export function DecisionPanel({
         `Award recorded: ${formatCents(result.awardedAmountCents)}, pending acceptance. ` +
           'The award letter can now be sent from the cycle\u2019s letters page.',
       );
+      setAwardId(result.awardId);
     } catch (e) {
       if (e instanceof ApiError) {
         setError(e.message);
@@ -239,6 +246,13 @@ export function DecisionPanel({
           )}
         </>
       )}
+
+      {/*
+        * The ledger, once an award exists. Below the reviews and the decision,
+        * because that is the order the work happens in: score, decide, record
+        * the award, then schedule the money.
+        */}
+      {awardId && <PaymentLedger awardId={awardId} />}
 
       <h3>Decision</h3>
       {decidedAt ? (

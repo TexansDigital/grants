@@ -104,20 +104,26 @@ const DASHBOARD = {
       reports: 6, total: null,
     },
   ],
+  disbursement: [
+    {
+      programId: 'p1', programName: 'Inspire Change', fiscalYear: 2026,
+      committedCents: 6_350_000, scheduledCents: 4_000_000, paidCents: 2_500_000,
+    },
+  ],
   budget: [
     {
       programId: 'p1', programName: 'Inspire Change', fiscalYear: 2026,
       totalBudgetCents: 5_000_000, committedCents: 6_350_000, awards: 3, overBudget: true,
     },
   ],
-  notAvailable: [
-    'Disbursement. Steward records what was committed, not what finance has paid — ' +
-      'there is no payment ledger in it yet.',
-  ],
+  // Empty now that the payment ledger exists. The field stays, because an
+  // export that can state its own gaps is worth more than one that has none
+  // today and quietly grows some later.
+  notAvailable: [],
 };
 
 function appState(status) {
-  return { status, awards: [] };
+  return { status, awards: [], awardId: null, payments: [] };
 }
 
 async function stubApi(page, s) {
@@ -144,6 +150,7 @@ async function stubApi(page, s) {
         organization: { id: 'o1', legal_name: 'Invented Collective' },
         answers: {},
         attachments: [],
+        award: s.awardId ? { id: s.awardId, status: 'pending' } : null,
       });
     }
     if (p === '/api/organizations/o1/history') {
@@ -159,9 +166,31 @@ async function stubApi(page, s) {
         byCriterion: [],
       });
     }
+    if (p === '/api/awards/w1/payments' && method === 'GET') {
+      return json(route, {
+        awardId: 'w1', organizationName: 'Invented Collective',
+        awardedAmountCents: 2_500_029,
+        scheduledCents: s.payments.reduce((t, x) => t + x.amountCents, 0),
+        paidCents: 0,
+        unscheduledCents:
+          2_500_029 - s.payments.reduce((t, x) => t + x.amountCents, 0),
+        payments: s.payments,
+      });
+    }
+    if (p === '/api/awards/w1/payments' && method === 'POST') {
+      const body = JSON.parse(route.request().postData() ?? '{}');
+      s.payments.push({
+        id: `pay${s.payments.length + 1}`, awardId: 'w1',
+        amountCents: body.amountCents, scheduledDate: body.scheduledDate,
+        paidDate: null, status: 'scheduled', method: null,
+        referenceNumber: null, note: null,
+      });
+      return json(route, s.payments[s.payments.length - 1], 201);
+    }
     if (p === '/api/applications/app1/award' && method === 'POST') {
       const body = JSON.parse(route.request().postData() ?? '{}');
       s.awards.push(body);
+      s.awardId = 'w1';
       return json(route, {
         awardId: 'w1', applicationId: 'app1',
         awardedAmountCents: body.awardedAmountCents, status: 'pending',
@@ -216,7 +245,26 @@ async function main() {
      * meeting, and "total awarded" is not one number -- it is a number plus a
      * rule about cancelled and pending grants.
      */
-    check('the screen says what is not included', body.includes('Disbursement'), true);
+    /*
+     * COMMITTED, SCHEDULED AND PAID, all three. The dashboard used to announce
+     * that it could not answer the second half of "committed versus
+     * disbursed"; the payment ledger closed that, and these are the numbers
+     * that replaced the apology.
+     */
+    check(
+      'committed, scheduled and paid are all shown',
+      [
+        body.includes('$63,500'),
+        body.includes('$40,000'),
+        body.includes('$25,000'),
+      ],
+      [true, true, true],
+    );
+    check(
+      'and the screen says Steward does not move money',
+      body.includes('It does not move money'),
+      true,
+    );
     check(
       'and carries the exclusion rules beside the numbers',
       [
@@ -292,6 +340,29 @@ async function main() {
       'the screen says the award is pending, not accepted',
       (await page.locator('body').innerText()).includes('pending acceptance'),
       true,
+    );
+
+    // ---- the payment ledger, once an award exists -------------------------
+    /*
+     * STEWARD DOES NOT PAY ANYBODY, and the screen has to say so. A button
+     * reading "Pay" would be a lie about what this system does; what an admin
+     * is doing is writing down somebody else's fact.
+     */
+    await page.locator('#payment-amount').waitFor();
+    check(
+      'the ledger says Steward does not move money',
+      (await page.locator('body').innerText()).includes('It does not move money'),
+      true,
+    );
+    await page.locator('#payment-amount').fill('8,333.33');
+    await page.locator('#payment-due').fill('2026-12-01');
+    await page.getByRole('button', { name: 'Schedule a payment' }).click();
+    await page.getByText('Record as paid').waitFor();
+    check('dollars became integer cents', s.payments[0].amountCents, 833333);
+    check(
+      'the action is "Record as paid", not "Pay"',
+      await page.getByRole('button', { name: /^Pay$/ }).count(),
+      0,
     );
     await ctx.close();
 
