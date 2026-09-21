@@ -6,45 +6,55 @@ stated. Nothing here has been built.
 
 ## Where we actually are
 
-**Last updated 9 September 2026.** This section is rewritten whenever it stops
-being true; the rest of the file is the original plan and its reasoning.
+**Last updated 21 September 2026.** This section is rewritten whenever it stops
+being true; the rest of the file is the original plan and its reasoning, kept
+because the reasoning still holds even where the status has moved on.
 
-**An applicant can now complete an application end to end.** Eligibility
-screen, magic-link sign-in, draft creation, server-backed autosave, direct-to-R2
-uploads, review, submit, and a confirmation email carrying a full read-back.
-Driven in a browser against a real local Worker and D1, at phone width.
+**Built and reachable: 1,361 tests, migrations 0001-0018.** Four browser
+harnesses drive real Chromium against the built bundle.
 
-**Staff can** sign in through Access, create and edit programs, stages and
-cycles, open and close a cycle, browse the pipeline with filters, search
-narratives full-text, read one application in full, and see an organization's
-history.
+**An applicant can complete an application end to end.** Eligibility screen,
+magic-link sign-in, draft creation, server-backed autosave, direct-to-R2
+uploads, review, submit, confirmation email with a full read-back. Turnstile is
+live on the public form, scoped to `apply.houstontexansfoundation.org`, and
+fails closed.
 
-**Built and reachable:** 677 tests, migrations 0001-0011.
+**Staff can** sign in through Access, manage programs, stages and cycles, open
+and close a cycle, browse and filter the pipeline, search narratives full-text,
+read one application in full with its organization's history, **open its
+uploaded files**, assign reviewers and see coverage, and remove junk
+organizations with an undo.
 
-**Built, no way in yet:**
-- Review and scoring. Tables exist (rubrics, criteria, assignments with
-  conflict declaration, per-criterion scores) and there is a queue endpoint. No
-  screens, and no rubric to load — see `docs/BLOCKED-ON-YOU.md` §2.1.
-- The Formstack importer. Parses and reports; writes nothing.
+**Reviewers can** see their own queue, score against the cycle's rubric with
+autosave, declare a conflict, and submit or reopen a review. **Admins can**
+build and publish a versioned rubric, read every reviewer's scores side by
+side, and record a decision.
 
-**Not built:** awards, payments, decision communication, grantee reporting,
-dashboard and exports, the public cycle page, organization merge tooling,
-Eloqua opt-in sync, and the cron D1→R2 export (`src/index.ts` `scheduled` is
-still a stub).
+**Also built:** awards and the payment ledger, grantee reporting with
+per-program metrics, the compliance desk, data health, organization merge,
+the Formstack/awards importer, the nightly D1 export to R2, and a retention
+policy that destroys applicants' financial documents 90 days after their
+application is decided.
+
+**Not built:** decision communication (award and decline emails with embargo
+handling), the dashboard and exports, the public grantee page, the Eloqua
+opt-in sync, and the offline scorecard export/import for consultants.
 
 **Never yet exercised for real,** and this is the honest gap between "works"
 and "works in production":
-- **No email has ever been delivered.** With no `RESEND_API_KEY` every message
-  is recorded and deliberately suppressed. Correct for preview; it means the
-  send path has been tested and never used.
-- **No file has ever reached a real R2 bucket.** The local runs sign with
-  invented credentials against a hostname that does not exist, and the browser
-  drive intercepts the PUT. The signature, the request shape and the absence of
-  a Content-Type header are all verified; storage accepting it is not.
-- **No real applicant has touched any of it.** CLAUDE.md's Phase 2 verification
-  is three friendly organizations submitting on their own devices with no help.
-  That has not happened and nothing substitutes for it.
-- **No human security review.** See `docs/BLOCKED-ON-YOU.md` §1.4.
+- **No real applicant has touched any of it.** CLAUDE.md's Phase 2
+  verification is three friendly organizations submitting on their own devices
+  with no help. That has not happened and nothing substitutes for it.
+- **No file has ever been destroyed by the retention job on a real schedule.**
+  The code is tested; the first real purge is a human verification step.
+- **The nightly export has never been restored.** A backup you have never
+  restored is a hypothesis. The manifest exists to make the test possible;
+  performing it is a human step that has not happened.
+- **No human security review.** See `docs/BLOCKED-ON-YOU.md`.
+
+**Still owed by the Foundation:** the impact metrics CSV, decline wording, the
+security review, the backup restore test, and answers to CLAUDE.md's open
+decisions #1, #2, #4, #5 and #7.
 
 ## The schema already commits to things that do not exist
 
