@@ -128,7 +128,11 @@ APPLICANT_BASE_URL = "https://apply.houstontexansfoundation.org"
 # with no TURNSTILE_SECRET_KEY and no TURNSTILE_OPTIONAL, every public endpoint
 # refuses. That is the correct posture for a form anybody on the internet can
 # reach, and it is the opposite of what this did before.
-TURNSTILE_SITE_KEY = ""
+# The widget is scoped to apply.houstontexansfoundation.org in the Turnstile
+# dashboard. If a public page is ever served from another hostname, Turnstile
+# refuses every token from it and that page stops working -- add the hostname
+# to the widget rather than blanking this value.
+TURNSTILE_SITE_KEY = "0x4AAAAAAE-1QKHwyJEDLSkb"
 # R2, for presigned uploads. Neither is a credential: the bucket name is the
 # same one bound below, and the account id is visible in any Cloudflare URL.
 # The key and secret that make them usable are Wrangler secrets.
