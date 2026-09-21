@@ -41,7 +41,7 @@ import {
 import { decideApplication, type DecisionStatus } from './lib/decisions';
 import {
   communicationQueue, sendAwardNotification, sendDeclineNotification,
-  recordManualCommunication,
+  recordManualCommunication, sendDeclineBatch,
 } from './lib/decisionComms';
 import {
   exportScorecard, planScorecardImport, applyScorecardImport, reviewersInCycle,
@@ -1260,6 +1260,29 @@ const routes: readonly Route[] = [
         await sendDeclineNotification(env, ctx, session, params.id!, paragraphs),
         ctx,
       );
+    },
+  },
+  {
+    /*
+     * One letter, many recipients, sent a round at a time.
+     *
+     * A ROUND, NOT THE LOT. A cycle produces around 250 declines and each is
+     * an HTTPS call to a mail provider; one request attempting all of them is
+     * betting the batch on the subrequest limit and the CPU budget, and the
+     * failure mode is a request that dies at letter 180 with nobody able to
+     * say which 180. The client loops while `remaining` is above zero, and
+     * every letter is keyed on its own application so a repeated round sends
+     * nothing twice.
+     */
+    method: 'POST',
+    path: '/api/cycles/:id/notify-declines',
+    roles: ADMIN_ONLY,
+    handler: async ({ request, env, ctx, params, session }) => {
+      const body = (await request.json().catch(() => ({}))) as { body?: unknown };
+      const paragraphs = Array.isArray(body.body)
+        ? body.body.map((p) => String(p ?? ''))
+        : String(body.body ?? '').split(/\n\s*\n/);
+      return json(await sendDeclineBatch(env, ctx, session, params.id!, paragraphs), ctx);
     },
   },
   {

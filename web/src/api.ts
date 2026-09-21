@@ -320,6 +320,19 @@ export interface DashboardData {
   notAvailable: string[];
 }
 
+export interface DeclineBatchResult {
+  sent: number;
+  failed: number;
+  /** Still waiting after this round. The caller loops while this is above 0. */
+  remaining: number;
+  outcomes: {
+    applicationId: string;
+    organizationName: string;
+    ok: boolean;
+    reason: string | null;
+  }[];
+}
+
 export interface SearchHit {
   application_id: string;
   rank: number;
@@ -579,6 +592,11 @@ export const api = {
     request<{ applicationId: string; communicatedAt: string }>(
       `/api/applications/${encodeURIComponent(applicationId)}/notify-award`,
       { method: 'POST', body: {} },
+    ),
+  notifyDeclineBatch: (cycleId: string, body: string[]) =>
+    request<DeclineBatchResult>(
+      `/api/cycles/${encodeURIComponent(cycleId)}/notify-declines`,
+      { method: 'POST', body: { body } },
     ),
   notifyDecline: (applicationId: string, body: string[]) =>
     request<{ applicationId: string; communicatedAt: string }>(

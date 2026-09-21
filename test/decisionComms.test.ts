@@ -24,7 +24,7 @@ import { nowIso } from '../src/lib/time';
 import { decideApplication } from '../src/lib/decisions';
 import {
   communicationQueue, sendAwardNotification, sendDeclineNotification,
-  recordManualCommunication,
+  recordManualCommunication, sendDeclineBatch, DECLINE_BATCH_SIZE,
 } from '../src/lib/decisionComms';
 import { getApplicationForExternal, applicantVisibleStatus } from '../src/lib/scope';
 import type { Env, Session } from '../src/types';
@@ -462,5 +462,162 @@ describe('recording that somebody phoned', () => {
         .bind(nowIso(), admin.userId, a.applicationId)
         .run(),
     ).rejects.toThrow();
+  });
+});
+
+describe('sending the week of declines', () => {
+  const LETTER = [
+    'We had far more strong applications this year than we were able to fund.',
+    'We hope you will apply again next cycle.',
+  ];
+
+  it('sends a round at a time and reports what is left', async () => {
+    /*
+     * A ROUND, NOT THE LOT. Each letter is an HTTPS call to a mail provider;
+     * one request attempting 250 is betting the batch on the subrequest limit
+     * and the CPU budget, and the failure mode is a request that dies at
+     * letter 180 with nobody able to say which 180.
+     */
+    const c = await cycle();
+    const apps = [];
+    for (let i = 0; i < 4; i += 1) {
+      const a = await applicationIn(c);
+      await decideApplication(db, ctx(), admin, a.applicationId, {
+        status: 'declined', notes: 'Not this cycle.',
+      });
+      apps.push(a);
+    }
+
+    const first = await sendDeclineBatch(mailEnv(), ctx(), admin, c.cycleId, LETTER, 2);
+    expect(first.sent).toBe(2);
+    expect(first.failed).toBe(0);
+    expect(first.remaining).toBe(2);
+
+    const second = await sendDeclineBatch(mailEnv(), ctx(), admin, c.cycleId, LETTER, 2);
+    expect(second.sent).toBe(2);
+    expect(second.remaining).toBe(0);
+
+    for (const a of apps) {
+      expect((await sentTo(a.applicationId, 'decline_notification'))?.n).toBe(1);
+    }
+  });
+
+  it('sends nothing twice when a round is repeated', async () => {
+    // The obvious operator mistake -- a double-click, a refreshed page, a
+    // retried request. Every letter is keyed on its own application.
+    const c = await cycle();
+    const a = await applicationIn(c);
+    await decideApplication(db, ctx(), admin, a.applicationId, {
+      status: 'declined', notes: 'Not this cycle.',
+    });
+
+    await sendDeclineBatch(mailEnv(), ctx(), admin, c.cycleId, LETTER);
+    const again = await sendDeclineBatch(mailEnv(), ctx(), admin, c.cycleId, LETTER);
+    expect(again.sent).toBe(0);
+    expect(again.remaining).toBe(0);
+    expect((await sentTo(a.applicationId, 'decline_notification'))?.n).toBe(1);
+  });
+
+  it('keeps going when one letter cannot be sent, and names who missed out', async () => {
+    /*
+     * A single bad address must not hold up 24 other nonprofits. And the
+     * outcome list has to name them, or somebody discovers it from a reply
+     * three weeks later.
+     */
+    const c = await cycle();
+    const good = await applicationIn(c);
+    const bad = await applicationIn(c, { email: null });
+    for (const a of [good, bad]) {
+      await decideApplication(db, ctx(), admin, a.applicationId, {
+        status: 'declined', notes: 'Not this cycle.',
+      });
+    }
+
+    const result = await sendDeclineBatch(mailEnv(), ctx(), admin, c.cycleId, LETTER);
+    expect(result.sent).toBe(1);
+    expect(result.failed).toBe(1);
+    const missed = result.outcomes.find((o) => o.applicationId === bad.applicationId)!;
+    expect(missed.ok).toBe(false);
+    // The PUBLIC message: an admin reading this is deciding what to do about
+    // it, and "no contact address" says go and find one.
+    expect(missed.reason).toMatch(/contact address/i);
+    expect(missed.organizationName).toBeTruthy();
+
+    // The one that failed is still outstanding, so the next round retries it.
+    expect(result.remaining).toBe(1);
+  });
+
+  it('is refused wholesale while an award is untold', async () => {
+    // One refusal with a reason beats 250 individual ones, and the gate is
+    // checked again inside every letter so the batch cannot be the bypass.
+    const c = await cycle();
+    const winner = await applicationIn(c);
+    const loser = await applicationIn(c);
+    await decideApplication(db, ctx(), admin, winner.applicationId, { status: 'awarded' });
+    await decideApplication(db, ctx(), admin, loser.applicationId, {
+      status: 'declined', notes: 'Not this cycle.',
+    });
+    await awardFor(winner.applicationId, winner.orgId, c.programId, null);
+
+    const err = await appErrorFrom(
+      sendDeclineBatch(mailEnv(), ctx(), admin, c.cycleId, LETTER),
+    );
+    expect(err.code).toBe('CONFLICT');
+    expect(err.publicMessage).toMatch(/Acceptances go first/i);
+    expect((await sentTo(loser.applicationId, 'decline_notification'))?.n).toBe(0);
+  });
+
+  it('refuses an empty letter, because there is no standard wording', async () => {
+    const c = await cycle();
+    const a = await applicationIn(c);
+    await decideApplication(db, ctx(), admin, a.applicationId, {
+      status: 'declined', notes: 'x',
+    });
+    for (const body of [[], [''], ['  ']]) {
+      const err = await appErrorFrom(
+        sendDeclineBatch(mailEnv(), ctx(), admin, c.cycleId, body),
+      );
+      expect(err.code).toBe('VALIDATION_FAILED');
+    }
+    expect((await sentTo(a.applicationId, 'decline_notification'))?.n).toBe(0);
+  });
+
+  it('refuses a reviewer, and caps the round size a caller can ask for', async () => {
+    const c = await cycle();
+    expect(
+      (await appErrorFrom(
+        sendDeclineBatch(mailEnv(), ctx(), reviewerSession(newId()), c.cycleId, LETTER),
+      )).code,
+    ).toBe('NOT_FOUND');
+
+    /*
+     * The cap needs MORE PENDING THAN THE CAP to be visible at all. A first
+     * version of this test queued three declines and asked for 10,000, where
+     * capped and uncapped give the same answer -- and a mutant that removed
+     * the cap survived it.
+     */
+    for (let i = 0; i < DECLINE_BATCH_SIZE + 1; i += 1) {
+      const a = await applicationIn(c);
+      await decideApplication(db, ctx(), admin, a.applicationId, {
+        status: 'declined', notes: 'x',
+      });
+    }
+    const result = await sendDeclineBatch(mailEnv(), ctx(), admin, c.cycleId, LETTER, 10_000);
+    expect(result.sent).toBe(DECLINE_BATCH_SIZE);
+    expect(result.remaining).toBe(1);
+  });
+
+  it('never returns an empty round, which the caller would loop on forever', async () => {
+    // The caller loops while `remaining` is above zero. A round of nothing
+    // with work outstanding is an infinite loop in somebody's browser.
+    const c = await cycle();
+    const a = await applicationIn(c);
+    await decideApplication(db, ctx(), admin, a.applicationId, {
+      status: 'declined', notes: 'x',
+    });
+    for (const asked of [0, -5]) {
+      const result = await sendDeclineBatch(mailEnv(), ctx(), admin, c.cycleId, LETTER, asked);
+      expect(result.sent + result.failed).toBeGreaterThan(0);
+    }
   });
 });

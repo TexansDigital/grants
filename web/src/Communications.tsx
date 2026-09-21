@@ -20,7 +20,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { ReactElement } from 'react';
 import { ApiError, api } from './api';
-import type { CommunicationQueue, PendingRow } from './api';
+import type { CommunicationQueue, PendingRow, DeclineBatchResult } from './api';
 import { formatCents } from '../../src/lib/money';
 
 interface Props {
@@ -36,6 +36,71 @@ export function Communications({ cycleId, onBack }: Props): ReactElement {
   /** The decline letter currently being written, keyed by application. */
   const [writing, setWriting] = useState<string | null>(null);
   const [letter, setLetter] = useState('');
+  /** The shared letter, for everyone who is getting the same one. */
+  const [batchLetter, setBatchLetter] = useState('');
+  const [batchRunning, setBatchRunning] = useState(false);
+  const [batchProgress, setBatchProgress] = useState<{ sent: number; remaining: number } | null>(
+    null,
+  );
+  const [batchFailures, setBatchFailures] = useState<DeclineBatchResult['outcomes']>([]);
+
+  /*
+   * Send the shared letter, a round at a time, until nothing is left.
+   *
+   * THE LOOP IS HERE AND NOT ON THE SERVER, deliberately. A Worker request
+   * attempting 250 mail-provider calls is betting the batch on a subrequest
+   * limit, and the failure mode is a request that dies at letter 180 with
+   * nobody able to say which 180. Rounds are small, every letter is keyed on
+   * its own application so nothing sends twice, and the person watching sees a
+   * number move rather than a spinner.
+   *
+   * FAILURES ACCUMULATE RATHER THAN STOPPING IT. A bad address on one
+   * application must not hold up the others, and the list names who missed out
+   * so somebody can act on it now rather than reading a reply in three weeks.
+   */
+  async function sendAllDeclines(): Promise<void> {
+    const paragraphs = batchLetter
+      .split(/\n\s*\n/)
+      .map((p) => p.trim())
+      .filter(Boolean);
+    if (paragraphs.length === 0) {
+      setError('Write the letter before sending it.');
+      return;
+    }
+    if (
+      !window.confirm(
+        `This sends the same letter to ${queue?.declines.length ?? 0} organizations. ` +
+          'It cannot be unsent. Send it?',
+      )
+    ) {
+      return;
+    }
+
+    setBatchRunning(true);
+    setError(null);
+    setNotice(null);
+    setBatchFailures([]);
+    let sent = 0;
+    try {
+      // A hard ceiling on rounds as well as on the loop condition: a server
+      // that kept reporting work left would otherwise spin here forever.
+      for (let round = 0; round < 200; round += 1) {
+        const result = await api.notifyDeclineBatch(cycleId, paragraphs);
+        sent += result.sent;
+        setBatchProgress({ sent, remaining: result.remaining });
+        setBatchFailures((prev) => [...prev, ...result.outcomes.filter((o) => !o.ok)]);
+        // Stop when nothing is left, and ALSO when a round achieved nothing --
+        // otherwise a batch where every remaining letter fails loops forever.
+        if (result.remaining === 0 || result.sent === 0) break;
+      }
+      setNotice(`Sent ${sent} letter${sent === 1 ? '' : 's'}.`);
+      await load();
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : String(e));
+    } finally {
+      setBatchRunning(false);
+    }
+  }
 
   const load = useCallback(
     async (signal?: AbortSignal) => {
@@ -235,7 +300,58 @@ export function Communications({ cycleId, onBack }: Props): ReactElement {
         {queue.declines.length === 0 ? (
           <p className="meta">No declines are waiting to be sent.</p>
         ) : (
-          queue.declines.map((r) => (
+          <>
+            {queue.declinesUnlocked && queue.declines.length > 1 && (
+              <article className="review-section">
+                <h3>Send the same letter to all {queue.declines.length}</h3>
+                <p className="meta">
+                  Most declines say the same thing. Write it once. Anyone who needs different
+                  words can be sent theirs individually below &mdash; do that first, and they
+                  will not appear in this count.
+                </p>
+                <label className="stack">
+                  <span>The letter</span>
+                  <textarea
+                    id="batch-letter"
+                    rows={8}
+                    value={batchLetter}
+                    placeholder="Blank lines separate paragraphs."
+                    onChange={(e) => setBatchLetter(e.target.value)}
+                  />
+                </label>
+                {batchProgress && (
+                  <p className="banner" role="status" aria-live="polite">
+                    Sent {batchProgress.sent}. {batchProgress.remaining} to go.
+                  </p>
+                )}
+                {batchFailures.length > 0 && (
+                  <>
+                    <p className="banner danger" role="alert">
+                      {batchFailures.length} could not be sent. The rest went.
+                    </p>
+                    <ul className="answers">
+                      {batchFailures.map((f) => (
+                        <li key={f.applicationId}>
+                          {f.organizationName}: {f.reason}
+                        </li>
+                      ))}
+                    </ul>
+                  </>
+                )}
+                <div className="actions">
+                  <button
+                    type="button"
+                    className="btn"
+                    disabled={batchRunning || batchLetter.trim() === ''}
+                    onClick={() => void sendAllDeclines()}
+                  >
+                    {batchRunning ? 'Sending…' : `Send to all ${queue.declines.length}`}
+                  </button>
+                </div>
+              </article>
+            )}
+
+            {queue.declines.map((r) => (
             <article key={r.applicationId} className="review-section">
               <h3>{r.organizationName}</h3>
               <p className="meta">
@@ -303,7 +419,8 @@ export function Communications({ cycleId, onBack }: Props): ReactElement {
                 </div>
               )}
             </article>
-          ))
+          ))}
+          </>
         )}
       </section>
     </>

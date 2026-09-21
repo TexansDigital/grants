@@ -1438,3 +1438,50 @@ obvious next step and is not built. There is no staff screen for recording
 receipt yet; the route exists and the data-health list is where it belongs.
 Nothing emails a grantee when an award is refused, so an admin learns from the
 portfolio rather than from a notification.
+
+## §43 — The week of declines goes out in rounds, from one letter
+
+**Date:** 2026-09-21
+**Status:** In force
+
+250 declines sent one at a time is the afternoon this removes. An admin writes
+the letter once and it goes to everyone still outstanding; the individual path
+stays for the decline that needs its own words, and anyone sent theirs
+individually first drops out of the batch count.
+
+**The loop is on the client, not the server.** A Worker request attempting 250
+mail-provider calls is betting the whole batch on the subrequest limit and the
+CPU budget, and the failure mode is the worst available: a request that dies at
+letter 180 with nobody able to say which 180. The server sends a round of at
+most 25 and reports what remains; the browser calls again until nothing is
+left. Every letter is keyed on its own application, so a repeated round — a
+double-click, a refreshed page, a retried request — sends nothing twice.
+
+**`remaining` is re-read, not calculated.** `round.length - sent` would be
+wrong the moment a colleague sends one from the individual panel while the
+batch is running, and the caller loops on that number.
+
+**The round size is clamped at both ends.** A caller asking for 10,000 gets 25,
+not 10,000 subrequests. A caller asking for 0 gets 1 — a round of nothing with
+work outstanding is an infinite loop in somebody's browser. The client has a
+hard ceiling on rounds as well, and stops when a round achieves nothing, so a
+batch where every remaining letter fails terminates instead of spinning.
+
+**One failure does not stop the round.** A single bad address must not hold up
+24 other nonprofits. Failures accumulate into a named list carrying the *public*
+error message — an admin reading it is deciding what to do, and "this
+application has no contact address" says go and find one where a stack trace
+does not. Those applications stay outstanding, so the next round retries them.
+
+**The acceptances-first gate is checked twice**: once for the batch, so a
+wholesale refusal is one clear message rather than 250 individual ones, and
+again inside every letter, because `sendDeclineNotification` is the function
+that must not be bypassable and a batch wrapper that skipped its checks would
+be exactly the bypass.
+
+**The panel hides at one remaining.** With a single decline left, the
+individual box is the better tool and "Send to all 1" is a silly button.
+
+**Six mutants, five killed on the first run.** The survivor — removing the round
+cap — was alive because the test queued three declines and asked for 10,000,
+where capped and uncapped give the same answer. It now queues more than the cap.

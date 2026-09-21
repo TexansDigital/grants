@@ -99,6 +99,18 @@ function state() {
         decidedAt: '2026-09-01T12:00:00.000Z', awardedAmountCents: null,
         announcementDate: null,
       },
+      {
+        applicationId: 'd2', status: 'declined', organizationName: 'Invented Union',
+        projectTitle: 'Night classes', contactEmail: 'four@example.org',
+        decidedAt: '2026-09-01T12:00:00.000Z', awardedAmountCents: null,
+        announcementDate: null,
+      },
+      {
+        applicationId: 'd3', status: 'declined', organizationName: 'Invented League',
+        projectTitle: 'Reading club', contactEmail: 'five@example.org',
+        decidedAt: '2026-09-01T12:00:00.000Z', awardedAmountCents: null,
+        announcementDate: null,
+      },
     ],
     sent: [],
   };
@@ -127,6 +139,36 @@ async function stubApi(page, s) {
         declines: s.declines.filter((r) => !s.told.has(r.applicationId)),
         awardsCommunicated: s.awards.filter((r) => s.told.has(r.applicationId)).length,
         declinesUnlocked: awards.length === 0,
+      });
+    }
+
+    const batch = p.match(/^\/api\/cycles\/cy1\/notify-declines$/);
+    if (batch && method === 'POST') {
+      /*
+       * A ROUND OF ONE, deliberately, so the harness drives the LOOP rather
+       * than a single call that happens to finish everything. The client is
+       * what keeps calling until `remaining` is zero, and that is the part
+       * worth exercising.
+       */
+      const body = JSON.parse(route.request().postData() ?? '{}');
+      const pending = s.declines.filter((r) => !s.told.has(r.applicationId));
+      const next = pending[0];
+      if (next) {
+        s.told.add(next.applicationId);
+        s.sent.push({ id: next.applicationId, kind: 'notify-decline-batch', body });
+      }
+      return json(route, {
+        sent: next ? 1 : 0,
+        failed: 0,
+        remaining: s.declines.filter((r) => !s.told.has(r.applicationId)).length,
+        outcomes: next
+          ? [{
+              applicationId: next.applicationId,
+              organizationName: next.organizationName,
+              ok: true,
+              reason: null,
+            }]
+          : [],
       });
     }
 
@@ -178,7 +220,7 @@ async function main() {
       'both blocks are shown with their counts',
       [
         await page.getByRole('heading', { name: 'Awards to send (2)' }).count(),
-        await page.getByRole('heading', { name: 'Declines to send (1)' }).count(),
+        await page.getByRole('heading', { name: 'Declines to send (3)' }).count(),
       ],
       [1, 1],
     );
@@ -195,7 +237,7 @@ async function main() {
     );
     check(
       'and offers no way to write a letter yet',
-      await page.getByRole('button', { name: /^Write the letter/ }).isDisabled(),
+      await page.getByRole('button', { name: /^Write the letter/ }).first().isDisabled(),
       true,
     );
 
@@ -233,7 +275,7 @@ async function main() {
     );
 
     // ---- the declines unlock ---------------------------------------------
-    await page.getByRole('button', { name: /^Write the letter/ }).click();
+    await page.getByRole('button', { name: /^Write the letter/ }).first().click();
     const box = page.locator('#letter-d1');
     await box.waitFor();
 
@@ -267,6 +309,44 @@ async function main() {
       'and only the typed words are sent',
       decline.body.body[0],
       'We had far more strong applications this year than we were able to fund.',
+    );
+
+    // ---- the rest, in one letter -----------------------------------------
+    /*
+     * MOST DECLINES SAY THE SAME THING. Writing 250 of them one at a time is
+     * the afternoon this panel exists to remove -- and the individual path
+     * above stays, for the one that needs its own words.
+     */
+    await page.locator('#batch-letter').waitFor();
+    /*
+     * The panel counts what is STILL OUTSTANDING -- two, not three. The one
+     * sent individually a moment ago is gone from it, which is the behaviour
+     * that makes "write theirs first, then send the rest" work.
+     */
+    check(
+      'the shared-letter panel counts only what is still outstanding',
+      (await page.getByRole('button', { name: /^Send to all/ }).innerText()).trim(),
+      'Send to all 2',
+    );
+    await page.locator('#batch-letter').fill(
+      'We had more strong applications than we could fund this year.',
+    );
+    await page.getByRole('button', { name: /^Send to all/ }).click();
+    /*
+     * TWO ROUNDS, because the stub returns one letter at a time. That is the
+     * point: the CLIENT keeps calling until nothing is left, so a Worker never
+     * has to hold 250 mail-provider calls open in one request.
+     */
+    await page.getByText(/^Sent 2 letters\.$/).waitFor();
+    check(
+      'the batch looped until nothing was left',
+      s.sent.filter((x) => x.kind === 'notify-decline-batch').length,
+      2,
+    );
+    check(
+      'and no organization was written to twice',
+      new Set(s.sent.map((x) => x.id)).size,
+      s.sent.length,
     );
 
     await ctx.close();

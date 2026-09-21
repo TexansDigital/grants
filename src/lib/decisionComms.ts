@@ -28,7 +28,7 @@
  */
 
 import type { Env, RequestContext, Session } from '../types';
-import { AppError, notFound } from './errors';
+import { AppError, notFound, logError } from './errors';
 import { nowIso, formatInZone } from './time';
 import { auditStatement } from './audit';
 import { sendEmail, transportFor } from './email';
@@ -459,4 +459,149 @@ export async function recordManualCommunication(
     stampStatements(db, ctx, session, row, 'manual', now, { note: trimmed }),
   );
   return { applicationId, communicatedAt: now, via: 'manual' };
+}
+
+// ---------------------------------------------------------------------------
+// Sending the week's declines
+// ---------------------------------------------------------------------------
+
+/**
+ * How many letters one request sends.
+ *
+ * NOT ALL OF THEM, and this is a deliberate limit rather than a timid one. A
+ * cycle produces around 250 declines; each is an HTTPS call to a mail
+ * provider. A Worker that tried the lot in one request would be betting the
+ * whole batch on staying inside the subrequest limit and the CPU budget, and
+ * the failure mode is the worst available: a request that dies at letter 180
+ * with nobody able to say which 180.
+ *
+ * Twenty-five is small enough to finish comfortably and large enough that 250
+ * letters is ten rounds rather than 250. The caller loops until `remaining` is
+ * zero, and because every letter is keyed on its own application, a repeated
+ * round sends nothing twice.
+ */
+export const DECLINE_BATCH_SIZE = 25;
+
+export interface BatchOutcome {
+  applicationId: string;
+  organizationName: string;
+  ok: boolean;
+  /** Present only when it did not go. Plain enough to act on. */
+  reason: string | null;
+}
+
+export interface DeclineBatchResult {
+  sent: number;
+  failed: number;
+  /** Still waiting after this round. The caller loops while this is above 0. */
+  remaining: number;
+  outcomes: BatchOutcome[];
+}
+
+/**
+ * Send one round of decline letters, all carrying the same words.
+ *
+ * ONE LETTER, MANY RECIPIENTS, and the words are still typed by a person. The
+ * single-send path exists for the decline that needs its own wording; this is
+ * for the 240 that say the same thing, which is the honest majority and the
+ * reason a week of declines currently takes an afternoon.
+ *
+ * THE GATE IS CHECKED ONCE, HERE, AND AGAIN PER LETTER. Once because a batch
+ * refused wholesale is a better message than 250 individual refusals; per
+ * letter because sendDeclineNotification is the function that must not be
+ * bypassable, and a batch wrapper that skipped its checks would be exactly the
+ * bypass.
+ *
+ * ONE FAILURE DOES NOT STOP THE ROUND. A single bad address should not hold up
+ * 24 other nonprofits, and the outcome list names who did not get theirs so
+ * somebody can act on it rather than discovering it in a reply three weeks
+ * later.
+ */
+export async function sendDeclineBatch(
+  env: Env,
+  ctx: RequestContext,
+  session: Session,
+  cycleId: string,
+  bodyParagraphs: string[],
+  limit: number = DECLINE_BATCH_SIZE,
+): Promise<DeclineBatchResult> {
+  if (session.role !== 'admin') throw notFound('cycle');
+
+  const paragraphs = bodyParagraphs.map((p) => String(p ?? '').trim()).filter(Boolean);
+  if (paragraphs.length === 0) {
+    throw new AppError('VALIDATION_FAILED', 'Write the letter before sending it.', {
+      internalMessage: 'decline batch with an empty body',
+      severity: 'warn',
+      fieldErrors: [
+        {
+          field: 'body',
+          message:
+            'This system has no standard decline wording, on purpose. Write what these ' +
+            'applicants should read.',
+        },
+      ],
+    });
+  }
+
+  const queue = await communicationQueue(env.DB, cycleId);
+  if (!queue.declinesUnlocked) {
+    throw new AppError(
+      'CONFLICT',
+      `${queue.awards.length} award letter${queue.awards.length === 1 ? '' : 's'} in this ` +
+        `cycle have not gone out yet. Acceptances go first.`,
+      {
+        internalMessage: `decline batch blocked: ${queue.awards.length} awards uncommunicated`,
+        severity: 'warn',
+      },
+    );
+  }
+
+  const round = queue.declines.slice(0, Math.max(1, Math.min(limit, DECLINE_BATCH_SIZE)));
+  const outcomes: BatchOutcome[] = [];
+
+  for (const row of round) {
+    try {
+      await sendDeclineNotification(env, ctx, session, row.applicationId, paragraphs);
+      outcomes.push({
+        applicationId: row.applicationId,
+        organizationName: row.organizationName,
+        ok: true,
+        reason: null,
+      });
+    } catch (err) {
+      /*
+       * The PUBLIC message, not the internal one. This list is read by an
+       * admin deciding what to do about each failure, and "no contact
+       * address" tells them to go and find one where a stack trace does not.
+       */
+      const reason =
+        err instanceof AppError ? err.publicMessage : 'That letter could not be sent.';
+      outcomes.push({
+        applicationId: row.applicationId,
+        organizationName: row.organizationName,
+        ok: false,
+        reason,
+      });
+      await logError(env, ctx, {
+        severity: 'error',
+        code: 'DECLINE_BATCH_ITEM_FAILED',
+        message: err instanceof Error ? err.message : String(err),
+        stack: err instanceof Error ? (err.stack ?? null) : null,
+        context: { application_id: row.applicationId, cycle_id: cycleId },
+      });
+    }
+  }
+
+  const sent = outcomes.filter((o) => o.ok).length;
+  return {
+    sent,
+    failed: outcomes.length - sent,
+    /*
+     * RE-READ, not arithmetic. `queue.declines.length - sent` would be wrong
+     * the moment a colleague sends one from the single-send screen while this
+     * batch is running, and the caller loops on this number.
+     */
+    remaining: (await communicationQueue(env.DB, cycleId)).declines.length,
+    outcomes,
+  };
 }
