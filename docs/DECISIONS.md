@@ -878,3 +878,38 @@ the one the Foundation asked for.
 **What would reopen it.** A program where the review pool includes people with
 standing relationships to the applicant pool, and where the history is the thing
 most likely to bias them rather than the thing most likely to inform them.
+
+## §33 — Turnstile is live on the public form, scoped to one hostname
+
+**Date:** 2026-09-21
+**Status:** In force
+
+A Managed Turnstile widget now sits on the public surface. Site key in
+`wrangler.toml`, secret in Wrangler secrets, verification failing closed in
+the default and production environments when the secret is absent.
+
+**Managed, not Invisible.** Invisible mode decides silently and gives a
+blocked visitor no way to prove otherwise. The people on the other side of
+this form are nonprofits filling in a forty-field application, sometimes at
+eleven at night on the day a cycle closes. A visible challenge they can
+complete is worth more than the small amount of friction it costs.
+
+**Scoped to `apply.houstontexansfoundation.org` alone.** Turnstile refuses
+every token originating from a hostname the widget does not list. That makes
+the hostname list a load-bearing piece of configuration: putting a public page
+on a second hostname without adding it to the widget takes the form down
+rather than leaving it open. `grants.` is not listed and does not need to be,
+because Cloudflare Access sits in front of it and no applicant reaches it.
+
+**The secret was rotated before first use.** The original appeared in a
+screenshot during setup. Rotating in the dashboard replaces the secret and
+leaves the site key untouched, so it cost nothing; a secret that has been
+photographed is not a secret, whatever the odds of it going further.
+
+**Verified in a browser, not by a test.** The widget rendering and a sign-in
+link arriving were confirmed by loading the live sign-in page and submitting
+an address. Nothing in the test suite can establish this: the suite exercises
+`verifyTurnstile` against fixtures, and the failure modes that matter here --
+a hostname mismatch, a secret belonging to a different widget -- live entirely
+in Cloudflare's configuration. Every future change to the widget config needs
+the same browser check.
