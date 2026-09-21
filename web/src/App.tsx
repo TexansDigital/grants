@@ -35,6 +35,7 @@ import { ReviewQueue } from './ReviewQueue';
 import { ScoringSheet } from './ScoringSheet';
 import { Communications } from './Communications';
 import { Scorecards } from './Scorecards';
+import { Dashboard } from './Dashboard';
 import { ApplicationDetail } from './ApplicationDetail';
 import { Shell } from './Shell';
 import {
@@ -60,6 +61,7 @@ type Route =
   | { name: 'scoringSheet'; assignmentId: string }
   | { name: 'communications'; cycleId: string }
   | { name: 'scorecards'; cycleId: string }
+  | { name: 'dashboard' }
   | { name: 'openCycles' }
   | { name: 'signIn' }
   | { name: 'eligibility'; cycleId: string }
@@ -85,6 +87,7 @@ function parseRoute(pathname: string): Route | null {
   // Linked from the nightly retention notice. If this path did not exist,
   // that email would send admins to a 404 on the night it matters most.
   if (parts.length === 1 && parts[0] === 'retention') return { name: 'retention' };
+  if (parts.length === 1 && parts[0] === 'dashboard') return { name: 'dashboard' };
   // A reviewer's own queue. NOT /pipeline, which is the admin's view of
   // everything -- two different questions must not share a path.
   if (parts.length === 1 && parts[0] === 'my-reviews') return { name: 'reviewQueue' };
@@ -310,7 +313,8 @@ export function App(): ReactElement {
           route?.name === 'reviewQueue' ||
           route?.name === 'scoringSheet' ||
           route?.name === 'communications' ||
-          route?.name === 'scorecards'
+          route?.name === 'scorecards' ||
+          route?.name === 'dashboard'
         ) {
           const [s, p, c, f] = await Promise.all([
             api.session(signal),
@@ -582,6 +586,10 @@ export function App(): ReactElement {
         onNavigate={(path) => navigate(path)}
       />,
     );
+  }
+
+  if (route.name === 'dashboard') {
+    return shell(<Dashboard />);
   }
 
   if (route.name === 'scorecards') {

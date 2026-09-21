@@ -30,6 +30,7 @@ const NAV: { path: string; label: string; route: string; adminOnly?: boolean }[]
   // server-side regardless; this is so a reviewer is not offered a door that
   // answers FORBIDDEN, which reads as a fault rather than a boundary.
   { path: '/data-health', label: 'Data health', route: 'dataHealth', adminOnly: true },
+  { path: '/dashboard', label: 'Dashboard', route: 'dashboard', adminOnly: true },
   { path: '/retention', label: 'Retention', route: 'retention', adminOnly: true },
   { path: '/configuration', label: 'Configuration', route: 'home' },
 ];

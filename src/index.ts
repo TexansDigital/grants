@@ -46,6 +46,8 @@ import {
 import {
   exportScorecard, planScorecardImport, applyScorecardImport, reviewersInCycle,
 } from './lib/scorecards';
+import { createAwardFromDecision, budgetByProgram } from './lib/awards';
+import { buildDashboard, dashboardCsv } from './lib/dashboard';
 import {
   granteeHome, granteeMe, readReport, autosaveReport, fileReport,
 } from './lib/granteeRoutes';
@@ -476,6 +478,7 @@ const routes: readonly Route[] = [
       '/my-reviews/:id/score',
       '/cycles/:id/letters',
       '/cycles/:id/scorecards',
+      '/dashboard',
     ] as const
   ).map(
     (path) =>
@@ -1005,6 +1008,72 @@ const routes: readonly Route[] = [
         }),
         ctx,
       );
+    },
+  },
+
+  // ---- awards from decisions -----------------------------------------------
+  {
+    /*
+     * A DECISION IS NOT AN AWARD, which is why this is a separate act rather
+     * than a side effect of recording the decision. The board approves "up to
+     * $50,000" and finance settles the number later; a grantee declines; the
+     * terms are renegotiated. And CLAUDE.md puts W-9s at acceptance, which
+     * cannot be true if every awarded application is already a live award.
+     */
+    method: 'POST',
+    path: '/api/applications/:id/award',
+    roles: ADMIN_ONLY,
+    handler: async ({ request, env, ctx, params, session }) => {
+      const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+      const result = await createAwardFromDecision(env.DB, ctx, session, params.id!, {
+        // CENTS on the wire. The browser parses dollars at the edge, the same
+        // rule every other money path in this system follows.
+        awardedAmountCents: Number(body.awardedAmountCents),
+        announcementDate: body.announcementDate == null ? null : String(body.announcementDate),
+        termStart: body.termStart == null ? null : String(body.termStart),
+        termEnd: body.termEnd == null ? null : String(body.termEnd),
+        isMultiYear: body.isMultiYear === true,
+        parentAwardId: body.parentAwardId == null ? null : String(body.parentAwardId),
+        notes: body.notes == null ? null : String(body.notes),
+      });
+      return json(result, ctx, 201);
+    },
+  },
+
+  // ---- dashboard and exports -----------------------------------------------
+  //
+  // ADMIN ONLY. Executives never log in -- CLAUDE.md is explicit -- so the
+  // EXPORT is the product for them, and it has to stand alone without anybody
+  // from this project in the room to explain a figure.
+  {
+    method: 'GET',
+    path: '/api/dashboard',
+    roles: ADMIN_ONLY,
+    handler: async ({ env, ctx, session }) =>
+      json(
+        {
+          ...(await buildDashboard(env.DB, session, nowIso())),
+          budget: await budgetByProgram(env.DB, session),
+        },
+        ctx,
+      ),
+  },
+  {
+    // One sectioned file rather than four downloads: four files in a Downloads
+    // folder is four chances to send a board the wrong one.
+    method: 'GET',
+    path: '/api/dashboard.csv',
+    roles: ADMIN_ONLY,
+    handler: async ({ env, ctx, session }) => {
+      const data = await buildDashboard(env.DB, session, nowIso());
+      return new Response(dashboardCsv(data), {
+        status: 200,
+        headers: {
+          ...securityHeaders(ctx.requestId),
+          'content-type': 'text/csv; charset=utf-8',
+          'content-disposition': `attachment; filename="grants-summary-${nowIso().slice(0, 10)}.csv"`,
+        },
+      });
     },
   },
 

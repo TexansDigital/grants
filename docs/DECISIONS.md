@@ -1280,3 +1280,99 @@ it validated and the writer uses them: one parse, one answer.
 or two consultants a cycle and poor for more. Nothing marks a review complete
 on import; an imported scorecard fills the scores and an admin still submits
 the review. Reviewers cannot import their own file, only admins.
+
+## §40 — A decision is not an award
+
+**Date:** 2026-09-21
+**Status:** In force
+
+Recording an awarded decision does not create an award. An admin creates the
+award record as a second, deliberate act, from the application's own screen.
+
+**Why they come apart in practice.** The board approves "up to $50,000" and
+finance settles the number later. A grantee declines. The amount is split
+across two fiscal years. Terms are renegotiated before anything is signed. A
+system that created the award at the moment of the decision would have to amend
+or delete it in every one of those cases.
+
+**It is also what keeps CLAUDE.md's W-9 rule true.** Tax documents and the
+media release are collected at acceptance, not application — which cannot be
+the case if every awarded application is already a live award with obligations
+before the grantee has said yes. An award starts `pending`: decided, not
+accepted.
+
+**`awarded_at` is the DECISION's date, not today.** The award record is often
+created weeks later, once finance has settled the number. Dating it now would
+put a December decision in the next fiscal year on every total the dashboard
+builds, and nobody would notice until a year-end figure disagreed with the
+minutes.
+
+**One live award per application.** A second is a double-click or two people
+working the same list, and either way the committed total is twice what the
+Foundation agreed.
+
+**Amount validation happens before `assertCents`, not through it.**
+`assertCents` throws a `MoneyParseError`, which is not an `AppError` — so a
+float or an out-of-range value from the browser reached an admin as an INTERNAL
+"something went wrong", on a form where the problem is a decimal point they can
+see. Each case now gets a message and a field; `assertCents` remains the
+backstop for callers that skipped the form.
+
+## §41 — The dashboard, and the caveats that travel with it
+
+**Date:** 2026-09-21
+**Status:** In force
+
+**The export is the product.** CLAUDE.md: executives never log in. Nobody from
+this project is in the room when these figures are read, so every aggregate
+carries its own rule — in the CSV, under the table on screen, and in the same
+words in both.
+
+**What each number excludes, stated beside it.** Cancelled awards are out;
+pending ones are in, because money offered cannot be offered twice. Drafts that
+were never submitted are not "received" — counting them makes the funded rate
+fall every year the form gets easier to start. Overdue is computed from the due
+date, not stored, because a stored flag drifts the moment a nightly job does not
+run. A waived report counts as compliant: staff decided it was not required,
+with a reason, and counting that as a failure would make the honest act look
+worse than quietly leaving the period open. Only accepted reports feed the
+impact totals, and the number of reports behind each total sits beside it —
+"4,200 people served" from six reports out of forty is a different sentence from
+the same number out of forty.
+
+**Rates are basis points; money is cents.** 17 of 63 is 26.98%, and a column of
+values each rounded to 27% no longer sums. Division happens once, at the display
+edge, exactly as it does for money.
+
+**The range travels with the total.** Forty $25,000 grants and thirty-nine
+$10,000 grants plus one $600,000 grant have similar totals and are completely
+different programs.
+
+**Disbursement is stated as missing, not approximated.** CLAUDE.md asks for
+committed versus disbursed. There is no payments table in this schema, so the
+second half does not exist; the dashboard says so in the payload, on the screen
+and in the CSV rather than showing committed twice under two headings.
+
+**Money is written twice in the CSV** — formatted for reading and in raw cents
+beside it. A spreadsheet that carries only "$25,000.00" is one somebody re-types.
+
+**A PDF is not generated.** CLAUDE.md asks for one for board and league
+reporting. Generating real PDFs in a Worker means a library and a cost this
+project does not have; the CSV plus the browser's own print-to-PDF is what
+exists today, and calling that a PDF export would be a false green light.
+
+**Twelve mutants, eleven killed.** The survivor — removing the "text metrics are
+never totalled" branch — is equivalent: a text metric's value lives in
+`value_text`, so `SUM(value_int)` is NULL either way, confirmed against a text
+metric that really had an accepted value. The branch stays with a comment naming
+the plausible edit that would make it load-bearing.
+
+**Two faults found by opening the page.** The "Remaining" column went negative
+exactly when a program was over budget — the case the flag exists for —
+and `formatCents` refuses negative cents, so the whole page fell into the error
+boundary. It now reads "over by $13,500", because a board reading
+"-$13,500 remaining" has to do the translation and half of them will do it
+wrong. And three harnesses waited for a heading that the loading branch also
+renders, then asserted "Loading…" was absent — a race. That is very likely the
+single unexplained `e2e:letters` failure recorded in this session; all three now
+wait for content that only exists once the data has arrived.

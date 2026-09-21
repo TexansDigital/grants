@@ -360,6 +360,7 @@ export function ApplicationDetail({ applicationId, isAdmin, onBack }: Props): Re
             decidedAt={
               (detail.application as unknown as { decided_at?: string | null }).decided_at ?? null
             }
+            decidedStatus={detail.application.status ?? null}
             onDecided={() => setReloadKey((k) => k + 1)}
           />
         )}

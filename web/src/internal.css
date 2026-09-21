@@ -197,6 +197,21 @@ th.num {
   color: var(--ink-3);
 }
 
+/*
+ * The one badge that spends red.
+ *
+ * The note above says red is kept for the cases that need it, and this is
+ * one: CLAUDE.md asks for "a flag when committed exceeds budget", and a
+ * program that has promised more money than it holds is exactly what that
+ * colour is being saved for. Filled rather than outlined, because an outline
+ * at this size reads as a category and this is an alert.
+ */
+.badge-danger {
+  border-color: var(--red);
+  background: var(--red);
+  color: var(--white);
+}
+
 .btn.small {
   font-size: var(--step--1);
   padding: var(--space-2) var(--space-3);

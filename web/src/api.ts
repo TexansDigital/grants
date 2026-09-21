@@ -257,6 +257,69 @@ export interface ScorecardPlan {
   totalScores: number;
 }
 
+export interface DashboardData {
+  generatedAt: string;
+  awardTotals: {
+    fiscalYear: number | null;
+    programId: string;
+    programName: string;
+    cycleId: string | null;
+    cycleName: string | null;
+    awards: number;
+    committedCents: number;
+    smallestCents: number | null;
+    largestCents: number | null;
+  }[];
+  funnel: {
+    programId: string;
+    programName: string;
+    cycleId: string;
+    cycleName: string;
+    closesAt: string;
+    received: number;
+    underReview: number;
+    awarded: number;
+    declined: number;
+    withdrawn: number;
+    /** Basis points, like money is cents. Divided only for display. */
+    successRateBp: number | null;
+  }[];
+  compliance: {
+    programId: string;
+    programName: string;
+    scheduled: number;
+    open: number;
+    submitted: number;
+    revisionsRequested: number;
+    accepted: number;
+    waived: number;
+    overdue: number;
+    total: number;
+    complianceRateBp: number | null;
+  }[];
+  metrics: {
+    programId: string;
+    programName: string;
+    metricDefinitionId: string;
+    label: string;
+    metricType: string;
+    unit: string | null;
+    reports: number;
+    total: number | null;
+  }[];
+  budget: {
+    programId: string;
+    programName: string;
+    fiscalYear: number | null;
+    totalBudgetCents: number | null;
+    committedCents: number;
+    awards: number;
+    overBudget: boolean;
+  }[];
+  /** What this dashboard cannot answer, carried in the payload. */
+  notAvailable: string[];
+}
+
 export interface SearchHit {
   application_id: string;
   rank: number;
@@ -478,6 +541,20 @@ export const api = {
    * row -- and because a GET would let a link prefetcher issue live download
    * credentials for every financial statement on a page nobody clicked.
    */
+  dashboard: (signal?: AbortSignal) => get<DashboardData>('/api/dashboard', signal),
+  createAward: (
+    applicationId: string,
+    body: {
+      awardedAmountCents: number;
+      announcementDate?: string | null;
+      termStart?: string | null;
+      termEnd?: string | null;
+    },
+  ) =>
+    request<{ awardId: string; awardedAmountCents: number; status: string }>(
+      `/api/applications/${encodeURIComponent(applicationId)}/award`,
+      { method: 'POST', body },
+    ),
   cycleReviewers: (cycleId: string, signal?: AbortSignal) =>
     get<{ cycleId: string; reviewers: CycleReviewer[] }>(
       `/api/cycles/${encodeURIComponent(cycleId)}/reviewers`,

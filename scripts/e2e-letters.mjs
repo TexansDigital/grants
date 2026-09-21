@@ -156,7 +156,18 @@ async function main() {
     await stubApi(page, s);
 
     await page.goto(`${base}/cycles/cy1/letters`);
-    await page.getByRole('heading', { name: 'Decision letters' }).waitFor();
+    /*
+     * WAIT FOR CONTENT, NOT FOR THE TITLE.
+     *
+     * The loading branch of this screen renders the SAME heading, so waiting
+     * on the heading and then asserting "Loading…" is absent is a race. This
+     * harness failed exactly once during the session it was written, with no
+     * output captured and no reproduction in eleven subsequent runs; the same
+     * race was later caught deterministically in the dashboard harness, which
+     * is very likely what that failure was. Waiting for a section that only
+     * exists once the data has arrived removes it either way.
+     */
+    await page.getByRole('heading', { name: /^Awards to send/ }).waitFor();
     check(
       'the page rendered rather than hanging on Loading',
       await page.getByText('Loading…').count(),

@@ -144,7 +144,10 @@ async function main() {
     await stubApi(page, s);
 
     await page.goto(`${base}/cycles/cy1/scorecards`);
-    await page.getByRole('heading', { name: 'Offline scorecards' }).waitFor();
+    // Wait for content rather than for the title: the reviewer table is what
+    // arrives with the data, and the title is on screen before it. See the
+    // note in e2e-letters.mjs.
+    await page.getByRole('link', { name: /^Download/ }).first().waitFor();
     check(
       'the page rendered rather than hanging on Loading',
       await page.getByText('Loading…').count(),

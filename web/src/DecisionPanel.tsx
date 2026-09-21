@@ -20,6 +20,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { ReactElement } from 'react';
 import { ApiError, api } from './api';
+import { formatCents } from '../../src/lib/money';
 import type { ScoreSummary } from './api';
 
 const WEIGHT_ONE_BP = 10000;
@@ -28,6 +29,8 @@ interface Props {
   applicationId: string;
   /** Null until the application is decided; then the decision is settled. */
   decidedAt: string | null;
+  /** The application's own status, so an awarded one can be given its award. */
+  decidedStatus: string | null;
   onDecided: () => void;
 }
 
@@ -40,13 +43,63 @@ function shortName(email: string): string {
   return email.split('@')[0] ?? email;
 }
 
-export function DecisionPanel({ applicationId, decidedAt, onDecided }: Props): ReactElement | null {
+export function DecisionPanel({
+  applicationId,
+  decidedAt,
+  decidedStatus,
+  onDecided,
+}: Props): ReactElement | null {
   const [summary, setSummary] = useState<ScoreSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState('');
   const [notes, setNotes] = useState('');
   const [fieldErrors, setFieldErrors] = useState<{ field: string; message: string }[]>([]);
   const [busy, setBusy] = useState(false);
+  /** The award form, shown once the decision says awarded. */
+  const [amount, setAmount] = useState('');
+  const [announce, setAnnounce] = useState('');
+  const [termStart, setTermStart] = useState('');
+  const [termEnd, setTermEnd] = useState('');
+  const [awardNotice, setAwardNotice] = useState<string | null>(null);
+
+  /*
+   * Dollars in, CENTS on the wire.
+   *
+   * The conversion happens once, here, at the display edge -- the same rule
+   * rubric weights follow. Math.round rather than a truncation: 25000.29 in
+   * binary floating point is 25000.289999..., and truncating would record an
+   * award one cent short of what somebody typed.
+   */
+  function toCents(dollars: string): number {
+    return Math.round(Number(dollars.replace(/[$,\s]/g, '')) * 100);
+  }
+
+  async function createAward(): Promise<void> {
+    setBusy(true);
+    setError(null);
+    setFieldErrors([]);
+    try {
+      const result = await api.createAward(applicationId, {
+        awardedAmountCents: toCents(amount),
+        announcementDate: announce ? new Date(`${announce}T12:00:00Z`).toISOString() : null,
+        termStart: termStart ? new Date(`${termStart}T12:00:00Z`).toISOString() : null,
+        termEnd: termEnd ? new Date(`${termEnd}T12:00:00Z`).toISOString() : null,
+      });
+      setAwardNotice(
+        `Award recorded: ${formatCents(result.awardedAmountCents)}, pending acceptance. ` +
+          'The award letter can now be sent from the cycle\u2019s letters page.',
+      );
+    } catch (e) {
+      if (e instanceof ApiError) {
+        setError(e.message);
+        setFieldErrors(e.fields ?? []);
+      } else {
+        setError(String(e));
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
 
   const load = useCallback(
     async (signal?: AbortSignal) => {
@@ -189,10 +242,89 @@ export function DecisionPanel({ applicationId, decidedAt, onDecided }: Props): R
 
       <h3>Decision</h3>
       {decidedAt ? (
-        <p className="meta">
-          Decided on {new Date(decidedAt).toLocaleDateString('en-US')}. A decision is recorded
-          once; changing one is not something this screen can do.
-        </p>
+        <>
+          <p className="meta">
+            Decided on {new Date(decidedAt).toLocaleDateString('en-US')}. A decision is recorded
+            once; changing one is not something this screen can do.
+          </p>
+          {decidedStatus === 'awarded' && (
+            /*
+             * A DECISION IS NOT AN AWARD, which is why this is a second,
+             * deliberate act. The board approves "up to $50,000" and finance
+             * settles the number; a grantee declines; the terms are
+             * renegotiated. And the award letter cannot go until this row
+             * exists, because it carries the amount.
+             */
+            <div className="panel-decide">
+              <h3>Award record</h3>
+              {awardNotice ? (
+                <p className="banner" role="status">
+                  {awardNotice}
+                </p>
+              ) : (
+                <>
+                  {fieldErrors.map((f) => (
+                    <p key={f.field} className="banner danger" role="alert">
+                      {f.message}
+                    </p>
+                  ))}
+                  <label className="stack">
+                    <span>Amount awarded</span>
+                    <input
+                      id="award-amount"
+                      type="text"
+                      inputMode="decimal"
+                      placeholder="25,000"
+                      value={amount}
+                      onChange={(e) => setAmount(e.target.value)}
+                    />
+                  </label>
+                  <label className="stack">
+                    <span>Announcement date (when they may talk about it)</span>
+                    <input
+                      id="award-announce"
+                      type="date"
+                      value={announce}
+                      onChange={(e) => setAnnounce(e.target.value)}
+                    />
+                  </label>
+                  <label className="stack">
+                    <span>Term start</span>
+                    <input
+                      id="award-term-start"
+                      type="date"
+                      value={termStart}
+                      onChange={(e) => setTermStart(e.target.value)}
+                    />
+                  </label>
+                  <label className="stack">
+                    <span>Term end</span>
+                    <input
+                      id="award-term-end"
+                      type="date"
+                      value={termEnd}
+                      onChange={(e) => setTermEnd(e.target.value)}
+                    />
+                  </label>
+                  <p className="meta">
+                    The award starts as pending: decided, not yet accepted. The W-9 and media
+                    release are collected at acceptance, not now.
+                  </p>
+                  <div className="actions">
+                    <button
+                      type="button"
+                      className="btn"
+                      disabled={busy || amount.trim() === ''}
+                      onClick={() => void createAward()}
+                    >
+                      Record the award
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+        </>
       ) : (
         <div className="panel-decide">
           {error && (
