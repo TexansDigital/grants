@@ -10,7 +10,7 @@ stated. Nothing here has been built.
 being true; the rest of the file is the original plan and its reasoning, kept
 because the reasoning still holds even where the status has moved on.
 
-**Built and reachable: 1,361 tests, migrations 0001-0018.** Four browser
+**Built and reachable: 1,403 tests, migrations 0001-0019.** Six browser
 harnesses drive real Chromium against the built bundle.
 
 **An applicant can complete an application end to end.** Eligibility screen,
@@ -28,7 +28,13 @@ organizations with an undo.
 **Reviewers can** see their own queue, score against the cycle's rubric with
 autosave, declare a conflict, and submit or reopen a review. **Admins can**
 build and publish a versioned rubric, read every reviewer's scores side by
-side, and record a decision.
+side, record a decision, send award and decline letters with the acceptances-
+first rule enforced, and export and re-import an offline scorecard for a
+consultant.
+
+**An applicant is never told by the portal.** An awarded or declined
+application reads as still under review to the applicant until somebody
+communicates the decision — by letter from Steward, or by phone, recorded.
 
 **Also built:** awards and the payment ledger, grantee reporting with
 per-program metrics, the compliance desk, data health, organization merge,
@@ -36,9 +42,9 @@ the Formstack/awards importer, the nightly D1 export to R2, and a retention
 policy that destroys applicants' financial documents 90 days after their
 application is decided.
 
-**Not built:** decision communication (award and decline emails with embargo
-handling), the dashboard and exports, the public grantee page, the Eloqua
-opt-in sync, and the offline scorecard export/import for consultants.
+**Not built:** the dashboard and exports, the public grantee page, the Eloqua
+opt-in sync, and anything that creates an award record from an awarded
+decision — that step is still manual.
 
 **Never yet exercised for real,** and this is the honest gap between "works"
 and "works in production":
@@ -52,9 +58,10 @@ and "works in production":
   performing it is a human step that has not happened.
 - **No human security review.** See `docs/BLOCKED-ON-YOU.md`.
 
-**Still owed by the Foundation:** the impact metrics CSV, decline wording, the
-security review, the backup restore test, and answers to CLAUDE.md's open
-decisions #1, #2, #4, #5 and #7.
+**Still owed by the Foundation:** the impact metrics CSV, decline wording (the
+machinery does not need it; the first real send does), the security review, the
+backup restore test, and answers to CLAUDE.md's open decisions #1, #2, #5 and
+#7. Decision #4 is answered — see DECISIONS §37.
 
 ## The schema already commits to things that do not exist
 
