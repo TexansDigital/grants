@@ -1034,9 +1034,15 @@ cleared by the re-read that followed it, so saving appeared to do nothing. Both
 are recorded in `scripts/e2e-rubric.mjs`, which now drives the arithmetic a
 person actually sees.
 
-**Known gaps.** Staff deep links are not served by the Worker — only the public
-shells are listed there — so `/programs/:id/rubrics` and `/retention` are
-reachable by in-app navigation but not by typing the address or following a
-link from an email. The retention notice links to `/retention` and will land on
-a 404 until that is fixed. No scoring screen consumes a rubric yet; that is the
-third phase and is not built.
+**Staff deep links now exist, and did not.** Only the public shells were
+listed in the Worker, so every staff screen worked by in-app navigation and
+404'd if the address was typed, bookmarked, or followed from an email — which
+meant the retention notice's link to `/retention` would have landed on a 404 on
+the night it said to act. `/pipeline`, `/configuration`, `/data-health`,
+`/retention`, `/applications/:id` and `/programs/:id/rubrics` are now served,
+all marked `surface: 'staff'` so `apply.` still refuses them. The shell is
+public; nothing in it is — each screen's first act is a call behind Cloudflare
+Access, so a stranger gets an empty frame and a 401.
+
+**Known gap.** No scoring screen consumes a rubric yet; that is the third phase
+and is not built.

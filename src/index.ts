@@ -433,6 +433,44 @@ const routes: readonly Route[] = [
     surface: 'staff',
     handler: serveAppShell,
   },
+  /*
+   * The staff app's own deep links.
+   *
+   * WHY THESE WERE MISSING AND WHY IT MATTERED. Only the public shells were
+   * listed, so every staff screen worked by in-app navigation and 404'd if the
+   * address was typed, bookmarked, or followed from an email. The retention
+   * notice links to /retention -- an email that lands on a 404 on the night it
+   * says to act is worse than no email.
+   *
+   * `surface: 'staff'` on every one: on apply.<domain> these must 404 rather
+   * than render a staff-looking page that then fails, and derivation cannot
+   * tell a public staff shell from a public applicant one.
+   *
+   * The SHELL is public; nothing in it is. Each screen's first act is a call
+   * to an API route behind Cloudflare Access, and a stranger who reaches one
+   * of these addresses gets an empty frame and a 401, not data.
+   */
+  ...(
+    [
+      '/pipeline',
+      '/configuration',
+      '/data-health',
+      '/retention',
+      '/applications/:id',
+      '/programs/:id/rubrics',
+    ] as const
+  ).map(
+    (path) =>
+      ({
+        method: 'GET',
+        path,
+        roles: [],
+        public: true,
+        surface: 'staff',
+        handler: serveAppShell,
+      }) satisfies Route,
+  ),
+
   // The applicant's own application. The shell is public; every API call it
   // makes is scoped by the session behind it, and a signed-out applicant gets
   // a 401 from the draft endpoint rather than a blank page.

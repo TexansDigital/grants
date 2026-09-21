@@ -21,6 +21,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { surfaceOf, type Route } from '../src/lib/router';
+import { routes } from '../src/index';
 
 const route = (over: Partial<Route>): Route => ({
   method: 'GET',
@@ -59,5 +60,40 @@ describe('surfaceOf', () => {
 
   it('honours an explicit marker even against a staff-looking route', () => {
     expect(surfaceOf(route({ roles: ['admin'], surface: 'applicant' }))).toBe('applicant');
+  });
+});
+
+/*
+ * The staff app's deep links.
+ *
+ * These were missing entirely: every staff screen worked by in-app navigation
+ * and 404'd if the address was typed, bookmarked, or followed from an email.
+ * The retention notice links to /retention, so the email would have landed on
+ * a 404 on the night it said to act.
+ */
+describe('staff deep links', () => {
+  const STAFF_SHELLS = [
+    '/pipeline',
+    '/configuration',
+    '/data-health',
+    '/retention',
+    '/applications/:id',
+    '/programs/:id/rubrics',
+  ];
+
+  it('every staff screen has a route, so a typed address reaches the app', () => {
+    for (const path of STAFF_SHELLS) {
+      const route = routes.find((r) => r.path === path && r.method === 'GET');
+      expect(route, `${path} has no route: typing it 404s`).toBeDefined();
+    }
+  });
+
+  it('and none of them is served on the applicant hostname', () => {
+    // A staff-looking page on apply.<domain> renders a frame that then fails,
+    // which reads to a nonprofit as a broken system rather than a boundary.
+    for (const path of STAFF_SHELLS) {
+      const route = routes.find((r) => r.path === path && r.method === 'GET')!;
+      expect(surfaceOf(route), `${path} is reachable from apply.`).toBe('staff');
+    }
   });
 });
