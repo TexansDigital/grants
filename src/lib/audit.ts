@@ -38,6 +38,10 @@ export type AuditAction =
   | 'application.withdrawn'
   | 'application.status_changed'
   | 'application.decided'
+  // The applicant was TOLD. Separate from the decision on purpose: a decision
+  // is recorded the moment it is made, and communicated when a human chooses
+  // to. Until then the applicant's portal shows 'under_review'.
+  | 'decision.communicated'
   | 'application.internal_note_changed'
   // refused a new application because a grant report is still outstanding
   | 'application.blocked_by_compliance'
@@ -92,9 +96,6 @@ export type AuditAction =
   | 'review.completed'
   // A reviewer taking their own submitted review back, before any decision.
   | 'review.reopened'
-  // An admin recording the outcome. The application's own status changes with
-  // it; this names the act rather than the field.
-  | 'application.decided'
   // awards and payments
   | 'award.created'
   | 'award.amended'

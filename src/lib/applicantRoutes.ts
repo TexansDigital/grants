@@ -40,6 +40,7 @@ import { formatInZone } from './time';
 import { logError } from './errors';
 import { isAcceptingApplications } from './eligibility';
 import { assertCompliant } from './compliance';
+import { applicantVisibleStatus } from './scope';
 
 function orgId(session: Session): string {
   if (!session.organizationId) {
@@ -196,12 +197,18 @@ export async function readDraft(
   const organizationId = orgId(session);
 
   const app = await env.DB.prepare(
-    `SELECT id, status, form_definition_id, updated_at
+    `SELECT id, status, form_definition_id, updated_at, decision_communicated_at
        FROM applications
       WHERE id = ? AND organization_id = ? AND deleted_at IS NULL`,
   )
     .bind(applicationId, organizationId)
-    .first<{ id: string; status: string; form_definition_id: string; updated_at: string }>();
+    .first<{
+      id: string;
+      status: string;
+      form_definition_id: string;
+      updated_at: string;
+      decision_communicated_at: string | null;
+    }>();
 
   // 404 for another organization's application, exactly as for one that does
   // not exist. A 403 would confirm it is real.
@@ -242,7 +249,20 @@ export async function readDraft(
   }
 
   return json({
-    application: { id: app.id, status: app.status, updated_at: app.updated_at },
+    application: {
+      id: app.id,
+      /*
+       * MASKED, and this is the second read site that needed it.
+       *
+       * This route hands an applicant their own application, and it reads
+       * `status` straight off the row. Without the mask a nonprofit signing in
+       * would learn it had been declined from this field, days before the
+       * letter a human was still writing -- which is the whole thing the
+       * human-release gate on the decline email exists to prevent.
+       */
+      status: applicantVisibleStatus(app.status, app.decision_communicated_at),
+      updated_at: app.updated_at,
+    },
     form: definition,
     answers: values,
   });

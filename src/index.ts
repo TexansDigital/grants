@@ -40,6 +40,10 @@ import {
 } from './lib/scoring';
 import { decideApplication, type DecisionStatus } from './lib/decisions';
 import {
+  communicationQueue, sendAwardNotification, sendDeclineNotification,
+  recordManualCommunication,
+} from './lib/decisionComms';
+import {
   granteeHome, granteeMe, readReport, autosaveReport, fileReport,
 } from './lib/granteeRoutes';
 import { requireStaffSession } from './lib/auth';
@@ -467,6 +471,7 @@ const routes: readonly Route[] = [
       // not share a path.
       '/my-reviews',
       '/my-reviews/:id/score',
+      '/cycles/:id/letters',
     ] as const
   ).map(
     (path) =>
@@ -994,6 +999,64 @@ const routes: readonly Route[] = [
           status: String(body.status ?? '') as DecisionStatus,
           notes: body.notes == null ? null : String(body.notes),
         }),
+        ctx,
+      );
+    },
+  },
+
+  // ---- decision communication ----------------------------------------------
+  //
+  // ADMIN ONLY, every one. This is the highest-reputation-risk output in the
+  // system: fifty acceptances and 250 declines in the same week, and the
+  // decline is the one that gets screenshotted.
+  {
+    method: 'GET',
+    path: '/api/cycles/:id/communications',
+    roles: ADMIN_ONLY,
+    handler: async ({ env, ctx, params }) =>
+      json(await communicationQueue(env.DB, params.id!), ctx),
+  },
+  {
+    method: 'POST',
+    path: '/api/applications/:id/notify-award',
+    roles: ADMIN_ONLY,
+    handler: async ({ env, ctx, params, session }) =>
+      json(await sendAwardNotification(env, ctx, session, params.id!), ctx),
+  },
+  {
+    /*
+     * The decline letter, in words a person wrote.
+     *
+     * The body is REQUIRED and comes from the request. This system has no
+     * standard decline wording and will not invent any: 250 of these go out in
+     * a week and one gets forwarded, and the Foundation has not settled what
+     * they should say. The template is a shell; the words are the sender's.
+     */
+    method: 'POST',
+    path: '/api/applications/:id/notify-decline',
+    roles: ADMIN_ONLY,
+    handler: async ({ request, env, ctx, params, session }) => {
+      const body = (await request.json().catch(() => ({}))) as { body?: unknown };
+      const paragraphs = Array.isArray(body.body)
+        ? body.body.map((p) => String(p ?? ''))
+        : String(body.body ?? '').split(/\n\s*\n/);
+      return json(
+        await sendDeclineNotification(env, ctx, session, params.id!, paragraphs),
+        ctx,
+      );
+    },
+  },
+  {
+    // The largest awards are phoned. Without this the portal would keep saying
+    // "under review" to an organization that has already been told, and the
+    // only fix would be a duplicate email sent to make the system behave.
+    method: 'POST',
+    path: '/api/applications/:id/communicated',
+    roles: ADMIN_ONLY,
+    handler: async ({ request, env, ctx, params, session }) => {
+      const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+      return json(
+        await recordManualCommunication(env.DB, ctx, session, params.id!, String(body.note ?? '')),
         ctx,
       );
     },

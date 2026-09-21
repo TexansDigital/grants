@@ -211,6 +211,28 @@ export interface QueueRow {
   conflict_declared_at: string | null;
 }
 
+export interface PendingRow {
+  applicationId: string;
+  status: string;
+  organizationName: string;
+  projectTitle: string | null;
+  contactEmail: string | null;
+  decidedAt: string;
+  awardedAmountCents: number | null;
+  announcementDate: string | null;
+}
+
+export interface CommunicationQueue {
+  cycleId: string;
+  cycleName: string;
+  programName: string;
+  awards: PendingRow[];
+  declines: PendingRow[];
+  awardsCommunicated: number;
+  /** False while ANY award in the cycle is still untold. */
+  declinesUnlocked: boolean;
+}
+
 export interface SearchHit {
   application_id: string;
   rank: number;
@@ -432,6 +454,26 @@ export const api = {
    * row -- and because a GET would let a link prefetcher issue live download
    * credentials for every financial statement on a page nobody clicked.
    */
+  communications: (cycleId: string, signal?: AbortSignal) =>
+    get<CommunicationQueue>(
+      `/api/cycles/${encodeURIComponent(cycleId)}/communications`,
+      signal,
+    ),
+  notifyAward: (applicationId: string) =>
+    request<{ applicationId: string; communicatedAt: string }>(
+      `/api/applications/${encodeURIComponent(applicationId)}/notify-award`,
+      { method: 'POST', body: {} },
+    ),
+  notifyDecline: (applicationId: string, body: string[]) =>
+    request<{ applicationId: string; communicatedAt: string }>(
+      `/api/applications/${encodeURIComponent(applicationId)}/notify-decline`,
+      { method: 'POST', body: { body } },
+    ),
+  markCommunicated: (applicationId: string, note: string) =>
+    request<{ applicationId: string; communicatedAt: string }>(
+      `/api/applications/${encodeURIComponent(applicationId)}/communicated`,
+      { method: 'POST', body: { note } },
+    ),
   reviewQueue: (signal?: AbortSignal) =>
     get<{ assignments: QueueRow[] }>('/api/review/queue', signal),
   scoringSheet: (assignmentId: string, signal?: AbortSignal) =>

@@ -22,6 +22,8 @@ interface Props {
   onOpenForm: (id: string) => void;
   /** The rubric builder for one program. */
   onOpenRubrics: (programId: string) => void;
+  /** The decision-letter desk for one cycle. */
+  onOpenLetters: (cycleId: string) => void;
   /** Reload the configuration after a form is built or published. */
   onChanged: () => void;
 }
@@ -33,6 +35,7 @@ export function Home({
   isAdmin,
   onOpenForm,
   onOpenRubrics,
+  onOpenLetters,
   onChanged,
 }: Props): ReactElement {
   const cyclesByProgram = new Map<string, CycleRow[]>();
@@ -133,7 +136,22 @@ export function Home({
                         <td className="num">
                           {c.draft_grace_hours === null ? '—' : `${c.draft_grace_hours} h`}
                         </td>
-                        <td>{isAdmin && <CycleStatusButton cycle={c} onChanged={onChanged} />}</td>
+                        <td className="actions">
+                          {isAdmin && <CycleStatusButton cycle={c} onChanged={onChanged} />}
+                          {isAdmin && (
+                            // The decision-letter desk for this cycle. Reached
+                            // from the cycle because that is the unit the week
+                            // is worked in: all its awards, then all its
+                            // declines.
+                            <button
+                              type="button"
+                              className="btn secondary small"
+                              onClick={() => onOpenLetters(c.id)}
+                            >
+                              Letters<span className="sr-only"> for {c.name}</span>
+                            </button>
+                          )}
+                        </td>
                       </tr>
                     ))}
                   </tbody>

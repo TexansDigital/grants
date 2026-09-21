@@ -111,6 +111,59 @@ export const APPLICANT_APPLICATION_COLUMNS = [
   'updated_at',
 ] as const;
 
+/*
+ * Read alongside the allowlist so the status can be masked, and never part of
+ * it. maskDecision removes the column before the payload is built; naming it
+ * here rather than in APPLICANT_APPLICATION_COLUMNS keeps that list meaning
+ * "safe to send" rather than "safe to send, except this one".
+ */
+const DECISION_MASK_COLUMN = ', decision_communicated_at';
+
+/**
+ * The status an APPLICANT is allowed to see.
+ *
+ * THE BUG THIS EXISTS FOR. `applications.status` becomes 'declined' the
+ * instant an admin records the decision. The applicant's own portal reads that
+ * column. So a nonprofit signing in on Tuesday learned it had been declined
+ * from a status badge, days before the letter a human was still writing --
+ * and after the Foundation had deliberately built a human-release gate on the
+ * email precisely so that would not happen.
+ *
+ * An outcome is the Foundation's to deliver, once, in words somebody chose.
+ * Until it has been delivered, the applicant sees the last honest thing that
+ * is true of their application: it is with us.
+ *
+ * `withdrawn` is NOT masked. An applicant who withdrew knows; hiding it from
+ * them would be a system pretending not to know something they told it.
+ */
+export function applicantVisibleStatus(
+  status: string,
+  decisionCommunicatedAt: string | null | undefined,
+): string {
+  if (decisionCommunicatedAt) return status;
+  if (status === 'awarded' || status === 'declined') return 'under_review';
+  return status;
+}
+
+/**
+ * Apply that masking to a projected application row.
+ *
+ * Takes the row as read, and returns it WITHOUT the communication column --
+ * whether a decision has been communicated is internal, and a nonprofit that
+ * noticed `decision_communicated_at: null` beside a masked status would have
+ * been told exactly what the mask exists to withhold.
+ */
+export function maskDecision<T extends Record<string, unknown>>(row: T): T {
+  const { decision_communicated_at: communicated, ...rest } = row as Record<string, unknown>;
+  return {
+    ...rest,
+    status: applicantVisibleStatus(
+      String(rest.status ?? ''),
+      communicated === null || communicated === undefined ? null : String(communicated),
+    ),
+  } as unknown as T;
+}
+
 /**
  * Columns that must NEVER appear in an external payload, from any table.
  * Used by both the projection builder and a test that guards it.
@@ -120,6 +173,19 @@ export const INTERNAL_ONLY_COLUMNS = [
   'decision_notes',
   'decided_by',
   'decided_at',
+  /*
+   * WHETHER, WHEN, BY WHOM AND HOW the applicant was told.
+   *
+   * Internal for a reason that is easy to miss: the masked status already
+   * withholds an uncommunicated outcome, and a payload carrying
+   * `decision_communicated_at: null` beside a status reading "under_review"
+   * would hand back exactly what the mask withholds. `_at` is read by the two
+   * external functions so they can mask on it, and removed before the payload
+   * is built.
+   */
+  'decision_communicated_at',
+  'decision_communicated_by',
+  'decision_communicated_via',
   'submission_ip',
   'submission_user_agent',
   'score',
@@ -179,7 +245,7 @@ export async function getApplicationForExternal(
   const orgId = sessionOrgId(session);
   const row = await db
     .prepare(
-      `SELECT ${selectList(APPLICANT_APPLICATION_COLUMNS)}
+      `SELECT ${selectList(APPLICANT_APPLICATION_COLUMNS)}${DECISION_MASK_COLUMN}
          FROM applications
         WHERE id = ?
           AND organization_id = ?
@@ -189,7 +255,7 @@ export async function getApplicationForExternal(
     .first<Record<string, unknown>>();
 
   if (!row) throw notFound('application');
-  return row;
+  return maskDecision(row);
 }
 
 /** List an external user's own applications. Scope comes from the session. */
@@ -200,7 +266,7 @@ export async function listApplicationsForExternal(
   const orgId = sessionOrgId(session);
   const { results } = await db
     .prepare(
-      `SELECT ${selectList(APPLICANT_APPLICATION_COLUMNS)}
+      `SELECT ${selectList(APPLICANT_APPLICATION_COLUMNS)}${DECISION_MASK_COLUMN}
          FROM applications
         WHERE organization_id = ?
           AND deleted_at IS NULL
@@ -208,7 +274,7 @@ export async function listApplicationsForExternal(
     )
     .bind(orgId)
     .all<Record<string, unknown>>();
-  return results ?? [];
+  return (results ?? []).map(maskDecision);
 }
 
 /**
@@ -291,6 +357,13 @@ export async function getApplicationForStaff(
     .bind(...scope.binds, applicationId)
     .first<Record<string, unknown>>();
   if (!row) throw notFound('application');
+  /*
+   * NOT masked. This is the STAFF read, and masking here would hide a recorded
+   * decision from the people who recorded it -- including from the screen
+   * where they go to send the letter. The mask exists to stop an APPLICANT
+   * learning an outcome before a human delivers it, and applicants do not
+   * reach this function.
+   */
   return row;
 }
 

@@ -697,10 +697,173 @@ export const FILES_DUE_FOR_DELETION: EmailTemplate<FilesDueForDeletionVars> = {
   },
 };
 
+// ---------------------------------------------------------------------------
+// award_notification
+// ---------------------------------------------------------------------------
+
+export interface AwardNotificationVars {
+  organizationName: string;
+  projectTitle: string | null;
+  programName: string;
+  amountDisplay: string;
+  /** When the grantee may talk about it. Null when there is no embargo. */
+  announcementDisplay: string | null;
+  portalUrl: string;
+  supportEmail: string;
+}
+
+/**
+ * "You have been awarded a grant."
+ *
+ * THE EMBARGO IS THE LOAD-BEARING PART. `announcement_date` is a separate fact
+ * from `decided_at` for a reason CLAUDE.md states plainly: grantees told on
+ * Tuesday post on Tuesday. A grant announcement that breaks a coordinated
+ * launch is not the grantee being careless -- it is a letter that failed to
+ * say when.
+ *
+ * So the embargo is not a footnote. It is its own block, before the link, in
+ * both bodies, and worded as a request with a date rather than as legal
+ * throat-clearing nobody reads.
+ *
+ * HUMAN RELEASE REQUIRED, like the decline. An award letter carries an amount,
+ * and an amount sent to the wrong organization is not a correctable email.
+ */
+export const AWARD_NOTIFICATION: EmailTemplate<AwardNotificationVars> = {
+  key: 'award_notification',
+  requiresHumanRelease: true,
+  render(v) {
+    const what = v.projectTitle ? `${v.projectTitle}` : `your ${v.programName} application`;
+    const embargoText = v.announcementDisplay
+      ? [
+          `Please hold this news until ${v.announcementDisplay}. We announce all`,
+          `${v.programName} grants together on that date, and we will share materials`,
+          'you can use beforehand.',
+        ]
+      : [];
+
+    return {
+      subject: `Your ${v.programName} grant application was successful`,
+      text: textBlock([
+        `${v.organizationName} has been awarded ${v.amountDisplay} for ${what}.`,
+        '',
+        'Congratulations. We were glad to read this application.',
+        ...(embargoText.length > 0 ? ['', ...embargoText] : []),
+        '',
+        'Next: sign in to see the agreement, the reporting dates, and what we',
+        'need from you before funds are released.',
+        '',
+        v.portalUrl,
+        '',
+        `Any questions, write to ${v.supportEmail}.`,
+      ]),
+      html: layout({
+        preview: `${v.organizationName} has been awarded ${v.amountDisplay}.`,
+        heading: 'Your grant application was successful',
+        blocks: [
+          `<strong>${escapeHtml(v.organizationName)}</strong> has been awarded ` +
+            `<strong>${escapeHtml(v.amountDisplay)}</strong> for ${escapeHtml(what)}.`,
+          'Congratulations. We were glad to read this application.',
+          ...(v.announcementDisplay
+            ? [
+                `<strong>Please hold this news until ` +
+                  `${escapeHtml(v.announcementDisplay)}.</strong> We announce all ` +
+                  `${escapeHtml(v.programName)} grants together on that date, and we will ` +
+                  `share materials you can use beforehand.`,
+              ]
+            : []),
+          'Sign in to see the agreement, the reporting dates, and what we need from you ' +
+            'before funds are released.',
+        ],
+        action: { label: 'Sign in', url: v.portalUrl },
+        footer: `Any questions, write to ${escapeHtml(v.supportEmail)}.`,
+      }),
+    };
+  },
+};
+
+// ---------------------------------------------------------------------------
+// decline_notification
+// ---------------------------------------------------------------------------
+
+export interface DeclineNotificationVars {
+  organizationName: string;
+  projectTitle: string | null;
+  programName: string;
+  /**
+   * The letter itself, written by a person. Paragraphs, plain text.
+   *
+   * NOT a canned string with merge fields. This is the highest-reputation-risk
+   * output in the system -- 250 of these go out in a week and one gets
+   * screenshotted and forwarded -- and the Foundation has not settled its
+   * wording. Inventing copy here and letting it ship would be this system
+   * putting words in the Foundation's mouth to 250 nonprofits.
+   *
+   * So the template is a SHELL: the brand, the greeting, the footer, the
+   * escaping. The words are supplied at send time by whoever is accountable
+   * for them, and `requiresHumanRelease` means they cannot be sent without a
+   * named person releasing them.
+   */
+  bodyParagraphs: string[];
+  supportEmail: string;
+  /** Shown only when the applicant can still reach their submission. */
+  portalUrl: string | null;
+}
+
+/**
+ * "We are not able to fund this."
+ *
+ * WHAT THIS TEMPLATE DOES NOT CONTAIN, deliberately: any reviewer score, any
+ * criterion, any internal note, and the decision rationale recorded on the
+ * application. Those are the Foundation's working papers. A decline that
+ * quotes a score is an argument the applicant will want to have, and a decline
+ * that quotes an internal note is a document nobody intended to publish.
+ *
+ * What it DOES carry is an invitation to reply, because a nonprofit that has
+ * spent an hour on an application is owed a person rather than a no-reply
+ * address.
+ */
+export const DECLINE_NOTIFICATION: EmailTemplate<DeclineNotificationVars> = {
+  key: 'decline_notification',
+  requiresHumanRelease: true,
+  render(v) {
+    const what = v.projectTitle ? `your application for ${v.projectTitle}` : 'your application';
+    const paragraphs = v.bodyParagraphs.map((p) => p.trim()).filter(Boolean);
+
+    return {
+      // Not "Your application was unsuccessful" in the subject line. It lands
+      // in a shared inbox and is read at a glance; the decision belongs in the
+      // letter, where the words around it are the ones somebody chose.
+      subject: `About your ${v.programName} application`,
+      text: textBlock([
+        `Thank you for ${what}.`,
+        '',
+        ...paragraphs.flatMap((p) => [p, '']),
+        `If you would like to talk this through, write to ${v.supportEmail}.`,
+        'A person reads that address.',
+        ...(v.portalUrl ? ['', 'Your submission remains available here:', '', v.portalUrl] : []),
+      ]),
+      html: layout({
+        preview: `About ${escapeHtml(v.organizationName)}'s ${escapeHtml(v.programName)} application`,
+        heading: `About your ${v.programName} application`,
+        blocks: [
+          `Thank you for ${escapeHtml(what)}.`,
+          ...paragraphs.map((p) => escapeHtml(p)),
+        ],
+        ...(v.portalUrl ? { action: { label: 'See your submission', url: v.portalUrl } } : {}),
+        footer:
+          `If you would like to talk this through, write to ${escapeHtml(v.supportEmail)}. ` +
+          `A person reads that address.`,
+      }),
+    };
+  },
+};
+
 export const TEMPLATES = {
   [SIGN_IN_PROBLEM.key]: SIGN_IN_PROBLEM,
   [SIGN_IN_LINK.key]: SIGN_IN_LINK,
   [APPLICATION_RECEIVED.key]: APPLICATION_RECEIVED,
   [REPORT_RECEIVED.key]: REPORT_RECEIVED,
   [FILES_DUE_FOR_DELETION.key]: FILES_DUE_FOR_DELETION,
+  [AWARD_NOTIFICATION.key]: AWARD_NOTIFICATION,
+  [DECLINE_NOTIFICATION.key]: DECLINE_NOTIFICATION,
 } as const;

@@ -33,6 +33,7 @@ import { Retention } from './Retention';
 import { RubricBuilder } from './RubricBuilder';
 import { ReviewQueue } from './ReviewQueue';
 import { ScoringSheet } from './ScoringSheet';
+import { Communications } from './Communications';
 import { ApplicationDetail } from './ApplicationDetail';
 import { Shell } from './Shell';
 import {
@@ -56,6 +57,7 @@ type Route =
   | { name: 'rubrics'; programId: string }
   | { name: 'reviewQueue' }
   | { name: 'scoringSheet'; assignmentId: string }
+  | { name: 'communications'; cycleId: string }
   | { name: 'openCycles' }
   | { name: 'signIn' }
   | { name: 'eligibility'; cycleId: string }
@@ -84,6 +86,9 @@ function parseRoute(pathname: string): Route | null {
   // A reviewer's own queue. NOT /pipeline, which is the admin's view of
   // everything -- two different questions must not share a path.
   if (parts.length === 1 && parts[0] === 'my-reviews') return { name: 'reviewQueue' };
+  if (parts.length === 3 && parts[0] === 'cycles' && parts[2] === 'letters' && parts[1]) {
+    return { name: 'communications', cycleId: parts[1] };
+  }
   if (parts.length === 3 && parts[0] === 'my-reviews' && parts[2] === 'score' && parts[1]) {
     return { name: 'scoringSheet', assignmentId: parts[1] };
   }
@@ -298,7 +303,8 @@ export function App(): ReactElement {
           route?.name === 'retention' ||
           route?.name === 'rubrics' ||
           route?.name === 'reviewQueue' ||
-          route?.name === 'scoringSheet'
+          route?.name === 'scoringSheet' ||
+          route?.name === 'communications'
         ) {
           const [s, p, c, f] = await Promise.all([
             api.session(signal),
@@ -572,6 +578,12 @@ export function App(): ReactElement {
     );
   }
 
+  if (route.name === 'communications') {
+    return shell(
+      <Communications cycleId={route.cycleId} onBack={() => navigate('/configuration')} />,
+    );
+  }
+
   if (route.name === 'reviewQueue') {
     return shell(
       <ReviewQueue
@@ -635,6 +647,7 @@ export function App(): ReactElement {
       forms={home.forms}
       onOpenForm={(id) => navigate(`/forms/${encodeURIComponent(id)}`)}
       onOpenRubrics={(id) => navigate(`/programs/${encodeURIComponent(id)}/rubrics`)}
+      onOpenLetters={(id) => navigate(`/cycles/${encodeURIComponent(id)}/letters`)}
     />,
   );
 }

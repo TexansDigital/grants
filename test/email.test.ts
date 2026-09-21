@@ -18,6 +18,8 @@ import {
   TEMPLATES,
   escapeHtml,
   FILES_DUE_FOR_DELETION,
+  AWARD_NOTIFICATION,
+  DECLINE_NOTIFICATION,
   type EmailTemplate,
 } from '../src/lib/emailTemplates';
 import type { Env } from '../src/types';
@@ -775,6 +777,26 @@ describe('templates', () => {
       supportEmail: 'grants@example.org',
       destination: 'Inspire Change application',
     },
+    award_notification: {
+      organizationName: 'Invented Guild',
+      projectTitle: 'After-school meals in Fort Bend',
+      programName: 'Inspire Change',
+      amountDisplay: '$25,000.00',
+      announcementDisplay: 'November 5, 2026',
+      portalUrl: 'https://apply.example.org/reports',
+      supportEmail: 'grants@example.org',
+    },
+    decline_notification: {
+      organizationName: 'Invented Guild',
+      projectTitle: 'After-school meals in Fort Bend',
+      programName: 'Inspire Change',
+      bodyParagraphs: [
+        'We had far more strong applications this year than we were able to fund.',
+        'We hope you will apply again next cycle.',
+      ],
+      supportEmail: 'grants@example.org',
+      portalUrl: 'https://apply.example.org/apply/abc',
+    },
     files_due_for_deletion: {
       fileCount: 2,
       soonestDueDisplay: 'October 3, 2026',
@@ -835,6 +857,62 @@ describe('templates', () => {
     expect(r.text).not.toMatch(/\bdownloaded\b/i);
     expect(r.html).not.toMatch(/\bdownloaded\b/i);
     expect(r.text).toMatch(/[Nn]othing is attached/);
+  });
+
+  it('the award letter carries the embargo as its own block, not a footnote', () => {
+    /*
+     * Grantees told on Tuesday post on Tuesday. `announcement_date` is a
+     * separate fact from `decided_at` for exactly this reason, and a letter
+     * that buries the date in a footer has not said it.
+     *
+     * Asserted in BOTH bodies, because plain text is what a phone shows first.
+     */
+    const r = AWARD_NOTIFICATION.render(
+      FIXTURES.award_notification as Parameters<typeof AWARD_NOTIFICATION.render>[0],
+    );
+    expect(r.text).toContain('November 5, 2026');
+    expect(r.html).toContain('November 5, 2026');
+    expect(r.text).toMatch(/hold this news until/i);
+  });
+
+  it('the award letter omits the embargo cleanly when there is none', () => {
+    // An empty embargo paragraph, or the word "null", is how a letter tells a
+    // grantee the system is not being read by anyone.
+    const r = AWARD_NOTIFICATION.render({
+      ...(FIXTURES.award_notification as Parameters<typeof AWARD_NOTIFICATION.render>[0]),
+      announcementDisplay: null,
+    });
+    expect(r.text).not.toMatch(/hold this news/i);
+    expect(r.text).not.toContain('null');
+    expect(r.html).not.toContain('null');
+  });
+
+  it('the decline letter contains only the words it was given', () => {
+    /*
+     * THE POINT OF THE TEMPLATE. There is no standard decline wording in this
+     * system, deliberately: 250 of these go out in a week, one gets
+     * screenshotted, and the Foundation has not settled what they should say.
+     * The shell supplies the brand, the greeting and the escaping; the
+     * sentences are the sender's.
+     *
+     * This test is what notices if somebody later adds a helpful default.
+     */
+    const r = DECLINE_NOTIFICATION.render({
+      ...(FIXTURES.decline_notification as Parameters<typeof DECLINE_NOTIFICATION.render>[0]),
+      bodyParagraphs: ['ONLY THIS SENTENCE.'],
+    });
+    expect(r.text).toContain('ONLY THIS SENTENCE.');
+    // No consolation, no reasons, no invitation to reapply that nobody wrote.
+    expect(r.text).not.toMatch(/unfortunately|regret|competitive|unable to fund/i);
+    expect(r.html).not.toMatch(/unfortunately|regret|competitive|unable to fund/i);
+  });
+
+  it('both decision letters refuse to send without a named releaser', () => {
+    // CLAUDE.md: decline emails are never sent automatically. The enforcement
+    // is on the template, so it holds for every caller rather than for the one
+    // that remembered.
+    expect(AWARD_NOTIFICATION.requiresHumanRelease).toBe(true);
+    expect(DECLINE_NOTIFICATION.requiresHumanRelease).toBe(true);
   });
 
   it('names the destination in the subject, for a shared inbox', () => {

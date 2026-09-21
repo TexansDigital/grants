@@ -1127,3 +1127,93 @@ what is absent from it. This is the same vacuous-assertion trap as §35's
 **Known gaps.** The offline export/import fallback for consultants is not
 built. There is no bulk view ranking a whole cycle by score — the comparison is
 per application. Nothing yet writes an award from an awarded decision.
+
+## §37 — Declined applicants keep portal access, and the portal does not break the news
+
+**Date:** 2026-09-21
+**Status:** In force. Closes CLAUDE.md open decision #4.
+
+**The Foundation's answer:** declined applicants keep portal access, and there
+should be nothing for them there. Both halves are now true, and the second one
+was not.
+
+**What was already correct.** A submitted application is read-only — `saveDraft`
+refuses anything that is not a draft — so a declined applicant can sign in, read
+what they sent, and do nothing else. The decision rationale has never been in an
+applicant payload.
+
+**What was wrong, and is the reason this section exists.**
+`applications.status` became `declined` the instant an admin recorded the
+decision, and the applicant's own portal read that column. A nonprofit signing
+in on Tuesday would have learned it was declined from a status badge, days
+before the letter a human was still writing — defeating the human-release gate
+on the decline email entirely, and defeating "acceptances send before declines"
+along with it.
+
+**The fix is a mask, not a hidden field.** `applicantVisibleStatus` shows
+`under_review` for an awarded or declined application until
+`decision_communicated_at` is stamped. The communication columns are internal,
+so the payload does not carry a `decision_communicated_at: null` beside a masked
+status — which would hand back exactly what the mask withholds. `withdrawn` is
+never masked: the applicant told us.
+
+**Staff are not masked.** The same function is not applied to the staff read.
+Masking there would hide a recorded decision from the people who recorded it,
+including on the screen where they go to send the letter.
+
+## §38 — Decision letters: the words are the Foundation's, the order is enforced
+
+**Date:** 2026-09-21
+**Status:** In force
+
+**There is no standard decline wording in this system, deliberately.** 250
+declines go out in a week and one gets screenshotted and forwarded. The
+Foundation has not settled what they should say, and a default that shipped
+would be this system putting words in its mouth to 250 nonprofits. The template
+is a shell — brand, greeting, footer, escaping — and the paragraphs are supplied
+at send time. An empty body is refused, and a test asserts the rendered letter
+contains no consolation language nobody wrote.
+
+**Neither letter can be sent by a machine.** Both templates are
+`requiresHumanRelease`, so `sendEmail` throws without a named releaser. That is
+on the template rather than in the caller, so it holds for every path rather
+than for the one that remembered.
+
+**Acceptances go first, and the gate is "all", not "some".** A decline is
+refused while *any* award in the cycle is still untold. Fifty awards go out on
+Monday; forty-nine send and one bounces; if the gate asked "have any gone out"
+the declines would start landing while one grantee still had no idea. The first
+version of that test had one award, so "some" and "all" were the same sentence
+and a mutant swapping them survived. The manual-recording path is gated on the
+same question, because recording a manual decline has the same effect on the
+portal as sending one.
+
+**The award letter carries the embargo as its own block.** `announcement_date`
+is a separate fact from `decided_at` because grantees told on Tuesday post on
+Tuesday. A letter that buries the date in a footer has not said it, so it is
+asserted in both the HTML and the plain-text body — plain text being what a
+phone shows first.
+
+**An award letter cannot go before the award record exists.** It carries an
+amount. This is also what keeps "a decision is not an award" true in practice.
+
+**Communication is stamped, not derived from `email_messages`.** The largest
+awards are phoned by the executive director. A column that could not record that
+would push somebody to send a duplicate email to make the portal behave. Three
+columns — when, by whom, how — enforced together by trigger, because a date with
+no method cannot answer the question the column exists for.
+
+**The decline's words are not copied into the audit log.** `email_messages`
+holds the subject; the body of a letter to a third party is not something to
+duplicate into an append-only table nobody can edit.
+
+**Seven mutants, all killed** after one survivor was fixed: the portal
+announcing the decision, the mask leaking its own flag, the acceptances-first
+gate removed, an empty decline body accepted, an award sent with no award row,
+the already-told check removed, and the all-versus-some gate.
+
+**Known gaps.** No bulk send — each letter is sent individually, which at 250
+declines is a long afternoon and is the next thing to build here. Nothing yet
+creates the award record from an awarded decision, so that step is manual. The
+Foundation still owes the decline wording itself; the machinery does not need it
+and the first real send does.
