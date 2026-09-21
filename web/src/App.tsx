@@ -19,6 +19,7 @@ import type { CycleRow, FormSummary, ProgramRow, SessionUser } from './api';
 import type { FormDefinition } from '../../src/lib/forms';
 import { publicApi, type OpenCycle } from './publicApi';
 import { OpenCycles } from './OpenCycles';
+import { PublicGrants } from './PublicGrants';
 import { SignIn } from './SignIn';
 import { EligibilityForm } from './EligibilityForm';
 import {
@@ -69,6 +70,7 @@ type Route =
   | { name: 'scorecards'; cycleId: string }
   | { name: 'dashboard' }
   | { name: 'openCycles' }
+  | { name: 'publicGrants' }
   | { name: 'signIn' }
   | { name: 'eligibility'; cycleId: string }
   | { name: 'portal' }
@@ -116,6 +118,9 @@ function parseRoute(pathname: string): Route | null {
   // The public front door. Checked BEFORE /apply/:id, because "start" is not
   // an application id and the three-segment path is the more specific match.
   if (parts.length === 1 && parts[0] === 'apply') return { name: 'openCycles' };
+  // Public and read-only. Served on both hostnames, like the other public
+  // pages: which address somebody arrives at is not their problem.
+  if (parts.length === 1 && parts[0] === 'grants') return { name: 'publicGrants' };
   if (parts.length === 3 && parts[0] === 'apply' && parts[1] === 'start' && parts[2]) {
     return { name: 'eligibility', cycleId: parts[2] };
   }
@@ -247,6 +252,7 @@ export function App(): ReactElement {
       route?.name === 'signIn' ||
       route?.name === 'eligibility' ||
       route?.name === 'portal' ||
+      route?.name === 'publicGrants' ||
       route?.name === 'report';
     const internal = !external;
     const html = document.documentElement;
@@ -472,6 +478,21 @@ export function App(): ReactElement {
           reason={new URLSearchParams(search).has('expired') ? 'expired' : null}
           onSeeOpenGrants={hasOpenCycles ? () => navigate('/apply') : undefined}
         />
+      </PortalShell>
+    );
+  }
+
+  if (route.name === 'publicGrants') {
+    /*
+     * NO PRELOAD in the effect above, unlike every other route. This page
+     * fetches its own data, because it is the one screen that must render for
+     * somebody who has never signed in and never will -- and routing it
+     * through the shared loader would tie a public page to the session reads
+     * the rest of the app does first.
+     */
+    return (
+      <PortalShell organization={null} heading="Grants">
+        <PublicGrants />
       </PortalShell>
     );
   }

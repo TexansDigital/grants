@@ -460,6 +460,23 @@ async function planInternal(
       issues.push({ row: rowNo, message: `${assignment.organization} has already been decided.` });
       return;
     }
+    if (assignment.completedAt) {
+      /*
+       * THE PLAN SELECTED completed_at AND NEVER READ IT -- a check that was
+       * clearly intended and was missing. saveScores now refuses a submitted
+       * review, so without this the file planned cleanly and then threw
+       * PART-WAY THROUGH the apply loop, leaving some reviews written and
+       * others not. Catching it here refuses the whole file, which is this
+       * importer's rule everywhere else.
+       */
+      issues.push({
+        row: rowNo,
+        message:
+          `${assignment.reviewerEmail} has already submitted their review of ` +
+          `${assignment.organization}. Reopen it first if it should be replaced.`,
+      });
+      return;
+    }
 
     const criterionKey = r.criterion_key ?? '';
     const criterion = byKey.get(criterionKey);
@@ -588,13 +605,31 @@ export async function applyScorecardImport(
    * different rules. Either reading might be the wrong one, and nothing would
    * have shown which. One parse, one answer.
    */
-  const grouped = new Map<string, { criterionId: string; score: number | null; comment: string | null }[]>();
+  const grouped = new Map<
+    string,
+    { criterionId: string; score: number | null; comment: string | null; changed: boolean }[]
+  >();
   for (const p of planned) {
     const list = grouped.get(p.assignmentId) ?? [];
-    list.push({ criterionId: p.criterionId, score: p.score, comment: p.comment });
+    list.push({ criterionId: p.criterionId, score: p.score, comment: p.comment, changed: p.changed });
     grouped.set(p.assignmentId, list);
   }
 
+  /*
+   * `applied` COUNTS WHAT CHANGED, which is what the preview counted.
+   *
+   * It used to add up `saveScores`'s own `saved`, which is every cell sent --
+   * including the ones the plan had already worked out were identical to what
+   * was there. So the preview said "8 scores to import" and the confirmation
+   * afterwards said "23 applied", on the same file, with nothing to explain
+   * the gap. Somebody reconciling a consultant's scorecard against what landed
+   * would have to assume one of the two numbers was a lie, and the larger one
+   * is the one that looks like a mistake was made.
+   *
+   * The unchanged rows are still SENT -- they are no-op UPDATEs, and dropping
+   * them would mean a second pass over the planned rows deciding what to omit,
+   * which is the double-reading this function already learned not to do.
+   */
   let applied = 0;
   for (const [assignmentId, scores] of grouped) {
     /*
@@ -605,8 +640,8 @@ export async function applyScorecardImport(
      * enormous batch whose failure tells you nothing about which review it
      * was.
      */
-    const result = await saveScores(db, ctx, session, assignmentId, scores);
-    applied += result.saved;
+    await saveScores(db, ctx, session, assignmentId, scores);
+    applied += scores.filter((r) => r.changed).length;
   }
 
   return { applied, assignments: grouped.size, plan };

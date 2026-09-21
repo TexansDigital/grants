@@ -171,20 +171,46 @@ export async function schedulePayment(
     );
   }
 
+  /*
+   * THE CHECK ABOVE IS A READ. THIS IS THE ONE THAT HOLDS.
+   *
+   * `awardLedger` is read, the sum is compared in JavaScript, and then the
+   * INSERT runs -- with an `await` in between. Two admins scheduling at the
+   * same moment both passed the check: an adversarial review reproduced a
+   * $10,000 award carrying two $9,000 instalments, an `unscheduledCents` of
+   * minus $8,000, and a payment run that would pay a grantee $18,000. The
+   * module's own header said over-scheduling was refused. It was not.
+   *
+   * The ceiling is now re-asserted inside the INSERT, against the live sum of
+   * the other rows, so the second writer's statement matches nothing. The JS
+   * check stays because it produces the message a person can act on; this is
+   * what makes the promise true.
+   *
+   * INSERT ... SELECT rather than VALUES, because only a SELECT can carry a
+   * WHERE. D1 has no interactive transaction to do it any other way.
+   */
   const id = newId();
   const now = nowIso();
-  await db.batch([
+  const [write] = await db.batch([
     db
       .prepare(
         `INSERT INTO payments (id, award_id, amount_cents, scheduled_date, status,
            method, note, created_at, updated_at)
-         VALUES (?,?,?,?, 'scheduled', ?, ?, ?, ?)`,
+         SELECT ?,?,?,?, 'scheduled', ?, ?, ?, ?
+          WHERE (
+            SELECT COALESCE(SUM(p.amount_cents), 0)
+              FROM payments p
+             WHERE p.award_id = ? AND p.deleted_at IS NULL AND p.status <> 'cancelled'
+          ) + ? <= (
+            SELECT awarded_amount_cents FROM awards WHERE id = ? AND deleted_at IS NULL
+          )`,
       )
       .bind(
         id, awardId, input.amountCents, when,
         (input.method ?? '')?.toString().trim() || null,
         (input.note ?? '')?.toString().trim() || null,
         now, now,
+        awardId, input.amountCents, awardId,
       ),
     auditStatement(db, ctx, {
       action: 'payment.scheduled',
@@ -197,8 +223,27 @@ export async function schedulePayment(
         status: 'scheduled',
         actor_user_id: session.userId,
       },
+    }, {
+      // No payment row, no audit row.
+      guard: {
+        sql: `EXISTS (SELECT 1 FROM payments WHERE id = ?)`,
+        binds: [id],
+      },
     }),
   ]);
+
+  if ((write?.meta?.changes ?? 0) === 0) {
+    throw new AppError('CONFLICT', 'That would schedule more than this award is for.', {
+      internalMessage: `schedulePayment lost a race on ${awardId}`,
+      severity: 'warn',
+      fieldErrors: [
+        {
+          field: 'amountCents',
+          message: 'Somebody else scheduled against this award. Reload and check the total.',
+        },
+      ],
+    });
+  }
 
   return {
     id, awardId, amountCents: input.amountCents, scheduledDate: when,
@@ -271,7 +316,7 @@ export async function recordPayment(
   }
 
   const now = nowIso();
-  await db.batch([
+  const [write] = await db.batch([
     db
       .prepare(
         `UPDATE payments
@@ -293,15 +338,41 @@ export async function recordPayment(
         award_id: row.awardId,
         actor_user_id: session.userId,
       },
+    }, {
+      // Conditional on OUR update landing. Without this, two admins recording
+      // the same cheque wrote two `payment.recorded` rows and both were told
+      // it worked.
+      guard: {
+        sql: `EXISTS (SELECT 1 FROM payments WHERE id = ? AND paid_date = ? AND reference_number = ?)`,
+        binds: [paymentId, paid, reference],
+      },
     }),
   ]);
 
-  return {
-    id: paymentId, awardId: row.awardId, amountCents: row.amountCents,
-    scheduledDate: row.scheduledDate, paidDate: paid, status: 'paid',
-    method: (input.method ?? '')?.toString().trim() || null,
-    referenceNumber: reference, note: null,
-  };
+  if ((write?.meta?.changes ?? 0) === 0) {
+    throw new AppError('CONFLICT', 'This payment has already been recorded.', {
+      internalMessage: `recordPayment lost a race on ${paymentId}`,
+      severity: 'warn',
+    });
+  }
+
+  /*
+   * RE-READ RATHER THAN ECHOING THE INPUT. This used to return `note: null`
+   * always and the method from the REQUEST, while the SQL wrote
+   * COALESCE(?, method) -- so recording a payment scheduled as "ACH" with no
+   * method in the request returned `method: null`, and the screen disagreed
+   * with the row until it reloaded.
+   */
+  const saved = await db
+    .prepare(
+      `SELECT id, award_id AS awardId, amount_cents AS amountCents,
+              scheduled_date AS scheduledDate, paid_date AS paidDate, status,
+              method, reference_number AS referenceNumber, note
+         FROM payments WHERE id = ?`,
+    )
+    .bind(paymentId)
+    .first<PaymentRow>();
+  return saved!;
 }
 
 /**
@@ -344,7 +415,7 @@ export async function cancelPayment(
   }
 
   const now = nowIso();
-  await db.batch([
+  const [write] = await db.batch([
     db
       .prepare(
         `UPDATE payments SET status = 'cancelled', note = ?, updated_at = ?
@@ -352,13 +423,33 @@ export async function cancelPayment(
       )
       .bind(trimmed, now, paymentId),
     auditStatement(db, ctx, {
-      action: 'payment.recorded',
+      /*
+       * ITS OWN ACTION. This used to write `payment.recorded`, so the obvious
+       * audit query -- "what did finance pay" -- returned cancellations mixed
+       * in with payments, distinguishable only by parsing after_json.
+       */
+      action: 'payment.cancelled',
       entityType: 'payment',
       entityId: paymentId,
       before: { status: 'scheduled' },
-      after: { status: 'cancelled', note: trimmed, award_id: row.awardId, actor_user_id: session.userId },
+      after: {
+        status: 'cancelled', reason: trimmed,
+        award_id: row.awardId, actor_user_id: session.userId,
+      },
+    }, {
+      guard: {
+        sql: `EXISTS (SELECT 1 FROM payments WHERE id = ? AND status = 'cancelled')`,
+        binds: [paymentId],
+      },
     }),
   ]);
+
+  if ((write?.meta?.changes ?? 0) === 0) {
+    throw new AppError('CONFLICT', 'This payment is no longer scheduled.', {
+      internalMessage: `cancelPayment lost a race on ${paymentId}`,
+      severity: 'warn',
+    });
+  }
 
   return { paymentId, status: 'cancelled' };
 }

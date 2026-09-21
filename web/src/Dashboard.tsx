@@ -250,6 +250,16 @@ export function Dashboard(): ReactElement {
 
       <section className="panel">
         <h3>Applications</h3>
+        {/*
+          A HEADER ROW WITH NOTHING UNDER IT is not an empty state, it is a
+          screen that looks broken. Every other table here says so in words;
+          these two were rendering bare column headings on a database with no
+          cycles yet -- which is exactly what a new program looks like on its
+          first day.
+        */}
+        {data.funnel.length === 0 ? (
+          <p className="meta">No cycles have taken applications yet.</p>
+        ) : (
         <div className="table-scroll">
           <table>
             <thead>
@@ -278,6 +288,7 @@ export function Dashboard(): ReactElement {
             </tbody>
           </table>
         </div>
+        )}
         <p className="meta">
           Drafts that were never submitted are not counted as received.
         </p>
@@ -285,6 +296,9 @@ export function Dashboard(): ReactElement {
 
       <section className="panel">
         <h3>Grant reports</h3>
+        {data.compliance.length === 0 ? (
+          <p className="meta">No programs have reports due yet.</p>
+        ) : (
         <div className="table-scroll">
           <table>
             <thead>
@@ -313,6 +327,7 @@ export function Dashboard(): ReactElement {
             </tbody>
           </table>
         </div>
+        )}
         <p className="meta">
           Overdue means past its due date and neither accepted nor waived. A waived report
           counts as compliant &mdash; staff decided it was not required, with a reason.

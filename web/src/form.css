@@ -594,7 +594,23 @@
   flex-wrap: wrap;
 }
 
+/*
+ * DISPLAY, BECAUSE .btn IS NOT ALWAYS A <button>.
+ *
+ * Two screens use an anchor styled as a button -- the dashboard CSV and the
+ * per-reviewer scorecard download -- because a real link is what a download
+ * has to be. An anchor defaults to display: inline, where min-height does
+ * nothing and vertical padding overflows the line box instead of growing it:
+ * those two buttons rendered short, misaligned, and below the 44px target
+ * everything else in this system meets. inline-flex makes the rule true for
+ * whichever element it lands on, and text-decoration: none stops the label
+ * carrying a link underline through the middle of the button.
+ */
 .btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
   font: inherit;
   font-size: var(--step-0);
   font-weight: 600;
@@ -943,4 +959,74 @@
   color: var(--ink-2);
   font-size: var(--step--1);
   margin: var(--space-3) 0 0;
+}
+
+/*
+ * .banner.danger — the rule that did not exist.
+ *
+ * Twenty-odd places across ten screens render errors as
+ * `<p className="banner danger">`, and `.danger` was styled nowhere. So
+ * `.banner` alone applied: amber background, amber text, the WARNING
+ * treatment. "Could not send the letter to Houston Food Bank" looked exactly
+ * like "Sent 12 letters." On the dark internal theme it was worse, because
+ * --warn-bg is a near-white card that is never redefined for dark.
+ *
+ * BORDER AND A PREFIX, NOT COLOUR ALONE. --danger at 4.0:1 on white is not
+ * enough for body text, which is why --danger-ink exists and is redefined for
+ * dark; and the "Error:" prefix carries the meaning for anyone who does not
+ * see the colour at all. Same idiom as .error::before.
+ */
+.banner.danger {
+  background: var(--danger-bg);
+  border-color: var(--danger-line);
+  border-left: 3px solid var(--danger);
+  color: var(--danger-ink);
+}
+
+.banner.danger::before {
+  content: 'Error: ';
+  font-weight: 700;
+}
+
+/*
+ * Multi-line inputs inside .stack, which were browser defaults.
+ *
+ * Six of them, including the grantee's decline box on the mobile portal --
+ * where a default ~13px font is what makes iOS Safari ZOOM on focus, against
+ * this project's own repeated 16px rule.
+ */
+.stack textarea {
+  font: inherit;
+  font-size: max(16px, var(--step-0));
+  line-height: 1.6;
+  min-height: 6rem;
+  resize: vertical;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--ink);
+  width: 100%;
+}
+
+.stack textarea:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 1px;
+}
+
+/*
+ * Action cells inside tables.
+ *
+ * `.actions` is the applicant form's page FOOTER -- display:flex, a 2rem top
+ * margin, 1.5rem of padding and a hairline rule. Putting it on a <td> takes
+ * the cell out of table layout so it stops sizing with its column, and adds a
+ * stray rule and a block of dead space to every action row. internal.css
+ * already had to undo this once for .panel-decide > .actions.
+ */
+td.row-actions {
+  white-space: nowrap;
+}
+
+td.row-actions .btn {
+  margin-right: var(--space-2);
 }

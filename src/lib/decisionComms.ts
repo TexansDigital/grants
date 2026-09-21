@@ -160,6 +160,15 @@ async function loadPending(
 }
 
 /** The statements that stamp the row and audit it. Shared by all three paths. */
+/**
+ * The stamp and its audit row.
+ *
+ * THE AUDIT INSERT IS GUARDED on the state the UPDATE creates. It was not, and
+ * the consequence is the one this whole module exists to prevent: two admins
+ * working the same list both stamp, the UPDATE refuses the second, and the
+ * second audit row claims a communication that did not happen -- against the
+ * column the applicant portal reads to decide whether to break the news.
+ */
 function stampStatements(
   db: D1Database,
   ctx: RequestContext,
@@ -189,6 +198,13 @@ function stampStatements(
         decision_communicated_via: via,
         status: row.status,
         ...extra,
+      },
+    }, {
+      guard: {
+        sql: `EXISTS (SELECT 1 FROM applications
+                       WHERE id = ? AND decision_communicated_at = ?
+                         AND decision_communicated_by = ?)`,
+        binds: [row.applicationId, now, session.userId],
       },
     }),
   ];

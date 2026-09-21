@@ -25,8 +25,9 @@ import type { Env } from '../src/types';
 const envWith = (over: Partial<Env> = {}): Env =>
   ({ R2_BUCKET_NAME: 'steward-preview-files', R2_ACCOUNT_ID: 'acct123', ...over }) as Env;
 
-const connectSrc = (csp: string) =>
-  csp.split('; ').find((d) => d.startsWith('connect-src')) ?? '';
+const directive = (csp: string, name: string) =>
+  csp.split('; ').find((d) => d.startsWith(`${name} `) || d === name) ?? '';
+const connectSrc = (csp: string) => directive(csp, 'connect-src');
 
 describe('the page may reach exactly one other origin', () => {
   it('admits the bucket the signer actually sends the browser to', () => {
@@ -64,18 +65,60 @@ describe('the page may reach exactly one other origin', () => {
     expect(headers['content-type']).toBe('text/html; charset=utf-8');
   });
 
+  it('lets the Turnstile widget load, which it could not', () => {
+    /*
+     * THE BUG THIS PREVENTS, and it is the upload fault again in a second
+     * place. Turnstile loads a script from challenges.cloudflare.com and
+     * renders its challenge in an iframe from the same origin. Under
+     * `script-src 'self'` the browser refused the script and `default-src
+     * 'self'` refused the frame, so the widget never appeared and no token was
+     * ever produced -- on the sign-in page and the eligibility screen, the two
+     * doors every applicant and grantee comes through.
+     *
+     * Nothing in the suite could see it: the applicant harness drives Vite,
+     * which serves no policy. The browser console said so on every load.
+     */
+    const csp = contentSecurityPolicy(r2UploadOrigin(envWith()), true);
+    expect(directive(csp, 'script-src')).toBe(
+      "script-src 'self' https://challenges.cloudflare.com",
+    );
+    expect(directive(csp, 'frame-src')).toBe('frame-src https://challenges.cloudflare.com');
+    // Widening for Turnstile must not widen anything else.
+    expect(connectSrc(csp)).toBe(
+      "connect-src 'self' https://steward-preview-files.acct123.r2.cloudflarestorage.com",
+    );
+    expect(csp).not.toContain('*');
+  });
+
+  it('allows nothing for Turnstile when no site key is configured', () => {
+    // An environment with no key renders no widget, so there is nothing to
+    // allow -- the same rule the upload origin follows.
+    const csp = contentSecurityPolicy(null, false);
+    expect(directive(csp, 'script-src')).toBe("script-src 'self'");
+    expect(directive(csp, 'frame-src')).toBe("frame-src 'none'");
+    expect(csp).not.toContain('challenges.cloudflare.com');
+  });
+
+  it('puts the Turnstile permission on the shell only when the key is set', () => {
+    expect(htmlHeaders('req-1', null, true)['content-security-policy'])
+      .toContain('https://challenges.cloudflare.com');
+    expect(htmlHeaders('req-1', null, false)['content-security-policy'])
+      .not.toContain('challenges.cloudflare.com');
+  });
+
   it('leaves every other directive alone', () => {
     // Widening one directive must not quietly widen another.
     const csp = contentSecurityPolicy(r2UploadOrigin(envWith()));
-    for (const directive of [
+    for (const d of [
       "default-src 'self'",
       "script-src 'self'",
       "style-src 'self'",
       "object-src 'none'",
       "base-uri 'none'",
       "frame-ancestors 'none'",
+      "frame-src 'none'",
     ]) {
-      expect(csp).toContain(directive);
+      expect(csp).toContain(d);
     }
   });
 });

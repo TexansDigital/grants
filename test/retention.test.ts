@@ -405,7 +405,11 @@ describe('an admin deleting a file early', () => {
 });
 
 describe('telling the admins', () => {
-  const line = (dueInDays: number, retrieved = false): DueFile => ({
+  // `warned` defaults to true -- "this file has already had its heads-up" --
+  // so each test says for itself whether it is about a file the admins have
+  // heard of. A default of false would make every quiet-period test pass for
+  // the wrong reason.
+  const line = (dueInDays: number, retrieved = false, warned = true): DueFile => ({
     id: newId(),
     filename: 'f.pdf',
     organization_name: 'Invented Trust',
@@ -413,6 +417,7 @@ describe('telling the admins', () => {
     application_id: newId(),
     effective_due_at: iso(dueInDays * DAY),
     download_url_first_issued_at: retrieved ? nowIso() : null,
+    retention_notice_sent_at: warned ? nowIso() : null,
   });
 
   it('says nothing when everything has been asked for', async () => {
@@ -430,7 +435,29 @@ describe('telling the admins', () => {
     // Between the month-out heads-up and the final week, a daily email would
     // be about twenty of them saying the same thing.
     expect(noticeIsDue([line(20)], Date.now())).toEqual([]);
-    expect(noticeIsDue([line(WARN_HORIZON_DAYS - 0.5)], Date.now()).length).toBe(1);
+    expect(noticeIsDue([line(WARN_HORIZON_DAYS - 0.5, false, false)], Date.now()).length).toBe(1);
+  });
+
+  it('still warns about a file whose heads-up night was missed', async () => {
+    /*
+     * THE BUG THIS PREVENTS. The heads-up used to fire only for files landing
+     * in the slice between 29 and 30 days from the instant the run began. A
+     * night the cron did not fire -- or fired an hour late -- skipped every
+     * file in that slice permanently, and silently: the daily notices in the
+     * last week would eventually arrive, but the warning that comes while
+     * there is still a month to act on it never would.
+     *
+     * A file sitting at 20 days with no notice ever sent is exactly that
+     * case, and it now speaks.
+     */
+    expect(noticeIsDue([line(20, false, false)], Date.now()).length).toBe(1);
+  });
+
+  it('does not warn again about a file already named, until the last week', async () => {
+    expect(noticeIsDue([line(25)], Date.now())).toEqual([]);
+    // ...and the daily window overrides the stamp, which is what makes the
+    // last seven days daily rather than once.
+    expect(noticeIsDue([line(5)], Date.now()).length).toBe(1);
   });
 
   it('writes one message per admin per day, however often the cron fires', async () => {
@@ -448,6 +475,71 @@ describe('telling the admins', () => {
       .first<{ n: number }>();
     expect(after?.n).toBe(before?.n);
     expect(a.attachmentId).toBeTruthy();
+  });
+
+  it('writes down which files it named, so the next night does not repeat itself', async () => {
+    /*
+     * The stamp is what makes the month-out heads-up a fact about the file
+     * rather than about the instant the cron fired. A file 25 days out is
+     * outside the daily window, so the only reason it is named tonight is that
+     * it has never been named -- and tomorrow night that has to have changed.
+     */
+    const a = await applicationWithFile({ decidedDaysAgo: 65 });
+    const env = r2Env();
+
+    const run = await runRetention(env, ctxFor(admin), new Date());
+    expect(run.noticesRecorded).toBeGreaterThan(0);
+
+    const stamped = await db
+      .prepare(`SELECT retention_notice_sent_at AS at FROM attachments WHERE id = ?`)
+      .bind(a.attachmentId)
+      .first<{ at: string | null }>();
+    expect(stamped?.at).not.toBeNull();
+
+    // And the file is now quiet, where before the stamp existed it depended on
+    // the run landing inside a one-day slice.
+    const due = await filesDueWithin(db, nowIso(), WARN_HORIZON_DAYS);
+    expect(noticeIsDue(due, Date.now())).toEqual([]);
+  });
+
+  it('does not mark files as warned about when nobody was warned', async () => {
+    /*
+     * A database with no active admin records nothing and sends nothing.
+     * Stamping anyway would mark every file in the horizon as already warned
+     * about, and the first admin account created afterwards would never
+     * receive the heads-up for any of them -- a silence caused by the fix for
+     * a silence.
+     */
+    const a = await applicationWithFile({ decidedDaysAgo: 65 });
+    await db.prepare(`UPDATE users SET is_active = 0 WHERE role = 'admin'`).run();
+
+    const run = await runRetention(r2Env(), ctxFor(admin), new Date());
+    expect(run.noticesRecorded).toBe(0);
+
+    const stamped = await db
+      .prepare(`SELECT retention_notice_sent_at AS at FROM attachments WHERE id = ?`)
+      .bind(a.attachmentId)
+      .first<{ at: string | null }>();
+    expect(stamped?.at).toBeNull();
+  });
+
+  it('gives a held file a fresh heads-up when it comes back into view', async () => {
+    // A hold pushes the date weeks out. Without clearing the stamp the file
+    // would re-enter the horizon already marked as warned about, and the only
+    // notice it ever got would describe a date that no longer applies.
+    const a = await applicationWithFile({ decidedDaysAgo: 65 });
+    const env = r2Env();
+    await runRetention(env, ctxFor(admin), new Date());
+
+    await holdAttachment(
+      db, ctxFor(admin), admin, a.attachmentId,
+      iso(200 * DAY), 'Audit query open on this grant',
+    );
+    const after = await db
+      .prepare(`SELECT retention_notice_sent_at AS at FROM attachments WHERE id = ?`)
+      .bind(a.attachmentId)
+      .first<{ at: string | null }>();
+    expect(after?.at).toBeNull();
   });
 
   it('never names a file it destroyed the same night', async () => {

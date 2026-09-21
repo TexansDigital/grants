@@ -47,6 +47,7 @@ import {
   exportScorecard, planScorecardImport, applyScorecardImport, reviewersInCycle,
 } from './lib/scorecards';
 import { createAwardFromDecision, budgetByProgram } from './lib/awards';
+import { publicGrants, publishableAwards, setAwardPublic } from './lib/publicGrants';
 import {
   awardsAwaitingResponse, acceptAward, declineAward, recordAwardDocument,
   type AwardDocument,
@@ -200,10 +201,16 @@ async function serveAppShell({ request, env, ctx }: RouteContext): Promise<Respo
     if (res.ok) {
       // The upload origin goes in THIS response's policy, not the API's: a
       // CSP governs only the document it arrives with, and the shell is the
-      // document that has to reach R2.
+      // document that has to reach R2. The same is true of Turnstile: the
+      // widget is loaded by this document, so this is the only policy that
+      // decides whether it may load at all.
       return new Response(res.body, {
         status: 200,
-        headers: htmlHeaders(ctx.requestId, r2UploadOrigin(env)),
+        headers: htmlHeaders(
+          ctx.requestId,
+          r2UploadOrigin(env),
+          (env.TURNSTILE_SITE_KEY ?? '').trim() !== '',
+        ),
       });
     }
   }
@@ -264,6 +271,29 @@ const routes: readonly Route[] = [
     public: true,
     handler: ({ env, params }) => readPublicForm(env, params.id!, nowIso()),
   },
+  {
+    /*
+     * Who the Foundation has funded. PUBLIC, and read-only.
+     *
+     * The dangerous part of this endpoint is not what it shows -- who, for
+     * what, how much is what every funder publishes -- it is WHEN. Three
+     * conditions gate every row and all three are in SQL: an admin opted the
+     * award in, the grantee has been told, and the embargo has passed. A web
+     * page is public to everyone at once, so publishing early is worse here
+     * than anywhere else in the system.
+     *
+     * No Turnstile: it is a read of data the Foundation has chosen to publish,
+     * and a challenge in front of a public grant list would be theatre.
+     */
+    method: 'GET',
+    path: '/api/public/grants',
+    roles: [],
+    public: true,
+    handler: async ({ env, ctx }) =>
+      json({ grants: await publicGrants(env.DB, nowIso()) }, ctx),
+  },
+  { method: 'GET', path: '/grants', roles: [], public: true, handler: serveAppShell },
+
   // The public pages themselves. Listed explicitly, as every other SPA path
   // is, so a mistyped URL still 404s.
   { method: 'GET', path: '/apply', roles: [], public: true, handler: serveAppShell },
@@ -1120,6 +1150,35 @@ const routes: readonly Route[] = [
     },
   },
 
+  // ---- publishing an award -------------------------------------------------
+  {
+    method: 'GET',
+    path: '/api/cycles/:id/publishable',
+    roles: ADMIN_ONLY,
+    handler: async ({ env, ctx, params, session }) =>
+      json(
+        { awards: await publishableAwards(env.DB, session, params.id!, nowIso()) },
+        ctx,
+      ),
+  },
+  {
+    /*
+     * The opt-in. Default is private -- publishing another organization's
+     * grant is a decision about them -- and taking one back down is usually a
+     * decision about a mistake. Both are audited.
+     */
+    method: 'POST',
+    path: '/api/awards/:id/public',
+    roles: ADMIN_ONLY,
+    handler: async ({ request, env, ctx, params, session }) => {
+      const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+      return json(
+        await setAwardPublic(env.DB, ctx, session, params.id!, body.isPublic === true),
+        ctx,
+      );
+    },
+  },
+
   // ---- payments ------------------------------------------------------------
   //
   // CLAUDE.md: "The system does not disburse money. It records schedules and
@@ -1683,9 +1742,24 @@ const routes: readonly Route[] = [
     // reviewer's own list, because the question it answers -- which
     // applications are short of reviewers -- is invisible from any one
     // reviewer's worklist, and finding out at the deadline is too late.
+    /*
+     * ADMIN ONLY, and it was STAFF_READ.
+     *
+     * reviewCoverage takes no Session and applies no scoping -- it lists every
+     * submitted application in the cycle with its organization's legal name
+     * and project title. Under STAFF_READ an outside consultant assigned three
+     * applications could read the whole roster, which is exactly the rule
+     * CLAUDE.md states: a reviewer sees "only applications assigned to them".
+     *
+     * No scores leaked, so this was a roster leak rather than a score leak --
+     * and it is still the thing that must not happen. Admin-only is the
+     * correct fix rather than adding scoping, because a reviewer-scoped
+     * coverage grid answers nothing: the question is which applications are
+     * SHORT of reviewers, which is invisible from inside one worklist.
+     */
     method: 'GET',
     path: '/api/cycles/:id/review-coverage',
-    roles: STAFF_READ,
+    roles: ADMIN_ONLY,
     handler: async ({ env, ctx, params, url }) => {
       const asked = Number(url.searchParams.get('target') ?? DEFAULT_REVIEWERS_PER_APPLICATION);
       const target =

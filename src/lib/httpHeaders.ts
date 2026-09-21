@@ -33,16 +33,39 @@
  *
  * Null when uploads are unconfigured: the policy then allows nothing extra,
  * which is correct, because there is nowhere to upload to.
+ *
+ * `turnstile` IS THE SECOND EXCEPTION, and it was the same fault as the first.
+ *
+ * Cloudflare Turnstile -- CLAUDE.md's bot protection on every public endpoint
+ * -- loads a script from challenges.cloudflare.com and renders its widget in
+ * an iframe from the same origin. Under `script-src 'self'` the browser
+ * refused the script outright, and `default-src 'self'` refused the frame, so
+ * the widget never appeared and no token was ever produced. On the sign-in
+ * page and the eligibility screen: the two doors every applicant and grantee
+ * comes through. The console said so on every load and nothing else did --
+ * exactly how the upload origin was missed, and found the same way, by
+ * reading a browser console rather than a test result.
+ *
+ * Named exactly, never a wildcard, and only when a site key is configured. An
+ * environment with no key renders no widget, so there is nothing to allow.
  */
-export function contentSecurityPolicy(uploadOrigin: string | null = null): string {
+const TURNSTILE_ORIGIN = 'https://challenges.cloudflare.com';
+
+export function contentSecurityPolicy(
+  uploadOrigin: string | null = null,
+  turnstile = false,
+): string {
   const connect = uploadOrigin ? `connect-src 'self' ${uploadOrigin}` : "connect-src 'self'";
   return [
     "default-src 'self'",
-    "script-src 'self'",
+    turnstile ? `script-src 'self' ${TURNSTILE_ORIGIN}` : "script-src 'self'",
     "style-src 'self'",
     "img-src 'self' data:",
     connect,
     "font-src 'self'",
+    // The widget is an iframe. default-src would otherwise refuse it, and a
+    // blocked frame is a blank space where the challenge should be.
+    turnstile ? `frame-src ${TURNSTILE_ORIGIN}` : "frame-src 'none'",
     "object-src 'none'",
     "base-uri 'none'",
     "form-action 'self'",
@@ -53,6 +76,7 @@ export function contentSecurityPolicy(uploadOrigin: string | null = null): strin
 export function securityHeaders(
   requestId: string,
   uploadOrigin: string | null = null,
+  turnstile = false,
 ): Record<string, string> {
   return {
     'content-type': 'application/json; charset=utf-8',
@@ -63,7 +87,7 @@ export function securityHeaders(
     'x-content-type-options': 'nosniff',
     'referrer-policy': 'strict-origin-when-cross-origin',
     'x-frame-options': 'DENY',
-    'content-security-policy': contentSecurityPolicy(uploadOrigin),
+    'content-security-policy': contentSecurityPolicy(uploadOrigin, turnstile),
   };
 }
 
@@ -82,9 +106,10 @@ export function securityHeaders(
 export function htmlHeaders(
   requestId: string,
   uploadOrigin: string | null = null,
+  turnstile = false,
 ): Record<string, string> {
   return {
-    ...securityHeaders(requestId, uploadOrigin),
+    ...securityHeaders(requestId, uploadOrigin, turnstile),
     'content-type': 'text/html; charset=utf-8',
   };
 }

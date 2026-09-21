@@ -429,28 +429,49 @@ describe('serving the single-page app', () => {
     }
 
     /*
-     * The CSP differs in ONE directive, deliberately.
+     * The CSP differs in exactly THREE directives, deliberately, and in no
+     * others. A CSP governs only the document it arrives with, so the shell is
+     * the one that needs permissions and the API response is the one that
+     * needs none. Asserting the two byte-identical is what this test used to
+     * do, and it would force both of the faults below back.
      *
-     * A file upload goes direct from the browser to R2 -- the Worker only
-     * authorizes it -- so the DOCUMENT has to be allowed to connect to the
-     * bucket. It previously was not, and every presigned PUT was refused by
-     * the browser before it was made: no request, no R2 error, nothing in any
-     * log. See test/csp.test.ts.
+     *   connect-src: a file upload goes direct from the browser to R2 -- the
+     *     Worker only authorizes it -- so the document has to reach the
+     *     bucket. It could not, and every presigned PUT was refused by the
+     *     browser before it was made: no request, no R2 error, nothing in any
+     *     log.
      *
-     * The API response needs no such permission, because a CSP governs only
-     * the document it arrives with. Asserting the two byte-identical is what
-     * this test used to do, and it would now force the fault back.
+     *   script-src and frame-src: Turnstile loads a script from
+     *     challenges.cloudflare.com and renders its challenge in an iframe
+     *     from the same origin. Neither was allowed, so the widget never
+     *     appeared on the sign-in page or the eligibility screen and no token
+     *     was ever produced.
+     *
+     * Both are asserted in detail in test/csp.test.ts. What this test adds is
+     * the count: nothing ELSE about the shell's policy may quietly differ.
      */
     const directives = (csp: string | null) => new Set((csp ?? '').split('; '));
     const shellCsp = directives(shell.headers.get('content-security-policy'));
     const apiCsp = directives(apiRes.headers.get('content-security-policy'));
 
-    const onlyInShell = [...shellCsp].filter((d) => !apiCsp.has(d));
-    const onlyInApi = [...apiCsp].filter((d) => !shellCsp.has(d));
+    const onlyInShell = [...shellCsp].filter((d) => !apiCsp.has(d)).sort();
+    const onlyInApi = [...apiCsp].filter((d) => !shellCsp.has(d)).sort();
 
-    expect(onlyInApi).toEqual(["connect-src 'self'"]);
-    expect(onlyInShell).toHaveLength(1);
-    expect(onlyInShell[0]).toMatch(/^connect-src 'self' https:\/\/[^ ]+\.r2\.cloudflarestorage\.com$/);
+    expect(onlyInApi).toEqual([
+      "connect-src 'self'",
+      "frame-src 'none'",
+      "script-src 'self'",
+    ]);
+    expect(onlyInShell).toHaveLength(3);
+    expect(onlyInShell.find((d) => d.startsWith('connect-src'))).toMatch(
+      /^connect-src 'self' https:\/\/[^ ]+\.r2\.cloudflarestorage\.com$/,
+    );
+    expect(onlyInShell.find((d) => d.startsWith('script-src'))).toBe(
+      "script-src 'self' https://challenges.cloudflare.com",
+    );
+    expect(onlyInShell.find((d) => d.startsWith('frame-src'))).toBe(
+      'frame-src https://challenges.cloudflare.com',
+    );
   });
 
   it('does NOT serve the shell for a path the app does not own', async () => {

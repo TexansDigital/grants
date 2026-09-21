@@ -357,6 +357,49 @@ describe('report compliance', () => {
     expect(row.open).toBe(2);
   });
 
+  it('does not hold a refused award against the program forever', async () => {
+    /*
+     * THE BUG THIS PREVENTS. A grantee who turns an award down leaves it
+     * `cancelled` -- but any report periods already generated from the term
+     * stay behind, in `scheduled`, with due dates that eventually pass. Joined
+     * without a status filter they sat in the overdue column permanently, for
+     * a grant nobody ever took, and they went into the denominator too: the
+     * program's compliance rate was being measured against reports no one was
+     * ever going to file.
+     *
+     * The exclusion is in the ON clause rather than the WHERE, so a program
+     * whose only award was refused still appears with a row of zeroes instead
+     * of vanishing from the dashboard.
+     */
+    const p = await program();
+    await awardWithPeriod(p, { dueDaysAgo: 30, status: 'accepted' });
+    const refused = await awardWithPeriod(p, { dueDaysAgo: 30, status: 'open' });
+    await db
+      .prepare(`UPDATE awards SET status = 'cancelled' WHERE id = ?`)
+      .bind(refused.awardId)
+      .run();
+
+    const row = (await reportCompliance(db, admin, nowIso())).find((r) => r.programId === p.programId)!;
+    expect(row.overdue).toBe(0);
+    expect(row.total).toBe(1);
+    expect(row.complianceRateBp).toBe(10000);
+  });
+
+  it('still lists a program whose only award was cancelled', async () => {
+    // The LEFT JOIN, proven: a row of zeroes, not a missing program.
+    const p = await program();
+    const refused = await awardWithPeriod(p, { dueDaysAgo: 30, status: 'open' });
+    await db
+      .prepare(`UPDATE awards SET status = 'cancelled' WHERE id = ?`)
+      .bind(refused.awardId)
+      .run();
+
+    const row = (await reportCompliance(db, admin, nowIso())).find((r) => r.programId === p.programId);
+    expect(row).toBeDefined();
+    expect(row!.total).toBe(0);
+    expect(row!.complianceRateBp).toBeNull();
+  });
+
   it('counts a waived report as compliant', async () => {
     /*
      * Staff decided it was not required, with a reason attached. Counting that
@@ -587,6 +630,68 @@ describe('the export, which is the product for executives', () => {
     // when there are any -- and the exact figure beside it.
     expect(csv).toContain('$25,000');
     expect(csv).toContain(',2500000,');
+  });
+
+  it('survives an impossible currency metric instead of breaking forever', async () => {
+    /*
+     * THE BUG THIS CLOSES. metric_values.value_int has no upper CHECK, so one
+     * grantee typing a nine-digit "funds leveraged" figure made formatCents
+     * throw above MAX_CENTS -- and because this is the CSV, the only artefact
+     * executives receive returned INTERNAL forever while the JSON dashboard
+     * kept working, so nothing else would have shown it was broken.
+     *
+     * The figure is reported as itself with a note rather than formatted,
+     * because the number IS the problem and hiding it behind an error helps
+     * nobody find the report it came from.
+     */
+    const p = await program();
+    const a = await submitted(p);
+    await decideApplication(db, ctx(), admin, a.applicationId, { status: 'awarded' });
+    const award = await createAwardFromDecision(db, ctx(), admin, a.applicationId, {
+      awardedAmountCents: 100_000,
+    });
+    const now = nowIso();
+    const metricId = newId();
+    const periodId = newId();
+    const submissionId = newId();
+    await db
+      .prepare(
+        `INSERT INTO metric_definitions (id, program_id, metric_key, label, metric_type,
+           unit, is_required, sort_order, created_at, updated_at)
+         VALUES (?,?, 'leveraged', 'Funds leveraged', 'currency', NULL, 0, 0, ?, ?)`,
+      )
+      .bind(metricId, p.programId, now, now)
+      .run();
+    await db
+      .prepare(
+        `INSERT INTO report_periods (id, award_id, label, period_type, due_date, status,
+           created_at, updated_at)
+         VALUES (?,?, 'Final', 'final', ?, 'accepted', ?, ?)`,
+      )
+      .bind(periodId, award.awardId, now, now, now)
+      .run();
+    await db
+      .prepare(
+        `INSERT INTO report_submissions (id, report_period_id, submitted_at, accepted_at,
+           accepted_by, created_at, updated_at)
+         VALUES (?,?,?,?,?,?,?)`,
+      )
+      .bind(submissionId, periodId, now, now, admin.userId, now, now)
+      .run();
+    await db
+      .prepare(
+        `INSERT INTO metric_values (id, report_submission_id, metric_definition_id,
+           value_int, created_at)
+         VALUES (?,?,?,?,?)`,
+      )
+      .bind(newId(), submissionId, metricId, 10_000_000_001, now)
+      .run();
+
+    const csv = dashboardCsv(await buildDashboard(db, admin, nowIso()));
+    expect(csv).toContain('outside the range we can total');
+    // And the rest of the export is intact.
+    expect(csv).toContain('AWARDS');
+    expect(csv).toContain('GRANT REPORTS');
   });
 
   it('quotes a program name containing a comma', async () => {

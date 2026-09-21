@@ -24,7 +24,7 @@
 
 import type { Session } from '../types';
 import { notFound } from './errors';
-import { formatCents } from './money';
+import { formatCents, MAX_CENTS } from './money';
 import { disbursementByProgram, type DisbursementLine } from './payments';
 
 function assertAdmin(session: Session): void {
@@ -161,6 +161,16 @@ export interface ComplianceRow {
  * WAIVED COUNTS AS COMPLIANT. Staff decided the report was not required; that
  * is a deliberate act with a reason attached, and counting it as a failure
  * would make the honest thing look worse than quietly leaving it open.
+ *
+ * A CANCELLED AWARD IS NOT A COMPLIANCE FAILURE, and this join used to make it
+ * one. When a grantee refuses an award, 0020 records it as `cancelled` -- but
+ * any report periods already generated from the award term stay behind, in
+ * `scheduled`, with due dates that eventually pass. Counted, they sit in the
+ * overdue column forever for a grant nobody ever took, and they drag the
+ * program's compliance rate down with a denominator that includes reports no
+ * one was ever going to file. Excluded in the ON clause, not the WHERE, so a
+ * program whose only award was cancelled still appears with a row of zeroes
+ * rather than vanishing from the dashboard.
  */
 export async function reportCompliance(
   db: D1Database,
@@ -183,6 +193,7 @@ export async function reportCompliance(
               COUNT(rp.id) AS total
          FROM programs p
          LEFT JOIN awards w ON w.program_id = p.id AND w.deleted_at IS NULL
+                                AND w.status <> 'cancelled'
          LEFT JOIN report_periods rp ON rp.award_id = w.id AND rp.deleted_at IS NULL
         WHERE p.deleted_at IS NULL
         GROUP BY p.id
@@ -314,6 +325,19 @@ function cell(value: string | number | null): string {
   return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
+/**
+ * Format a reported currency metric, or say plainly that it cannot be one.
+ *
+ * Grantee-supplied, so the range is whatever somebody typed into a report.
+ */
+function safeMoney(total: number): string {
+  const cents = Math.round(total);
+  if (!Number.isSafeInteger(cents) || cents < 0 || cents > MAX_CENTS) {
+    return `${cents} (outside the range we can total)`;
+  }
+  return formatCents(cents);
+}
+
 /** Basis points to a percentage string, at the display edge only. */
 export function formatRate(bp: number | null): string {
   return bp === null ? '' : `${(bp / 100).toFixed(1)}%`;
@@ -411,10 +435,22 @@ export function dashboardCsv(d: Dashboard): string {
   for (const r of d.metrics) {
     row(
       r.programName, r.label, r.unit ?? '', r.reports,
+      /*
+       * NOT formatCents DIRECTLY. `metric_values.value_int` has no upper
+       * CHECK, so one grantee typing a nine-digit "funds leveraged" figure
+       * makes assertCents throw above MAX_CENTS -- and because this is the
+       * CSV, GET /api/dashboard.csv then returned INTERNAL forever while the
+       * JSON dashboard kept working. The only artefact executives receive
+       * would break and nothing else would.
+       *
+       * An out-of-range figure is reported as itself with a note rather than
+       * formatted, because the number IS the problem and hiding it behind an
+       * error helps nobody find the report it came from.
+       */
       r.total === null
         ? ''
         : r.metricType === 'currency'
-          ? formatCents(Math.round(r.total))
+          ? safeMoney(r.total)
           : r.total,
     );
   }

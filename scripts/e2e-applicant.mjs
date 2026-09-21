@@ -122,10 +122,22 @@ const stamp = Date.now().toString().slice(-6);
 const ein = `00${stamp}0`;
 if (ein.length !== 9) throw new Error(`fixture EIN must be nine digits, got ${ein}`);
 
+/*
+ * THE FULL APPLICATION, NAMED BY ITS STAGE rather than by version.
+ *
+ * Inspire Change has two published forms of kind 'application': the
+ * eligibility screen on stage 0 and the application itself on stage 1, both at
+ * version 1. Ordering by version alone is a coin toss between them, and it had
+ * been landing on the eligibility screen -- so this script was driving a
+ * four-question gate and then looking for the application's sections, which is
+ * why it stopped at "Primary contact". The stage order is the thing that
+ * actually distinguishes them.
+ */
 const formId = one(
   `SELECT fd.id FROM form_definitions fd
+     JOIN program_stages ps ON ps.id = fd.stage_id
     WHERE fd.kind='application' AND fd.status='published'
-    ORDER BY fd.version DESC LIMIT 1`, 'id');
+    ORDER BY ps.sort_order DESC, fd.version DESC LIMIT 1`, 'id');
 const stageId = one(`SELECT stage_id AS id FROM form_definitions WHERE id='${formId}'`, 'id');
 const programId = one(`SELECT program_id AS id FROM form_definitions WHERE id='${formId}'`, 'id');
 
@@ -184,9 +196,6 @@ const go = async (name) => {
 
 check('the applicant sees no staff preview banner', await page.locator('.banner').count(), 0);
 
-await go(/Eligibility/i);
-for (const cb of await page.locator('input[type="checkbox"]').all()) await cb.check();
-
 await go(/Primary contact/i);
 await page.fill('input[name="contact_first_name"]', 'Alex');
 await page.fill('input[name="contact_last_name"]', 'Moreno');
@@ -235,6 +244,17 @@ check('every required document attached',
 check('the browser sent no content-type on any upload',
   puts.map((p) => p.headers['content-type'] ?? null).filter(Boolean), []);
 check('every upload was a PUT', [...new Set(puts.map((p) => p.method))], ['PUT']);
+
+/*
+ * THE ATTESTATIONS, which is where the checkbox sweep belongs. It used to run
+ * against a section called "Eligibility" that exists on the eligibility screen
+ * and not on this form; here it ticks the 501(c)(3) confirmation, the
+ * guidelines attestation and the authority to submit -- all required, and all
+ * of which the review screen would otherwise list as outstanding.
+ */
+await go(/Before you submit/i);
+for (const cb of await page.locator('input[type="checkbox"]').all()) await cb.check();
+await page.waitForTimeout(600);
 
 await go(/Staying in touch/i);
 for (const cb of await page.locator('input[type="checkbox"]').all()) await cb.check();

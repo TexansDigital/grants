@@ -20,7 +20,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { ReactElement } from 'react';
 import { ApiError, api } from './api';
-import { formatCents } from '../../src/lib/money';
+import { formatCents, parseCurrencyToCents, MoneyParseError } from '../../src/lib/money';
 import { PaymentLedger } from './PaymentLedger';
 import type { ScoreSummary } from './api';
 
@@ -69,15 +69,21 @@ export function DecisionPanel({
   const [awardId, setAwardId] = useState<string | null>(existingAwardId);
 
   /*
-   * Dollars in, CENTS on the wire.
-   *
-   * The conversion happens once, here, at the display edge -- the same rule
-   * rubric weights follow. Math.round rather than a truncation: 25000.29 in
-   * binary floating point is 25000.289999..., and truncating would record an
-   * award one cent short of what somebody typed.
+   * NO LOCAL toCents. This used to be `Math.round(Number(dollars) * 100)`,
+   * which is the exact thing money.ts's header forbids -- "never
+   * `parseFloat(x) * 100`, which turns 25000.07 into 2500006.9999999995" --
+   * and it was sitting on an AWARD AMOUNT. parseCurrencyToCents does it with
+   * string arithmetic, refuses more than two decimal places and enforces
+   * MAX_CENTS, none of which the local version did.
    */
-  function toCents(dollars: string): number {
-    return Math.round(Number(dollars.replace(/[$,\s]/g, '')) * 100);
+  let awardCents: number | null = null;
+  let amountError: string | null = null;
+  if (amount.trim() !== '') {
+    try {
+      awardCents = parseCurrencyToCents(amount);
+    } catch (e) {
+      amountError = e instanceof MoneyParseError ? e.message : 'That is not an amount.';
+    }
   }
 
   async function createAward(): Promise<void> {
@@ -86,7 +92,7 @@ export function DecisionPanel({
     setFieldErrors([]);
     try {
       const result = await api.createAward(applicationId, {
-        awardedAmountCents: toCents(amount),
+        awardedAmountCents: awardCents!,
         announcementDate: announce ? new Date(`${announce}T12:00:00Z`).toISOString() : null,
         termStart: termStart ? new Date(`${termStart}T12:00:00Z`).toISOString() : null,
         termEnd: termEnd ? new Date(`${termEnd}T12:00:00Z`).toISOString() : null,
@@ -290,9 +296,22 @@ export function DecisionPanel({
                       inputMode="decimal"
                       placeholder="25,000"
                       value={amount}
+                      aria-invalid={amountError ? true : undefined}
+                      aria-describedby={amountError ? 'award-amount-error' : 'award-amount-reads'}
                       onChange={(e) => setAmount(e.target.value)}
                     />
                   </label>
+                  {amountError ? (
+                    <p id="award-amount-error" className="error" role="alert">
+                      {amountError}
+                    </p>
+                  ) : (
+                    <p id="award-amount-reads" className="meta">
+                      {awardCents === null
+                        ? '\u00a0'
+                        : `Reads as ${formatCents(awardCents, { withCents: true })}`}
+                    </p>
+                  )}
                   <label className="stack">
                     <span>Announcement date (when they may talk about it)</span>
                     <input
@@ -328,7 +347,7 @@ export function DecisionPanel({
                     <button
                       type="button"
                       className="btn"
-                      disabled={busy || amount.trim() === ''}
+                      disabled={busy || awardCents === null || amountError !== null}
                       onClick={() => void createAward()}
                     >
                       Record the award

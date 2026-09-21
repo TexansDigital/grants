@@ -172,7 +172,11 @@ export async function loadScoringSheet(
     totalSoFarBp: rows.reduce((t, c) => t + (c.score ?? 0) * c.weight_bp, 0),
     completedAt: a.completedAt,
     conflictDeclaredAt: a.conflictDeclaredAt,
-    editable: a.decidedAt === null && a.conflictDeclaredAt === null,
+    // `completedAt` belongs here too: a submitted review is not editable
+    // until it is reopened, and omitting it let the UI offer inputs the API
+    // now refuses.
+    editable:
+      a.decidedAt === null && a.conflictDeclaredAt === null && a.completedAt === null,
   };
 }
 
@@ -207,6 +211,23 @@ export async function saveScores(
   if (a.decidedAt) {
     throw new AppError('CONFLICT', 'This application has already been decided.', {
       internalMessage: `saveScores on decided application ${a.applicationId}`,
+      severity: 'warn',
+    });
+  }
+  if (a.completedAt) {
+    /*
+     * A SUBMITTED REVIEW CANNOT BE REWRITTEN WITHOUT REOPENING IT, and this
+     * check was missing.
+     *
+     * `reopenReview` and its `review.reopened` audit action existed and were
+     * decorative: a reviewer -- or an admin importing a scorecard -- could
+     * overwrite every score on a completed review, the total would change, and
+     * `completed_at` would still read as submitted. The audit trail would show
+     * scores saved after a completion with nothing marking the review as
+     * having been taken back.
+     */
+    throw new AppError('CONFLICT', 'This review has been submitted. Reopen it to change it.', {
+      internalMessage: `saveScores on completed assignment ${assignmentId}`,
       severity: 'warn',
     });
   }
@@ -525,7 +546,22 @@ export async function scoreSummary(
       `SELECT ra.id AS assignmentId, ra.reviewer_user_id AS reviewerUserId,
               u.email AS reviewerEmail, ra.completed_at AS completedAt,
               COALESCE(SUM(rs.score * rc.weight_bp), 0) AS totalBp,
-              COUNT(rs.id) AS scored
+              -- COUNT(rc.id), NOT COUNT(rs.id), so the count and the total
+              -- answer over the same set. A score whose criterion has been
+              -- soft-deleted keeps a live review_scores row, but its LEFT JOIN
+              -- to rubric_criteria yields NULL and SUM skips it -- counting
+              -- the score row anyway would read "6 of 5 criteria scored" next
+              -- to a total built from 5.
+              --
+              -- NOT REACHABLE TODAY, and said plainly rather than dressed up
+              -- as a bug fixed: 0006 freezes a published rubric's criteria
+              -- with triggers, publication is one way, and a cycle can only
+              -- use a published rubric -- so nothing in this system can
+              -- soft-delete a criterion that has scores against it. This is
+              -- the expression that stays correct if that freeze is ever
+              -- relaxed, which costs nothing now and is the kind of thing
+              -- nobody re-derives later.
+              COUNT(rc.id) AS scored
          FROM review_assignments ra
          JOIN users u ON u.id = ra.reviewer_user_id
          LEFT JOIN review_scores rs

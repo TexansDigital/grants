@@ -57,6 +57,17 @@ function formatTotal(bp: number): string {
   return (bp / WEIGHT_ONE_BP).toLocaleString('en-US', { maximumFractionDigits: 2 });
 }
 
+/** What the server holds, as editable rows. The baseline "unsaved" measures against. */
+function rowsFromDetail(detail: RubricDetail): DraftCriterion[] {
+  return detail.criteria.map((c) => ({
+    criterionKey: c.criterion_key,
+    label: c.label,
+    description: c.description ?? '',
+    weight: String(c.weight_bp / WEIGHT_ONE_BP),
+    maxScore: String(c.max_score),
+  }));
+}
+
 export function RubricBuilder({ programId, programName }: Props): ReactElement {
   const [rubrics, setRubrics] = useState<RubricRow[] | null>(null);
   const [open, setOpen] = useState<RubricDetail | null>(null);
@@ -102,15 +113,7 @@ export function RubricBuilder({ programId, programName }: Props): ReactElement {
     try {
       const detail = await api.rubric(id);
       setOpen(detail);
-      setRows(
-        detail.criteria.map((c) => ({
-          criterionKey: c.criterion_key,
-          label: c.label,
-          description: c.description ?? '',
-          weight: String(c.weight_bp / WEIGHT_ONE_BP),
-          maxScore: String(c.max_score),
-        })),
-      );
+      setRows(rowsFromDetail(detail));
     } catch (e) {
       setError(e instanceof ApiError ? e.message : String(e));
     }
@@ -181,6 +184,25 @@ export function RubricBuilder({ programId, programName }: Props): ReactElement {
 
   async function publish(): Promise<void> {
     if (!open) return;
+    /*
+     * UNSAVED WORK STOPS A PUBLISH, and this used to be silent.
+     *
+     * Publish posted straight to the API. An admin who changed a weight and
+     * reached for Publish -- the button right next to Save -- froze the
+     * rubric WITHOUT that change, permanently, with no way back but a new
+     * version, and nothing on screen said the edit had been dropped. This is
+     * the instrument a funding decision is made with; losing the last edit to
+     * it silently is the worst thing this screen could do.
+     *
+     * Refusing rather than saving for them: publish is the irreversible act,
+     * and quietly writing an edit somebody has not committed to on the way
+     * into a freeze is the same class of surprise in the other direction.
+     */
+    if (unsaved) {
+      setNotice(null);
+      setError('Save your changes first — publishing freezes the rubric as it is stored.');
+      return;
+    }
     // Publishing freezes it. Saying so before, not after, because the way back
     // is a new version rather than an undo.
     if (
@@ -228,6 +250,15 @@ export function RubricBuilder({ programId, programName }: Props): ReactElement {
   }
 
   const isDraft = open?.rubric.status === 'draft';
+  /*
+   * Does what is on screen differ from what the server holds? Compared as the
+   * strings the person typed rather than as parsed numbers, so "1.50" against
+   * a stored "1.5" counts as a change -- it saves identically, and telling
+   * somebody there is nothing to save while their cursor is in a field they
+   * just edited is worse than one redundant save.
+   */
+  const unsaved =
+    open !== null && JSON.stringify(rows) !== JSON.stringify(rowsFromDetail(open));
   const liveTotal = rows.reduce(
     (t, r) => t + (Number(r.maxScore) || 0) * (toBasisPoints(r.weight) || 0),
     0,
@@ -331,6 +362,15 @@ export function RubricBuilder({ programId, programName }: Props): ReactElement {
             )}
           </div>
 
+          {isDraft && unsaved && (
+            // Said before Publish is pressed, not only when it refuses. The
+            // two buttons sit side by side and the wrong one is one keystroke
+            // away.
+            <p className="meta strong" aria-live="polite">
+              You have changes that are not saved yet.
+            </p>
+          )}
+
           {!isDraft && (
             <p className="meta">
               This version is frozen. {open.cyclesUsing.length > 0
@@ -406,8 +446,13 @@ export function RubricBuilder({ programId, programName }: Props): ReactElement {
                       <span className="meta">{r.criterionKey}</span>
                     </td>
                     <td className="num">
+                      {/* The column header names it for somebody reading the
+                          table; a form control still needs its own name for
+                          somebody moving between fields, where the header is
+                          not announced. */}
                       <input
                         id={`crit-max-${i}`}
+                        aria-label={`Maximum score for ${r.label || `criterion ${i + 1}`}`}
                         type="number"
                         min={1}
                         max={100}
@@ -420,6 +465,7 @@ export function RubricBuilder({ programId, programName }: Props): ReactElement {
                     <td className="num">
                       <input
                         id={`crit-weight-${i}`}
+                        aria-label={`Weight for ${r.label || `criterion ${i + 1}`}`}
                         type="number"
                         min={0}
                         step="0.05"
@@ -432,7 +478,7 @@ export function RubricBuilder({ programId, programName }: Props): ReactElement {
                       {formatTotal((Number(r.maxScore) || 0) * (toBasisPoints(r.weight) || 0))}
                     </td>
                     {isDraft && (
-                      <td className="actions">
+                      <td className="row-actions">
                         <button
                           type="button"
                           className="btn secondary small"

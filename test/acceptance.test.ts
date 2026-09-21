@@ -26,6 +26,7 @@ import { createAwardFromDecision, budgetByProgram } from '../src/lib/awards';
 import {
   awardsAwaitingResponse, acceptAward, declineAward, recordAwardDocument,
 } from '../src/lib/acceptance';
+import { schedulePayment, recordPayment } from '../src/lib/payments';
 import type { Session } from '../src/types';
 
 const ATTESTATION =
@@ -313,6 +314,59 @@ describe('refusing', () => {
         .bind(nowIso(), s.awardId)
         .run(),
     ).rejects.toThrow();
+  });
+});
+
+describe('a refused award takes its payments with it', () => {
+  it('cancels every scheduled payment, so none stays on a finance list', async () => {
+    /*
+     * THE BUG THIS CLOSES, reproduced by an adversarial review and not by this
+     * suite. A refusal set the award to `cancelled` and touched nothing else.
+     * Its payments stayed `scheduled` -- still in payments_due_idx, so still
+     * on whatever list finance works from -- more could be scheduled against
+     * the refused award, and one could be marked PAID. The dashboard then
+     * showed money disbursed against nothing committed.
+     */
+    const s = await offered();
+    const p = await schedulePayment(db, ctx(), admin, s.awardId, {
+      amountCents: 1_000_000,
+      scheduledDate: new Date(Date.now() + 5 * 86_400_000).toISOString(),
+    });
+
+    await declineAward(db, ctx(), s.grantee, s.awardId, 'We lost the matching funder.');
+
+    const row = await db
+      .prepare(`SELECT status, note FROM payments WHERE id = ?`)
+      .bind(p.id)
+      .first<{ status: string; note: string }>();
+    expect(row?.status).toBe('cancelled');
+    expect(row?.note).toMatch(/did not accept/i);
+
+    // Cancelled, not deleted: "we scheduled this and then did not pay it" is a
+    // question somebody asks.
+    const still = await db
+      .prepare(`SELECT COUNT(*) AS n FROM payments WHERE id = ?`)
+      .bind(p.id)
+      .first<{ n: number }>();
+    expect(still?.n).toBe(1);
+  });
+
+  it('leaves nothing payable behind it', async () => {
+    const s = await offered();
+    const p = await schedulePayment(db, ctx(), admin, s.awardId, {
+      amountCents: 500_000,
+      scheduledDate: new Date(Date.now() + 5 * 86_400_000).toISOString(),
+    });
+    await declineAward(db, ctx(), s.grantee, s.awardId, 'Not able to deliver it.');
+
+    // The cancelled payment cannot now be recorded as paid.
+    expect(
+      (await appErrorFrom(
+        recordPayment(db, ctx(), admin, p.id, {
+          paidDate: nowIso(), referenceNumber: 'CHQ-1',
+        }),
+      )).code,
+    ).toBe('CONFLICT');
   });
 });
 

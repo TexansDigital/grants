@@ -113,6 +113,50 @@ describe('scheduling', () => {
     expect((await awardLedger(db, admin, a.awardId)).scheduledCents).toBe(800_000);
   });
 
+  it('holds the ceiling in SQL, not only in the read before it', async () => {
+    /*
+     * THE RACE THIS CLOSES, reproduced by an adversarial review and not by
+     * this suite. `awardLedger` is read, the sum is compared in JavaScript,
+     * and the INSERT runs after an await. Two admins scheduling at the same
+     * moment both passed: a $10,000 award ended with two $9,000 instalments,
+     * an unscheduledCents of minus $8,000, and a payment run that would pay a
+     * grantee $18,000.
+     *
+     * Simulated here by calling both WITHOUT awaiting in between, which is the
+     * same interleaving the two requests produce.
+     */
+    const a = await awarded(1_000_000);
+    const results = await Promise.allSettled([
+      schedulePayment(db, ctx(), admin, a.awardId, {
+        amountCents: 900_000, scheduledDate: day(10),
+      }),
+      schedulePayment(db, ctx(), admin, a.awardId, {
+        amountCents: 900_000, scheduledDate: day(20),
+      }),
+    ]);
+
+    const ok = results.filter((r) => r.status === 'fulfilled');
+    expect(ok.length, 'exactly one instalment should land').toBe(1);
+
+    const ledger = await awardLedger(db, admin, a.awardId);
+    expect(ledger.scheduledCents).toBe(900_000);
+    // The number the module promises: never negative, because the award is
+    // never over-scheduled.
+    expect(ledger.unscheduledCents).toBeGreaterThanOrEqual(0);
+
+    // And the loser wrote no audit row, so the log does not claim a payment
+    // that does not exist.
+    const audited = await db
+      .prepare(
+        `SELECT COUNT(*) AS n FROM audit_log al
+           JOIN payments p ON p.id = al.entity_id
+          WHERE al.action = 'payment.scheduled' AND p.award_id = ?`,
+      )
+      .bind(a.awardId)
+      .first<{ n: number }>();
+    expect(audited?.n).toBe(1);
+  });
+
   it('refuses a float, a zero and a date it cannot read', async () => {
     const a = await awarded();
     for (const cents of [2500.5, 0, -100]) {

@@ -33,6 +33,18 @@ export function Retention({ isAdmin }: Props): ReactElement {
   const [error, setError] = useState<ApiError | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  /*
+   * FAILURES DO NOT GO IN `notice`. They used to, and `notice` renders as a
+   * plain `role="status"` banner -- so "That file could not be deleted."
+   * arrived looking exactly like "...has been deleted.", in the same grey box,
+   * announced politely. On the one screen in this system that destroys
+   * financial documents. CLAUDE.md: "No false green lights."
+   *
+   * `error` above is the load failure and returns early; this is the failure
+   * of an action taken on a screen that is already rendered, which has to be
+   * shown alongside the list rather than instead of it.
+   */
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const load = useCallback(async (signal?: AbortSignal) => {
     try {
@@ -53,6 +65,7 @@ export function Retention({ isAdmin }: Props): ReactElement {
   async function download(id: string): Promise<void> {
     setBusy(id);
     setNotice(null);
+    setActionError(null);
     try {
       const grant = await api.downloadUrl(id);
       window.location.assign(grant.url);
@@ -60,7 +73,7 @@ export function Retention({ isAdmin }: Props): ReactElement {
       // the nightly notice, so the screen should stop showing it as unread.
       await load();
     } catch (e) {
-      setNotice(e instanceof ApiError ? e.message : 'That file could not be opened.');
+      setActionError(e instanceof ApiError ? e.message : 'That file could not be opened.');
     } finally {
       setBusy(null);
     }
@@ -73,13 +86,14 @@ export function Retention({ isAdmin }: Props): ReactElement {
     if (reason === null) return;
     setBusy(id);
     setNotice(null);
+    setActionError(null);
     try {
       const until = new Date(Date.now() + HOLD_DAYS * 86_400_000).toISOString();
       await api.holdAttachment(id, until, reason);
       setNotice(`${filename} will be kept for another ${HOLD_DAYS} days.`);
       await load();
     } catch (e) {
-      setNotice(e instanceof ApiError ? e.message : 'That file could not be held.');
+      setActionError(e instanceof ApiError ? e.message : 'That file could not be held.');
     } finally {
       setBusy(null);
     }
@@ -92,12 +106,13 @@ export function Retention({ isAdmin }: Props): ReactElement {
     if (reason === null) return;
     setBusy(id);
     setNotice(null);
+    setActionError(null);
     try {
       await api.purgeAttachment(id, reason);
       setNotice(`${filename} has been deleted.`);
       await load();
     } catch (e) {
-      setNotice(e instanceof ApiError ? e.message : 'That file could not be deleted.');
+      setActionError(e instanceof ApiError ? e.message : 'That file could not be deleted.');
     } finally {
       setBusy(null);
     }
@@ -144,6 +159,11 @@ export function Retention({ isAdmin }: Props): ReactElement {
           application is decided. An application with a pending or active award is not on a clock
           at all &mdash; the itemized budget is what the award was made against.
         </p>
+        {actionError && (
+          <p className="banner danger" role="alert">
+            {actionError}
+          </p>
+        )}
         {notice && (
           <p className="banner" role="status">
             {notice}
@@ -193,7 +213,7 @@ export function Retention({ isAdmin }: Props): ReactElement {
                         {f.download_url_first_issued_at ? 'Yes' : <strong>No</strong>}
                       </td>
                       {isAdmin && (
-                        <td className="actions">
+                        <td className="row-actions">
                           <button
                             type="button"
                             className="btn secondary small"

@@ -26,7 +26,7 @@ import { newId } from '../src/lib/ids';
 import { nowIso } from '../src/lib/time';
 import { createRubric, replaceCriteria, publishRubric, attachRubricToCycle, newDraftFrom } from '../src/lib/rubrics';
 import { assignReviewer, declareConflict, recuse } from '../src/lib/reviewAssign';
-import { loadScoringSheet, saveScores } from '../src/lib/scoring';
+import { loadScoringSheet, saveScores, completeReview } from '../src/lib/scoring';
 import { decideApplication } from '../src/lib/decisions';
 import { exportScorecard, planScorecardImport, applyScorecardImport } from '../src/lib/scorecards';
 import type { Session } from '../src/types';
@@ -390,6 +390,36 @@ describe('applying a clean file', () => {
     expect(second.assignments.every((a) => a.scored === 0 && a.unchanged > 0)).toBe(true);
   });
 
+  it('applies the number the preview promised, not every cell in the file', async () => {
+    /*
+     * THE BUG THIS PREVENTS. `applied` was the sum of what saveScores reported
+     * saving, which is every cell sent -- including the ones the plan had
+     * already worked out were identical to what was there. So the preview said
+     * "8 scores to import", the confirmation afterwards said "23 applied", and
+     * the two numbers describing the same file disagreed by the number of
+     * unchanged rows. Somebody reconciling a consultant's scorecard against
+     * what landed has to assume one of them is wrong, and the larger one reads
+     * like a mistake was made with their reviewer's scores.
+     */
+    const s = await cycleWithReviewer();
+    const first = fill((await exportScorecard(db, admin, s.cycleId, s.reviewerId)).csv, '4');
+    await applyScorecardImport(db, ctx(), admin, s.cycleId, first);
+
+    // Re-export so the file carries what is now stored, then change exactly
+    // one cell. Every other row in it is unchanged.
+    const exported = (await exportScorecard(db, admin, s.cycleId, s.reviewerId)).csv;
+    const scoreAt = exported.trim().split(/\r?\n/)[0]!.split(',').indexOf('score');
+    const second = fill(exported, (cells) =>
+      cells[6] === 'capacity' ? '2' : cells[scoreAt]!,
+    );
+    const plan = await planScorecardImport(db, admin, s.cycleId, second);
+    expect(plan.totalScores).toBeGreaterThan(0);
+
+    const result = await applyScorecardImport(db, ctx(), admin, s.cycleId, second);
+    expect(result.applied).toBe(plan.totalScores);
+    expect(result.applied).toBe(result.plan.totalScores);
+  });
+
   it('treats an emptied score cell as cleared, not as zero', async () => {
     // The same rule as the in-app sheet. Zero is a judgement; blank is the
     // absence of one, and a scorecard returned with one cell blank must not
@@ -427,6 +457,32 @@ describe('applying a clean file', () => {
 
     const sheet = await loadScoringSheet(db, s.reviewer, s.apps[0]!.assignmentId);
     expect(sheet.criteria.every((c) => c.score === null)).toBe(true);
+  });
+
+  it('refuses to overwrite a review the reviewer has already submitted', async () => {
+    /*
+     * THE SAME HOLE, BY THE OTHER DOOR. The import writes through saveScores,
+     * so an admin uploading a CSV could silently replace a consultant's
+     * submitted scores and the review would still read as completed. Fixing
+     * saveScores closed both; this is the test that says so for the import
+     * path, which is the one somebody would not think to check.
+     */
+    const s = await cycleWithReviewer();
+    const csv = fill((await exportScorecard(db, admin, s.cycleId, s.reviewerId)).csv, '4');
+    const ids = (await loadScoringSheet(db, s.reviewer, s.apps[0]!.assignmentId)).criteria;
+    for (const c of ids) {
+      await saveScores(db, ctx(), s.reviewer, s.apps[0]!.assignmentId, [
+        { criterionId: c.id, score: 1 },
+      ]);
+    }
+    await completeReview(db, ctx(), s.reviewer, s.apps[0]!.assignmentId);
+
+    const err = await appErrorFrom(applyScorecardImport(db, ctx(), admin, s.cycleId, csv));
+    expect(err.code).toBe('VALIDATION_FAILED');
+
+    // The submitted scores are untouched.
+    const sheet = await loadScoringSheet(db, s.reviewer, s.apps[0]!.assignmentId);
+    expect(sheet.criteria.map((c) => c.score)).toEqual([1, 1, 1]);
   });
 
   it('re-checks at apply time rather than trusting the preview', async () => {

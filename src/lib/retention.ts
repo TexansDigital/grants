@@ -138,6 +138,8 @@ export interface DueFile {
   application_id: string;
   effective_due_at: string;
   download_url_first_issued_at: string | null;
+  /** When this file was last named in a notice. Null means never. */
+  retention_notice_sent_at: string | null;
 }
 
 /**
@@ -158,6 +160,7 @@ export async function filesDueWithin(
   const { results } = await db
     .prepare(
       `SELECT a.id, a.filename, a.download_url_first_issued_at,
+              a.retention_notice_sent_at,
               ${EFFECTIVE_DUE} AS effective_due_at,
               app.id AS application_id, app.project_title,
               o.legal_name AS organization_name
@@ -273,7 +276,17 @@ export interface RetentionRun {
  * The Foundation's rule: one heads-up a month out, then EVERY DAY through the
  * last week until the file has been asked for. So a notice is warranted when
  * anything not yet retrieved is inside the daily window, or when something
- * crosses the horizon today.
+ * inside the horizon has never been warned about at all.
+ *
+ * THE HEADS-UP USED TO BE A CLOCK CALCULATION AND IS NOW A FACT ABOUT THE
+ * FILE. It fired only for files whose deletion date fell between 29 and 30
+ * days from the exact instant the run began -- a one-day slice that is
+ * contiguous with the previous night's only if the cron fires at precisely the
+ * same moment every night. A missed run, a late retry, or an admin releasing a
+ * hold that drops a date into the middle of the slice skipped the warning
+ * outright, and skipped it silently. `retention_notice_sent_at` (0022) records
+ * whether the file has ever been named, so a missed night delays the heads-up
+ * by a night instead of losing it.
  *
  * Nothing not yet retrieved means no notice. A daily email that is empty
  * teaches the recipient to filter it, and the one that matters arrives after
@@ -285,14 +298,9 @@ export function noticeIsDue(files: DueFile[], nowMs: number): DueFile[] {
   if (outstanding.length === 0) return [];
   const urgent = outstanding.some((f) => Date.parse(f.effective_due_at) <= cutoff);
   // Outside the last week, one notice a day would be thirty of them. The
-  // month-out heads-up is the day a file first enters the horizon.
-  const arrivingToday = outstanding.some(
-    (f) =>
-      Date.parse(f.effective_due_at) > cutoff &&
-      Date.parse(f.effective_due_at) <= nowMs + WARN_HORIZON_DAYS * 86_400_000 &&
-      Date.parse(f.effective_due_at) > nowMs + (WARN_HORIZON_DAYS - 1) * 86_400_000,
-  );
-  return urgent || arrivingToday ? outstanding : [];
+  // month-out heads-up is the first night a file is seen inside the horizon.
+  const neverWarned = outstanding.some((f) => f.retention_notice_sent_at === null);
+  return urgent || neverWarned ? outstanding : [];
 }
 
 /**
@@ -340,6 +348,18 @@ export async function runRetention(
   let noticesRecorded = 0;
   if (outstanding.length > 0) {
     noticesRecorded = await sendRetentionNotices(env, ctx, outstanding, now);
+    /*
+     * STAMPED ONLY IF A NOTICE ROW WAS ACTUALLY WRITTEN. A database with no
+     * active admin records nothing and sends nothing; stamping anyway would
+     * mark every one of those files as warned about, and the first admin
+     * account created afterwards would never receive the heads-up for any of
+     * them. `sendRetentionNotices` counts a suppressed message as recorded on
+     * purpose -- a staging environment with no provider key has still written
+     * down that the notice was due.
+     */
+    if (noticesRecorded > 0) {
+      await stampNoticed(env.DB, outstanding.map((f) => f.id), nowStr);
+    }
   }
 
   return {
@@ -417,6 +437,34 @@ async function sendRetentionNotices(
   return sent;
 }
 
+/**
+ * Write down that these files have been named in a notice.
+ *
+ * NO AUDIT ROW. CLAUDE.md requires one for "every status, score, decision,
+ * award and payment write"; this is none of those. It is the notice's own
+ * bookkeeping, and the notice itself is already a message row with an
+ * idempotency key. An audit entry per file per night would bury the rows that
+ * matter -- the holds and the destructions -- under thirty times their number.
+ *
+ * CHUNKED, because the horizon can hold a whole cycle's uploads and a single
+ * statement with several hundred bound parameters is a limit nobody wants to
+ * discover on the one night it matters.
+ */
+async function stampNoticed(db: D1Database, ids: string[], nowIsoStr: string): Promise<void> {
+  const CHUNK = 50;
+  for (let i = 0; i < ids.length; i += CHUNK) {
+    const slice = ids.slice(i, i + CHUNK);
+    await db
+      .prepare(
+        `UPDATE attachments SET retention_notice_sent_at = ?
+          WHERE id IN (${slice.map(() => '?').join(',')})
+            AND purged_at IS NULL AND deleted_at IS NULL`,
+      )
+      .bind(nowIsoStr, ...slice)
+      .run();
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Admin actions
 // ---------------------------------------------------------------------------
@@ -482,7 +530,13 @@ export async function holdAttachment(
       .prepare(
         `UPDATE attachments
             SET retention_hold_until = ?, retention_reason = ?,
-                retention_set_by = ?, retention_set_at = ?
+                retention_set_by = ?, retention_set_at = ?,
+                -- A HOLD EARNS A FRESH HEADS-UP. The file leaves the horizon
+                -- and will come back into it weeks later; without clearing
+                -- this it would re-enter already marked as warned about, and
+                -- the only notice it ever got would be the one from before the
+                -- extension, about a date that no longer applies.
+                retention_notice_sent_at = NULL
           WHERE id = ? AND deleted_at IS NULL AND purged_at IS NULL`,
       )
       .bind(holdUntil, trimmed, session.userId, now, attachmentId),

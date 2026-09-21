@@ -40,6 +40,19 @@ export function ScoringSheet({ assignmentId, onBack }: Props): ReactElement {
   const [busy, setBusy] = useState(false);
   /** Local edits, so a slow save never fights the person typing. */
   const [draft, setDraft] = useState<Record<string, { score: string; comment: string }>>({});
+  /*
+   * SAVE STATE PER CRITERION, not only at the bottom of the page.
+   *
+   * Autosave's whole promise is "nothing is lost", and a reviewer can only
+   * believe that if they can see it happen. The single "Saved at 14:02" line
+   * lives under the total, which on a twelve-criterion rubric is several
+   * screens below the field somebody just left -- so the confirmation for a
+   * save was, in practice, invisible at the moment it mattered. The same is
+   * true of a refusal: a score of 11 on a criterion out of 10 was reported in
+   * a banner at the top of the page, nowhere near the box holding the 11.
+   */
+  const [savedAt, setSavedAt] = useState<Record<string, string>>({});
+  const [saveErrors, setSaveErrors] = useState<Record<string, string>>({});
 
   const load = useCallback(
     async (signal?: AbortSignal) => {
@@ -86,7 +99,15 @@ export function ScoringSheet({ assignmentId, onBack }: Props): ReactElement {
           comment: d.comment.trim() || null,
         },
       ]);
-      setSaved(new Date().toLocaleTimeString('en-US'));
+      const at = new Date().toLocaleTimeString('en-US');
+      setSaved(at);
+      setSavedAt((prev) => ({ ...prev, [criterionId]: at }));
+      setSaveErrors((prev) => {
+        if (!(criterionId in prev)) return prev;
+        const next = { ...prev };
+        delete next[criterionId];
+        return next;
+      });
       setSheet((prev) =>
         prev
           ? {
@@ -101,7 +122,16 @@ export function ScoringSheet({ assignmentId, onBack }: Props): ReactElement {
           : prev,
       );
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : String(e));
+      const message = e instanceof ApiError ? e.message : String(e);
+      // Against the field, not in a banner at the top of the page. The reason
+      // a save was refused is nearly always about the number in one box.
+      setSaveErrors((prev) => ({ ...prev, [criterionId]: message }));
+      setSavedAt((prev) => {
+        if (!(criterionId in prev)) return prev;
+        const next = { ...prev };
+        delete next[criterionId];
+        return next;
+      });
     }
   }
 
@@ -244,6 +274,17 @@ export function ScoringSheet({ assignmentId, onBack }: Props): ReactElement {
                 {formatScore(c.max_score * c.weight_bp)}
               </span>
             </div>
+            {saveErrors[c.id] ? (
+              <p className="error" role="alert">
+                {saveErrors[c.id]}
+              </p>
+            ) : (
+              savedAt[c.id] && (
+                <p className="meta" aria-live="polite">
+                  Saved at {savedAt[c.id]}.
+                </p>
+              )
+            )}
             <label className="stack">
               <span>Comment</span>
               <textarea

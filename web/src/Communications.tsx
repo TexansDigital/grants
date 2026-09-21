@@ -254,7 +254,7 @@ export function Communications({ cycleId, onBack }: Props): ReactElement {
                         ? new Date(r.announcementDate).toLocaleDateString('en-US')
                         : '—'}
                     </td>
-                    <td className="actions">
+                    <td className="row-actions">
                       <button
                         type="button"
                         className="btn small"
@@ -289,7 +289,16 @@ export function Communications({ cycleId, onBack }: Props): ReactElement {
       <section className="panel">
         <h3>Declines to send ({queue.declines.length})</h3>
         {!queue.declinesUnlocked && (
-          <p className="banner danger" role="alert">
+          /*
+           * A STANDING RULE, NOT AN ALERT. This used to be `banner danger` with
+           * role="alert" -- red, and announced assertively the moment the page
+           * loaded, interrupting whatever a screen-reader user was reading. But
+           * nothing has gone wrong here: the sequencing is working exactly as
+           * designed, and the note explains why the buttons below are off.
+           * CLAUDE.md reserves Battle Red for "highest-priority accents and
+           * alerts only", and an ordinary rule being followed is neither.
+           */
+          <p className="banner">
             {/* The reason, in words. A greyed-out button nobody can account for
                 is how somebody works around a rule they do not understand. */}
             {queue.awards.length} award letter{queue.awards.length === 1 ? '' : 's'} in this cycle

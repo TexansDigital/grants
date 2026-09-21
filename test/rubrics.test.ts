@@ -28,6 +28,8 @@ import {
   validateCriteria,
   WEIGHT_ONE_BP,
   MAX_CRITERION_SCORE,
+  MAX_WEIGHT_BP,
+  MAX_CRITERIA,
   type CriterionInput,
 } from '../src/lib/rubrics';
 import type { Session } from '../src/types';
@@ -109,6 +111,34 @@ describe('weights are integers, and stay integers', () => {
       ]);
       expect(problems.some((p) => p.field === 'criteria[0].maxScore'), `maxScore ${bad}`).toBe(true);
     }
+  });
+
+  it('refuses a weight above the ceiling, not just a negative one', async () => {
+    /*
+     * THE BUG THIS PREVENTS. The floor was checked and the ceiling was not, so
+     * a weight of Number.MAX_SAFE_INTEGER validated cleanly. Every weighted
+     * total in the system is SUM(score * weight_bp) computed in SQLite, and a
+     * product past safe-integer range stops being exact -- which is the whole
+     * reason weights are integers rather than floats. The bound is generous:
+     * 40 criteria at max score 100 and weight 100 apiece tops out four orders
+     * of magnitude inside the safe range.
+     */
+    for (const bad of [MAX_WEIGHT_BP + 1, Number.MAX_SAFE_INTEGER]) {
+      const problems = validateCriteria([
+        { criterionKey: 'a', label: 'A', weightBp: bad, maxScore: 10 },
+      ]);
+      expect(problems.some((p) => p.field === 'criteria[0].weightBp'), `weight ${bad}`).toBe(true);
+    }
+    // And the ceiling itself is allowed, so the bound is not off by one.
+    expect(
+      validateCriteria([{ criterionKey: 'a', label: 'A', weightBp: MAX_WEIGHT_BP, maxScore: 10 }]),
+    ).toEqual([]);
+  });
+
+  it('keeps the worst legal rubric inside safe-integer range', async () => {
+    // The point of the ceiling, stated as arithmetic rather than as a promise.
+    const worst = MAX_CRITERIA * MAX_CRITERION_SCORE * MAX_WEIGHT_BP;
+    expect(Number.isSafeInteger(worst)).toBe(true);
   });
 
   it('refuses a rubric where every weight is zero', async () => {
@@ -273,6 +303,37 @@ describe('publishing freezes it', () => {
       CRITERIA.map((c) => c.criterionKey).sort(),
     );
     expect(detail.rubric.status).toBe('draft');
+  });
+
+  it('will not let a criterion with scores against it be soft-deleted', async () => {
+    /*
+     * WHY THIS IS TESTED HERE rather than in the summary. `scoreSummary`
+     * counts a reviewer's progress with COUNT(rc.id), joined to live criteria,
+     * so the count and the weighted total always answer over the same set --
+     * but the reason that never diverges in practice is this freeze, not the
+     * SQL. Publication is one way, a published rubric's criteria cannot be
+     * touched, and a cycle can only use a published rubric. Three rules, and
+     * removing any one of them puts scores against a criterion that no longer
+     * exists.
+     */
+    const { rubricId } = await draftWithCriteria();
+    await publishRubric(db, ctx(), admin, rubricId);
+
+    const criterion = await db
+      .prepare(`SELECT id FROM rubric_criteria WHERE rubric_id = ? LIMIT 1`)
+      .bind(rubricId)
+      .first<{ id: string }>();
+    await expect(
+      db
+        .prepare(`UPDATE rubric_criteria SET deleted_at = ? WHERE id = ?`)
+        .bind(nowIso(), criterion!.id)
+        .run(),
+    ).rejects.toThrow(/not draft/);
+
+    // ...and the rubric cannot be walked back to draft to get around it.
+    await expect(
+      db.prepare(`UPDATE rubrics SET status = 'draft' WHERE id = ?`).bind(rubricId).run(),
+    ).rejects.toThrow(/cannot return to draft/);
   });
 
   it('refuses to publish twice', async () => {

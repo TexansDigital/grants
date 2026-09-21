@@ -375,6 +375,39 @@ describe('submitting a review', () => {
       .toBe('CONFLICT');
   });
 
+  it('refuses to rewrite a submitted review without reopening it', async () => {
+    /*
+     * THE HOLE THIS CLOSES, found by an adversarial review and not by this
+     * suite. `saveScores` checked `decidedAt` and `conflictDeclaredAt` and
+     * never `completedAt`, so a reviewer -- or an admin importing a scorecard
+     * -- could overwrite every score on a submitted review. The total changed,
+     * `completed_at` still read as submitted, and `reopenReview` and its
+     * `review.reopened` audit action were decorative.
+     */
+    const s = await scored();
+    const ids = await idsOf(s.assignmentId, s.reviewer);
+    for (const [i, score] of [9, 8, 4].entries()) {
+      await saveScores(db, ctx(), s.reviewer, s.assignmentId, [{ criterionId: ids[i]!, score }]);
+    }
+    await completeReview(db, ctx(), s.reviewer, s.assignmentId);
+
+    const err = await appErrorFrom(
+      saveScores(db, ctx(), s.reviewer, s.assignmentId, [{ criterionId: ids[0]!, score: 0 }]),
+    );
+    expect(err.code).toBe('CONFLICT');
+    expect(err.publicMessage).toMatch(/Reopen it/i);
+
+    // Unchanged, and the sheet says it cannot be edited.
+    const sheet = await loadScoringSheet(db, s.reviewer, s.assignmentId);
+    expect(sheet.totalSoFarBp).toBe(470_000);
+    expect(sheet.editable).toBe(false);
+
+    // And reopening is the way through, which is what makes it not decorative.
+    await reopenReview(db, ctx(), s.reviewer, s.assignmentId);
+    await saveScores(db, ctx(), s.reviewer, s.assignmentId, [{ criterionId: ids[0]!, score: 0 }]);
+    expect((await loadScoringSheet(db, s.reviewer, s.assignmentId)).totalSoFarBp).toBe(200_000);
+  });
+
   it('lets a reviewer reopen their own, until a decision is made', async () => {
     const s = await scored();
     const ids = await idsOf(s.assignmentId, s.reviewer);

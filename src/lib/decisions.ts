@@ -117,8 +117,25 @@ export async function decideApplication(
     });
   }
 
+  /*
+   * THE CHECK ABOVE IS A READ, AND THE WRITE BELOW IS WHAT DECIDES.
+   *
+   * Two admins working the same list at the same moment both pass the
+   * `app.decidedAt` check, then both reach here. The UPDATE is guarded on
+   * `decided_at IS NULL` so only one lands -- but before this change the audit
+   * INSERT was unguarded and the function returned success either way. The
+   * loser got a 200 saying their decline was recorded, the row said awarded by
+   * somebody else, the audit log carried two `application.decided` rows, and
+   * the decline notes were nowhere. Reproduced by an adversarial review, not
+   * by this suite.
+   *
+   * So: the audit row is now conditional on the state the UPDATE created, and
+   * `meta.changes` decides what this function returns. `db.batch` is atomic,
+   * and atomicity does not help when statement one matches zero rows and
+   * statement two is unconditional.
+   */
   const now = nowIso();
-  await db.batch([
+  const [write] = await db.batch([
     db
       .prepare(
         `UPDATE applications
@@ -126,22 +143,42 @@ export async function decideApplication(
           WHERE id = ? AND decided_at IS NULL AND deleted_at IS NULL`,
       )
       .bind(input.status, now, session.userId, notes, now, applicationId),
-    auditStatement(db, ctx, {
-      action: 'application.decided',
-      entityType: 'application',
-      entityId: applicationId,
-      before: { status: app.status, decided_at: null },
-      after: {
-        status: input.status,
-        decided_at: now,
-        decided_by: session.userId,
-        // The rationale IS recorded here, deliberately. audit_log is internal
-        // and append-only; decision_notes on the row can in principle be
-        // edited, and the reason a nonprofit was declined should survive that.
-        decision_notes: notes,
+    auditStatement(
+      db,
+      ctx,
+      {
+        action: 'application.decided',
+        entityType: 'application',
+        entityId: applicationId,
+        before: { status: app.status, decided_at: null },
+        after: {
+          status: input.status,
+          decided_at: now,
+          decided_by: session.userId,
+          // The rationale IS recorded here, deliberately. audit_log is
+          // internal and append-only; decision_notes on the row can in
+          // principle be edited, and the reason a nonprofit was declined
+          // should survive that.
+          decision_notes: notes,
+        },
       },
-    }),
+      {
+        // Matches only if OUR update is the one that landed.
+        guard: {
+          sql: `EXISTS (SELECT 1 FROM applications
+                         WHERE id = ? AND decided_at = ? AND decided_by = ?)`,
+          binds: [applicationId, now, session.userId],
+        },
+      },
+    ),
   ]);
+
+  if ((write?.meta?.changes ?? 0) === 0) {
+    throw new AppError('CONFLICT', 'Somebody else decided this application first.', {
+      internalMessage: `decideApplication lost a race on ${applicationId}`,
+      severity: 'warn',
+    });
+  }
 
   return { applicationId, status: input.status, decidedAt: now, decidedBy: session.userId };
 }

@@ -326,7 +326,27 @@ async function main() {
     await page.locator('#score-c1').fill('9');
     await page.locator('#comment-c1').fill('Clearly evidenced.');
     await page.locator('#comment-c1').blur();
-    await page.getByText('Saved at').waitFor();
+    /*
+     * THE CONFIRMATION HAS TO BE WHERE THE PERSON IS LOOKING.
+     *
+     * There is a "Saved at" under the running total as well, but on a rubric
+     * with a dozen criteria that line is several screens below the box the
+     * reviewer just left -- so the proof that autosave worked was, in
+     * practice, invisible at the moment it mattered. This waits for the one
+     * INSIDE criterion one's own section.
+     */
+    const firstSection = page.locator('.review-section').first();
+    await firstSection.getByText('Saved at').waitFor();
+    check(
+      'the criterion just left says so itself, not only the page footer',
+      (await firstSection.getByText('Saved at').count()) >= 1,
+      true,
+    );
+    check(
+      'and the criteria nobody has touched say nothing',
+      await page.locator('.review-section').nth(2).getByText('Saved at').count(),
+      0,
+    );
 
     await page.locator('#score-c2').fill('8');
     await page.locator('#score-c2').blur();

@@ -27,8 +27,12 @@
  * WHAT IT DOES NOT PROVE, and must not be reported as proving:
  *   - No email is delivered. Local dev has no RESEND_API_KEY, so every send is
  *     recorded as 'suppressed'. This checks what the PAGE does, not the mail.
- *   - Nothing about Turnstile. No site key is configured locally, so no widget
- *     renders here. If one is ever configured, this page must be re-driven.
+ *   - Nothing about Turnstile. A site key IS configured now, so the page does
+ *     try to load the widget -- but whether it actually renders and returns a
+ *     token has to be seen on a deployed environment with real network access
+ *     to challenges.cloudflare.com. What this file can and does check is that
+ *     the page works with no token in hand; the CSP that lets the widget load
+ *     at all is asserted in test/csp.test.ts.
  *   - It is not an accessibility test. Correct markup is not a screen reader.
  *
  * PREREQUISITES: `npm run build:web`, a migrated local database, and:

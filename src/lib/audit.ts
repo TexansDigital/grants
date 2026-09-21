@@ -102,6 +102,9 @@ export type AuditAction =
   | 'award.accepted'
   | 'payment.scheduled'
   | 'payment.recorded'
+  // Its own action, not payment.recorded. "What did finance pay" is the
+  // obvious audit query and it must not return cancellations.
+  | 'payment.cancelled'
   // reporting
   | 'report_period.created'
   // generated in bulk from an award term, rather than created one at a time

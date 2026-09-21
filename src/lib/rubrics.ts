@@ -50,6 +50,21 @@ export const MAX_CRITERION_SCORE = 100;
 /** Enough for any rubric a human will actually read in one sitting. */
 export const MAX_CRITERIA = 40;
 
+/**
+ * A ceiling on a single weight: 1,000,000 basis points, a weight of 100.
+ *
+ * WHY THERE HAS TO BE ONE. The floor was checked and the ceiling was not, so a
+ * weight of Number.MAX_SAFE_INTEGER validated cleanly. Every weighted total in
+ * the system is `SUM(score * weight_bp)` computed in SQLite, and once that
+ * product leaves safe-integer range the sums stop being exact -- which is the
+ * whole reason weights are integers in the first place. The bound is generous
+ * on purpose: 40 criteria at a max score of 100 and a weight of 100 apiece
+ * tops out at 400,000,000 score-basis-points, four orders of magnitude inside
+ * the safe range, so no legitimate rubric can reach it and no rubric can
+ * silently leave it.
+ */
+export const MAX_WEIGHT_BP = 1_000_000;
+
 export interface CriterionInput {
   /** Stable within the rubric. Carried across versions so trends survive. */
   criterionKey: string;
@@ -196,7 +211,7 @@ export function validateCriteria(criteria: CriterionInput[]): { field: string; m
         message: `A maximum score is a whole number between 1 and ${MAX_CRITERION_SCORE}.`,
       });
     }
-    if (!Number.isInteger(c.weightBp) || c.weightBp < 0) {
+    if (!Number.isInteger(c.weightBp) || c.weightBp < 0 || c.weightBp > MAX_WEIGHT_BP) {
       /*
        * INTEGER BASIS POINTS, and a float is refused rather than rounded.
        * Rounding 0.333 to 3333 silently is how a rubric stops summing to what
@@ -205,7 +220,9 @@ export function validateCriteria(criteria: CriterionInput[]): { field: string; m
        */
       problems.push({
         field: `criteria[${i}].weightBp`,
-        message: 'A weight is a whole number of basis points; 10000 means a weight of 1.',
+        message:
+          'A weight is a whole number of basis points between 0 and ' +
+          `${MAX_WEIGHT_BP}; 10000 means a weight of 1.`,
       });
     }
   });
