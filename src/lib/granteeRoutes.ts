@@ -165,6 +165,60 @@ export async function granteeHome(env: Env, session: Session): Promise<Response>
     .all<{ report_period_id: string }>();
   const hasDraft = new Set((drafts ?? []).map((d) => d.report_period_id));
 
+  /*
+   * WHAT THEY FILED WITH IT.
+   *
+   * A grantee could attach documents to a report and never see them again --
+   * the same gap the application form had. "Did I send the right budget?" is
+   * asked most often AFTER submitting, which is exactly when nothing on the
+   * page could answer it.
+   *
+   * WHAT ACTUALLY SCOPES THIS, said accurately because a mutant proved the
+   * obvious answer wrong. The output is scoped by the PERIOD LIST built above,
+   * which is already restricted to this organization's awards: a file is only
+   * ever attached to a report this grantee can see, so removing the
+   * organization_id clause below leaks nothing and no test catches it.
+   *
+   * It stays anyway, and not as decoration. Without it this query reads every
+   * report attachment in the database on every portal page load, and a
+   * grouping bug in the lines beneath it would then have another
+   * organization's filenames already in memory to leak. The cheap version of
+   * that mistake is a slow page; the expensive one is a filename on somebody
+   * else's screen.
+   *
+   * The ids this returns are in any case the only ones the portal download
+   * route will honour for this session -- it re-checks ownership itself.
+   *
+   * Only the LATEST submission's files, matching the row above it. A revised
+   * report's earlier attempts are history; showing three budgets under one
+   * report period asks the grantee to work out which one counts.
+   */
+  const { results: files } = await env.DB.prepare(
+    `SELECT rs.report_period_id, at.id, at.filename, at.size_bytes
+       FROM attachments at
+       JOIN report_submissions rs ON rs.id = at.parent_id
+       JOIN report_periods rp     ON rp.id = rs.report_period_id
+       JOIN awards a              ON a.id = rp.award_id
+      WHERE at.parent_type = 'report_submission'
+        AND at.deleted_at IS NULL
+        AND at.purged_at IS NULL
+        AND rs.deleted_at IS NULL AND rp.deleted_at IS NULL AND a.deleted_at IS NULL
+        AND a.organization_id = ?
+        AND rs.id = (SELECT id FROM report_submissions
+                      WHERE report_period_id = rp.id AND deleted_at IS NULL
+                      ORDER BY submitted_at DESC LIMIT 1)
+      ORDER BY at.uploaded_at`,
+  )
+    .bind(organizationId)
+    .all<{ report_period_id: string; id: string; filename: string; size_bytes: number }>();
+
+  const filesByPeriod = new Map<string, { id: string; filename: string; sizeBytes: number }[]>();
+  for (const f of files ?? []) {
+    const list = filesByPeriod.get(f.report_period_id) ?? [];
+    list.push({ id: f.id, filename: f.filename, sizeBytes: f.size_bytes });
+    filesByPeriod.set(f.report_period_id, list);
+  }
+
   const now = nowIso();
   const periodsByAward = new Map<string, unknown[]>();
   for (const p of periods ?? []) {
@@ -185,6 +239,7 @@ export async function granteeHome(env: Env, session: Session): Promise<Response>
       // when there is something to say, so the client has no empty panel to
       // render and no reason to guess.
       feedback: state === 'changes_requested' ? p.admin_feedback : null,
+      attachments: filesByPeriod.get(p.id) ?? [],
     });
     periodsByAward.set(p.award_id, list);
   }

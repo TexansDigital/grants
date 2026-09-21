@@ -11,8 +11,11 @@
  * horizontal scrolling, and every control clears 44px.
  */
 
+import { useState } from 'react';
 import type { ReactElement } from 'react';
 import { formatCents } from '../../src/lib/money';
+import { applicantApi } from './applicantApi';
+import { formatBytes } from './uploadFile';
 import type { AwardSummary, GranteeHomeResponse, ReportState } from './granteeApi';
 import { formatDay, reportHeadline, reportTone } from './reportWording';
 
@@ -161,10 +164,79 @@ function AwardCard({
                   </button>
                 )}
               </div>
+              {report.attachments.length > 0 && <FiledFiles files={report.attachments} />}
             </li>
           ))}
         </ul>
       )}
     </section>
+  );
+}
+
+/**
+ * What was filed with a report, readable again.
+ *
+ * WHY. A grantee could attach documents to a report and never see them
+ * afterwards -- and "did I send the right budget?" is asked most often AFTER
+ * submitting, which is exactly when the page could not answer it. The same gap
+ * the application form had, in the place a grantee visits more often.
+ *
+ * ONE FAILURE MESSAGE PER FILE, not a banner at the top of a page that may
+ * hold several grants and a dozen reports. Somebody who cannot open the
+ * January budget needs to be told beside the January budget.
+ */
+function FiledFiles({
+  files,
+}: {
+  files: { id: string; filename: string; sizeBytes: number }[];
+}): ReactElement {
+  const [busy, setBusy] = useState<string | null>(null);
+  const [failed, setFailed] = useState<Record<string, string>>({});
+
+  async function open(id: string): Promise<void> {
+    setBusy(id);
+    setFailed((prev) => {
+      if (!(id in prev)) return prev;
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+    try {
+      const grant = await applicantApi.downloadUrl(id);
+      window.location.assign(grant.url);
+    } catch (e) {
+      setFailed((prev) => ({
+        ...prev,
+        [id]:
+          e instanceof Error && e.message
+            ? e.message
+            : 'That file could not be opened just now.',
+      }));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <ul className="portal-files">
+      {files.map((f) => (
+        <li key={f.id}>
+          <button
+            type="button"
+            className="linklike"
+            disabled={busy === f.id}
+            onClick={() => void open(f.id)}
+          >
+            {busy === f.id ? 'Opening…' : f.filename}
+          </button>
+          <span className="portal-meta"> {formatBytes(f.sizeBytes)}</span>
+          {failed[f.id] && (
+            <p className="error" role="alert">
+              {failed[f.id]}
+            </p>
+          )}
+        </li>
+      ))}
+    </ul>
   );
 }

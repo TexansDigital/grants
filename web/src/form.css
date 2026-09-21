@@ -1030,3 +1030,29 @@ td.row-actions {
 td.row-actions .btn {
   margin-right: var(--space-2);
 }
+
+/* ---- files filed with a report ------------------------------------------ */
+/*
+ * A grantee re-reading what they sent. Indented under the report it belongs
+ * to, because on a phone a flat list of filenames under a card with three
+ * reports on it says nothing about which report each file came with.
+ */
+.portal-files {
+  list-style: none;
+  margin: var(--space-2) 0 0;
+  padding: 0 0 0 var(--space-4);
+  border-left: 2px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.portal-files li {
+  /* The filename can be long and the size must not be pushed off a phone. */
+  overflow-wrap: anywhere;
+}
+.portal-files .linklike {
+  /* 44px, like every other control on this surface. A filename that is also
+     the button is easy to make too small to hit. */
+  min-height: 44px;
+  text-align: left;
+}

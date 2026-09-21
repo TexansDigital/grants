@@ -16,6 +16,7 @@ const report = (over: Partial<ReportSummary> = {}): ReportSummary => ({
   outstanding: true,
   submittedAt: null,
   feedback: null,
+  attachments: [],
   ...over,
 });
 

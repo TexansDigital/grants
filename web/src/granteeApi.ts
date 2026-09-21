@@ -33,6 +33,8 @@ export interface ReportSummary {
   submittedAt: string | null;
   /** Staff feedback, present only when changes were requested. */
   feedback: string | null;
+  /** What was filed with the latest submission, so it can be read back. */
+  attachments: { id: string; filename: string; sizeBytes: number }[];
 }
 
 export interface AwardSummary {

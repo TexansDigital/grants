@@ -586,6 +586,76 @@ describe('attaching a file to a report', () => {
     });
   });
 
+  it('shows the grantee what they filed, so it can be read back', async () => {
+    /*
+     * WHAT THIS CLOSES. A grantee could attach documents to a report and never
+     * see them again -- and "did I send the right budget?" is asked most often
+     * AFTER submitting, which is exactly when the page could not answer it.
+     * The same gap the application form had, in the place a grantee returns
+     * to most.
+     */
+    const g = await grantee();
+    const up = await call(`/api/grantee/reports/${g.periodId}/uploads`, {
+      method: 'POST', cookie: g.cookie, body: intent,
+    });
+    const { attachmentId } = await up.json<{ attachmentId: string }>();
+    // The answer carries the filename as well as the id: the client controls
+    // both and the server trusts neither, but it refuses a reference with
+    // half of it missing.
+    const sub = await call(`/api/grantee/reports/${g.periodId}/submit`, {
+      method: 'POST',
+      cookie: g.cookie,
+      body: {
+        answers: {
+          ...ANSWERS,
+          supporting_files: [{ attachment_id: attachmentId, filename: 'photos.pdf' }],
+        },
+      },
+    });
+    expect(sub.status).toBe(201);
+
+    const home = await call('/api/grantee/home', { cookie: g.cookie });
+    const body = await home.json<{
+      awards: { reports: { id: string; attachments: { id: string; filename: string }[] }[] }[];
+    }>();
+    const report = body.awards.flatMap((a) => a.reports).find((r) => r.id === g.periodId);
+    expect(report?.attachments.map((f) => f.filename)).toEqual(['photos.pdf']);
+    expect(report?.attachments[0]?.id).toBe(attachmentId);
+  });
+
+  it('does not offer another organization a file back through this page', async () => {
+    /*
+     * WHAT THIS TEST CAN AND CANNOT PROVE, said plainly because a mutant made
+     * the difference visible. The files are grouped onto the period list,
+     * which is already scoped to this organization's awards -- so this passes
+     * even with the organization_id clause removed from the query. It is a
+     * guard against a future grouping change, not a proof of the WHERE.
+     *
+     * What the clause buys is that another organization's rows are never read
+     * at all, which is a blast-radius argument rather than a behavioural one
+     * and is stated as such in granteeRoutes.ts.
+     */
+    const mine = await grantee();
+    const up = await call(`/api/grantee/reports/${mine.periodId}/uploads`, {
+      method: 'POST', cookie: mine.cookie, body: intent,
+    });
+    const { attachmentId } = await up.json<{ attachmentId: string }>();
+    await call(`/api/grantee/reports/${mine.periodId}/submit`, {
+      method: 'POST',
+      cookie: mine.cookie,
+      body: {
+        answers: {
+          ...ANSWERS,
+          supporting_files: [{ attachment_id: attachmentId, filename: 'photos.pdf' }],
+        },
+      },
+    });
+
+    const theirs = await grantee();
+    const home = await call('/api/grantee/home', { cookie: theirs.cookie });
+    expect(JSON.stringify(await home.json())).not.toContain('photos.pdf');
+  });
+
   it('refuses an upload once the report has been filed', async () => {
     const g = await grantee();
     await call(`/api/grantee/reports/${g.periodId}/submit`, {

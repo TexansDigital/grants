@@ -323,8 +323,21 @@ await context.route(
   (url) => url.hostname.endsWith('.r2.cloudflarestorage.com'),
   async (route) => {
     const r = route.request();
-    puts.push({ method: r.method(), headers: r.headers() });
-    await route.fulfill({ status: 200, body: '' });
+    puts.push({ method: r.method(), headers: r.headers(), url: r.url() });
+    /*
+     * A DOWNLOAD, NOT A NAVIGATION, for the GET. `content-disposition:
+     * attachment` is what the real signed URL carries, and it is also what
+     * stops Chromium replacing the portal page when the grantee opens a file
+     * they filed.
+     */
+    await route.fulfill({
+      status: 200,
+      body: '',
+      headers:
+        r.method() === 'GET'
+          ? { 'content-disposition': 'attachment; filename="x.pdf"' }
+          : {},
+    });
   },
 );
 
@@ -470,12 +483,13 @@ check('the grantee is shown what they attached',
   await page.locator('#field-supporting_files .upload-name').first().innerText(),
   'summer-reading-summary.pdf');
 
-truthy('the browser did issue an upload', puts.length > 0);
-check('every upload was a PUT', [...new Set(puts.map((p) => p.method))], ['PUT']);
+const uploads = puts.filter((p) => p.method === 'PUT');
+truthy('the browser did issue an upload', uploads.length > 0);
+check('every upload was a PUT', [...new Set(uploads.map((p) => p.method))], ['PUT']);
 // The rule from CLAUDE.md. A content-type here is a 403 from R2 that does not
 // reproduce in curl, and it is the single most expensive way to get this wrong.
 check('the browser sent no content-type on the upload',
-  puts.map((p) => p.headers['content-type'] ?? null).filter(Boolean), []);
+  uploads.map((p) => p.headers['content-type'] ?? null).filter(Boolean), []);
 
 const attached = sql(
   `SELECT parent_type, parent_id, filename, size_bytes, r2_key FROM attachments
@@ -533,6 +547,37 @@ await page.waitForSelector('.portal-award', { timeout: 10_000 });
 check('nothing is outstanding any more', await page.locator('#todo-heading').count(), 0);
 truthy('and the report reads as sent',
   (await page.locator('.portal-chip').first().innerText()) === 'Sent');
+
+/*
+ * AND WHAT THEY SENT WITH IT IS STILL READABLE.
+ *
+ * "Did I send the right budget?" is asked most often AFTER submitting, which
+ * is exactly the moment this page could not answer. A grantee could attach a
+ * document to a report and never see it again -- the same gap the application
+ * form had, in the place a grantee comes back to.
+ */
+const filed = page.locator('.portal-files button');
+check('the file filed with the report is listed afterwards', await filed.count(), 1);
+check('and it is named, not called "attachment"',
+  await filed.first().innerText(), 'summer-reading-summary.pdf');
+
+const downloads = [];
+page.on('request', (r) => {
+  if (r.url().includes('/api/portal/attachments/') && r.method() === 'POST') downloads.push(r.url());
+});
+await filed.first().click();
+await page.waitForTimeout(900);
+check('opening it asked the portal for a download URL', downloads.length, 1);
+const reads = puts.filter((p) => p.method === 'GET');
+check('and the browser fetched exactly one object', reads.length, 1);
+check('the signed read forces a download rather than a render',
+  [
+    decodeURIComponent(reads[0].url).includes('attachment;'),
+    decodeURIComponent(reads[0].url).includes('application/octet-stream'),
+  ],
+  [true, true]);
+check('the grantee stayed on their own page',
+  new URL(page.url()).pathname, '/reports');
 
 check('no console errors', consoleErrors, []);
 check('nothing on the page 404s', notFound, []);
