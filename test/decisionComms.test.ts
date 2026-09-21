@@ -610,14 +610,17 @@ describe('sending the week of declines', () => {
   it('never returns an empty round, which the caller would loop on forever', async () => {
     // The caller loops while `remaining` is above zero. A round of nothing
     // with work outstanding is an infinite loop in somebody's browser.
-    const c = await cycle();
-    const a = await applicationIn(c);
-    await decideApplication(db, ctx(), admin, a.applicationId, {
-      status: 'declined', notes: 'x',
-    });
+    // A FRESH CYCLE PER VALUE. Reusing one meant the second call had nothing
+    // left to send, so an empty round was correct and the assertion failed for
+    // the right reason in the wrong place.
     for (const asked of [0, -5]) {
+      const c = await cycle();
+      const a = await applicationIn(c);
+      await decideApplication(db, ctx(), admin, a.applicationId, {
+        status: 'declined', notes: 'x',
+      });
       const result = await sendDeclineBatch(mailEnv(), ctx(), admin, c.cycleId, LETTER, asked);
-      expect(result.sent + result.failed).toBeGreaterThan(0);
+      expect(result.sent + result.failed, `asked for ${asked}`).toBeGreaterThan(0);
     }
   });
 });
