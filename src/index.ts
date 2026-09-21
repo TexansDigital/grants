@@ -47,6 +47,10 @@ import {
   exportScorecard, planScorecardImport, applyScorecardImport, reviewersInCycle,
 } from './lib/scorecards';
 import { createAwardFromDecision, budgetByProgram } from './lib/awards';
+import {
+  awardsAwaitingResponse, acceptAward, declineAward, recordAwardDocument,
+  type AwardDocument,
+} from './lib/acceptance';
 import { buildDashboard, dashboardCsv } from './lib/dashboard';
 import {
   granteeHome, granteeMe, readReport, autosaveReport, fileReport,
@@ -1006,6 +1010,79 @@ const routes: readonly Route[] = [
           status: String(body.status ?? '') as DecisionStatus,
           notes: body.notes == null ? null : String(body.notes),
         }),
+        ctx,
+      );
+    },
+  },
+
+  // ---- award acceptance ----------------------------------------------------
+  //
+  // THE GRANTEE'S OWN ACT. CLAUDE.md puts the W-9 and the media release at
+  // acceptance rather than application, which only means anything if
+  // acceptance is a moment the grantee causes. All three routes are scoped by
+  // the magic-link session's organization; another organization's award is a
+  // 404, not a 403.
+  {
+    method: 'GET',
+    path: '/api/my/awards',
+    roles: EXTERNAL_USER,
+    auth: 'applicant',
+    handler: async ({ env, ctx, session }) =>
+      json({ awards: await awardsAwaitingResponse(env.DB, session) }, ctx),
+  },
+  {
+    method: 'POST',
+    path: '/api/my/awards/:id/accept',
+    roles: EXTERNAL_USER,
+    auth: 'applicant',
+    handler: async ({ request, env, ctx, params, session }) => {
+      const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+      return json(
+        await acceptAward(env.DB, ctx, session, params.id!, {
+          // The exact words the grantee saw, sent back and recorded on the
+          // audit row -- so "what did they agree to" survives a later change
+          // to the wording.
+          attestationText: String(body.attestationText ?? ''),
+          note: body.note == null ? null : String(body.note),
+        }),
+        ctx,
+      );
+    },
+  },
+  {
+    // Not every award survives acceptance. Without this the award sits
+    // `pending` forever and the committed total stays wrong.
+    method: 'POST',
+    path: '/api/my/awards/:id/decline',
+    roles: EXTERNAL_USER,
+    auth: 'applicant',
+    handler: async ({ request, env, ctx, params, session }) => {
+      const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+      return json(
+        await declineAward(env.DB, ctx, session, params.id!, String(body.reason ?? '')),
+        ctx,
+      );
+    },
+  },
+  {
+    /*
+     * Receipt of a W-9, a signed agreement or a media release.
+     *
+     * STAFF, NOT THE GRANTEE: what is recorded is "we have it", and only the
+     * Foundation knows that. A grantee marking their own W-9 received would
+     * make the data health check that reads these columns meaningless.
+     */
+    method: 'POST',
+    path: '/api/awards/:id/document',
+    roles: ADMIN_ONLY,
+    handler: async ({ request, env, ctx, params, session }) => {
+      const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+      return json(
+        await recordAwardDocument(
+          env.DB, ctx, session, params.id!,
+          String(body.document ?? '') as AwardDocument,
+          body.receivedAt == null ? null : String(body.receivedAt),
+        ),
         ctx,
       );
     },

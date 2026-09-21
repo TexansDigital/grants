@@ -38,7 +38,8 @@
     "e2e:scoring": "node scripts/e2e-scoring.mjs",
     "e2e:letters": "node scripts/e2e-letters.mjs",
     "e2e:scorecards": "node scripts/e2e-scorecards.mjs",
-    "e2e:dashboard": "node scripts/e2e-dashboard.mjs"
+    "e2e:dashboard": "node scripts/e2e-dashboard.mjs",
+    "e2e:offer": "node scripts/e2e-offer.mjs"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.12.21",

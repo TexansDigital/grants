@@ -1,0 +1,351 @@
+/**
+ * A grantee accepting, or refusing, an award.
+ *
+ * THE DEAD END THIS ENDS. `awards.status` has admitted 'active' -- "accepted,
+ * term running, reports expected" -- since 0012 and nothing could put an award
+ * into it. `award.accepted` has been a declared audit action since Phase 0 and
+ * nothing has ever written it. Data health checks active awards for a missing
+ * W-9, agreement and media release, and those checks could never fire, because
+ * no award could become active.
+ *
+ * Most visibly: the award letter tells a grantee to sign in and see "what we
+ * need from you before funds are released". They sign in and there is nothing
+ * to do.
+ *
+ * WHY ACCEPTANCE IS THE GRANTEE'S ACT AND NOT AN ADMIN'S. CLAUDE.md puts the
+ * W-9 and the media release at acceptance rather than application, which only
+ * means anything if acceptance is a moment the grantee causes. An admin
+ * flipping a status is not that moment, and an award marked accepted by staff
+ * is a claim about somebody else's decision.
+ *
+ * WHY A GRANTEE MAY SAY NO, and why it is recorded rather than deleted. Terms
+ * do not always work. A project loses its other funding. An organization
+ * folds between the decision and the letter. Without a refusal path those
+ * awards sit `pending` forever, the committed total stays wrong, and the
+ * portfolio cannot say what happened.
+ */
+
+import type { Env, RequestContext, Session } from '../types';
+import { AppError, notFound } from './errors';
+import { nowIso } from './time';
+import { auditStatement } from './audit';
+import { sessionOrgId } from './scope';
+import { generateReportPeriods } from './reportPeriods';
+
+export interface PendingAward {
+  id: string;
+  programName: string;
+  awardedAmountCents: number;
+  awardedAt: string;
+  announcementDate: string | null;
+  termStart: string | null;
+  termEnd: string | null;
+  projectTitle: string | null;
+}
+
+/**
+ * Awards this organization has been offered and not yet answered.
+ *
+ * SCOPED BY THE SESSION, never by a parameter. The organization comes from the
+ * magic-link session; an award belonging to anybody else is not filtered out
+ * of a larger set, it is never selected.
+ */
+export async function awardsAwaitingResponse(
+  db: D1Database,
+  session: Session,
+): Promise<PendingAward[]> {
+  const organizationId = sessionOrgId(session);
+  const { results } = await db
+    .prepare(
+      `SELECT w.id, p.name AS programName, w.awarded_amount_cents AS awardedAmountCents,
+              w.awarded_at AS awardedAt, w.announcement_date AS announcementDate,
+              w.term_start AS termStart, w.term_end AS termEnd,
+              a.project_title AS projectTitle
+         FROM awards w
+         JOIN programs p ON p.id = w.program_id
+         LEFT JOIN applications a ON a.id = w.application_id
+        WHERE w.organization_id = ?
+          AND w.status = 'pending'
+          AND w.accepted_at IS NULL
+          AND w.declined_by_grantee_at IS NULL
+          AND w.deleted_at IS NULL
+        ORDER BY w.awarded_at DESC`,
+    )
+    .bind(organizationId)
+    .all<PendingAward>();
+  return results ?? [];
+}
+
+async function loadOwnPendingAward(
+  db: D1Database,
+  session: Session,
+  awardId: string,
+): Promise<{ id: string; organizationId: string; status: string; acceptedAt: string | null }> {
+  const organizationId = sessionOrgId(session);
+  const row = await db
+    .prepare(
+      `SELECT id, organization_id AS organizationId, status, accepted_at AS acceptedAt
+         FROM awards
+        WHERE id = ? AND organization_id = ? AND deleted_at IS NULL`,
+    )
+    .bind(awardId, organizationId)
+    .first<{ id: string; organizationId: string; status: string; acceptedAt: string | null }>();
+  // 404 for another organization's award, exactly as for one that does not
+  // exist. A 403 would confirm it is real.
+  if (!row) throw notFound('award');
+  return row;
+}
+
+export interface AcceptResult {
+  awardId: string;
+  acceptedAt: string;
+  /** Report periods generated from the term, or 0 with a reason. */
+  reportPeriodsCreated: number;
+  reportPeriodsSkipped: string | null;
+}
+
+/**
+ * Accept it.
+ *
+ * THE ATTESTATION IS REQUIRED and is not decoration. A grantee is agreeing to
+ * a term, a reporting obligation and a set of documents; a button with no
+ * statement beside it produces an acceptance nobody can characterise later.
+ * The text the grantee saw is recorded on the audit row, so "what did they
+ * agree to" survives a later change to the wording.
+ *
+ * REPORT PERIODS ARE GENERATED HERE. 'active' means "reports expected", and an
+ * active award with no periods is a grantee who will be told they are overdue
+ * for something that was never scheduled. Generation is best-effort: an award
+ * with no term dates generates nothing and says so rather than inventing a
+ * deadline a grantee is then held to.
+ *
+ * A FAILURE TO GENERATE DOES NOT UNDO THE ACCEPTANCE. The acceptance is the
+ * grantee's act and is theirs; the schedule is the Foundation's bookkeeping.
+ * Rolling back somebody's "yes" because our own scheduler had a bad day would
+ * be the wrong half to sacrifice, and admins can generate periods later from
+ * the reporting desk.
+ */
+export async function acceptAward(
+  db: D1Database,
+  ctx: RequestContext,
+  session: Session,
+  awardId: string,
+  opts: { attestationText: string; note?: string | null },
+): Promise<AcceptResult> {
+  const attestation = (opts.attestationText ?? '').trim();
+  if (!attestation) {
+    throw new AppError('VALIDATION_FAILED', 'Please confirm the statement before accepting.', {
+      internalMessage: 'acceptAward with no attestation',
+      severity: 'warn',
+      fieldErrors: [{ field: 'attested', message: 'Tick the box to accept this grant.' }],
+    });
+  }
+
+  const award = await loadOwnPendingAward(db, session, awardId);
+  if (award.acceptedAt) {
+    throw new AppError('CONFLICT', 'You have already accepted this grant.', {
+      internalMessage: `re-acceptance of ${awardId}, accepted at ${award.acceptedAt}`,
+      severity: 'warn',
+    });
+  }
+  if (award.status !== 'pending') {
+    throw new AppError('CONFLICT', 'This grant is no longer waiting on you.', {
+      internalMessage: `acceptAward on ${awardId} in status ${award.status}`,
+      severity: 'warn',
+    });
+  }
+
+  const now = nowIso();
+  const note = (opts.note ?? '')?.toString().trim() || null;
+  await db.batch([
+    db
+      .prepare(
+        `UPDATE awards
+            SET status = 'active', accepted_at = ?, accepted_by_user_id = ?,
+                grantee_response_note = ?, updated_at = ?
+          WHERE id = ? AND status = 'pending' AND accepted_at IS NULL AND deleted_at IS NULL`,
+      )
+      .bind(now, session.userId, note, now, awardId),
+    auditStatement(db, ctx, {
+      action: 'award.accepted',
+      entityType: 'award',
+      entityId: awardId,
+      before: { status: 'pending', accepted_at: null },
+      after: {
+        status: 'active',
+        accepted_at: now,
+        accepted_by_user_id: session.userId,
+        organization_id: award.organizationId,
+        // The exact words the grantee saw. Recorded so "what did they agree
+        // to" survives a later change to the wording.
+        attestation,
+        note,
+      },
+    }),
+  ]);
+
+  let created = 0;
+  let skipped: string | null = null;
+  try {
+    const result = await generateReportPeriods(db, ctx, awardId);
+    created = result.created;
+    skipped = result.skipped ?? null;
+  } catch {
+    // Deliberately swallowed: see the note above. The acceptance stands and
+    // the reporting desk can generate periods later.
+    skipped = 'could not be generated now';
+  }
+
+  return { awardId, acceptedAt: now, reportPeriodsCreated: created, reportPeriodsSkipped: skipped };
+}
+
+/**
+ * Refuse it, with a reason.
+ *
+ * The award becomes `cancelled`, which the dashboard already excludes from
+ * committed totals -- so the money goes back to the program's uncommitted
+ * balance the moment the grantee says no, rather than when somebody remembers
+ * to tidy up.
+ */
+export async function declineAward(
+  db: D1Database,
+  ctx: RequestContext,
+  session: Session,
+  awardId: string,
+  reason: string,
+): Promise<{ awardId: string; declinedAt: string }> {
+  const trimmed = (reason ?? '').trim();
+  if (trimmed.length < 3) {
+    throw new AppError('VALIDATION_FAILED', 'Please tell us why.', {
+      internalMessage: 'declineAward with no reason',
+      severity: 'warn',
+      fieldErrors: [
+        {
+          field: 'reason',
+          message: 'A sentence is enough. It helps us understand what did not work.',
+        },
+      ],
+    });
+  }
+
+  const award = await loadOwnPendingAward(db, session, awardId);
+  if (award.status !== 'pending' || award.acceptedAt) {
+    throw new AppError('CONFLICT', 'This grant is no longer waiting on you.', {
+      internalMessage: `declineAward on ${awardId} in status ${award.status}`,
+      severity: 'warn',
+    });
+  }
+
+  const now = nowIso();
+  await db.batch([
+    db
+      .prepare(
+        `UPDATE awards
+            SET status = 'cancelled', declined_by_grantee_at = ?,
+                grantee_response_note = ?, updated_at = ?
+          WHERE id = ? AND status = 'pending' AND accepted_at IS NULL AND deleted_at IS NULL`,
+      )
+      .bind(now, trimmed, now, awardId),
+    auditStatement(db, ctx, {
+      action: 'award.amended',
+      entityType: 'award',
+      entityId: awardId,
+      before: { status: 'pending' },
+      after: {
+        status: 'cancelled',
+        declined_by_grantee_at: now,
+        grantee_response_note: trimmed,
+        declined_by_user_id: session.userId,
+        organization_id: award.organizationId,
+      },
+    }),
+  ]);
+
+  return { awardId, declinedAt: now };
+}
+
+// ---------------------------------------------------------------------------
+// Staff side
+// ---------------------------------------------------------------------------
+
+export const AWARD_DOCUMENTS = ['w9', 'agreement', 'media_release'] as const;
+export type AwardDocument = (typeof AWARD_DOCUMENTS)[number];
+
+const DOCUMENT_COLUMN: Record<AwardDocument, string> = {
+  w9: 'w9_received_at',
+  agreement: 'agreement_signed_at',
+  media_release: 'media_release_at',
+};
+
+/**
+ * Record that a document arrived.
+ *
+ * STAFF, NOT THE GRANTEE, because what is being recorded is receipt -- "we
+ * have it" -- and only the Foundation knows that. A grantee marking their own
+ * W-9 received would make the data health check that reads these columns
+ * meaningless.
+ *
+ * A DATE, NOT A FILE, in this version. These documents arrive by email today
+ * and an admin is confirming receipt; a column that says "received on the
+ * 12th" is honest about that. Attaching the file is the obvious next step --
+ * `attachments.parent_type` already admits 'award' -- and is recorded as a gap
+ * rather than half-built here.
+ */
+export async function recordAwardDocument(
+  db: D1Database,
+  ctx: RequestContext,
+  session: Session,
+  awardId: string,
+  document: AwardDocument,
+  receivedAt: string | null,
+): Promise<{ awardId: string; document: AwardDocument; receivedAt: string | null }> {
+  if (session.role !== 'admin') throw notFound('award');
+  if (!AWARD_DOCUMENTS.includes(document)) {
+    throw new AppError('VALIDATION_FAILED', 'That is not a document we track.', {
+      internalMessage: `unknown award document ${String(document)}`,
+      severity: 'warn',
+    });
+  }
+  const stamp = receivedAt === null ? null : receivedAt.trim() || null;
+  if (stamp !== null && !Number.isFinite(Date.parse(stamp))) {
+    throw new AppError('VALIDATION_FAILED', 'That is not a date we can read.', {
+      internalMessage: `unparseable receipt date ${stamp}`,
+      severity: 'warn',
+    });
+  }
+
+  /*
+   * THE SECOND PLACE IN THIS CODEBASE THAT INTERPOLATES INTO SQL, after
+   * scope.ts's selectList -- so it is worth saying exactly why it is safe.
+   *
+   * `document` is checked against AWARD_DOCUMENTS above before we get here,
+   * and DOCUMENT_COLUMN is a compile-time constant whose three values are
+   * column names written in this file. Nothing a caller sends can reach the
+   * query string. The validation ABOVE is what makes this safe; moving it, or
+   * making DOCUMENT_COLUMN take a value from anywhere else, breaks that.
+   */
+  const column = DOCUMENT_COLUMN[document];
+  const before = await db
+    .prepare(`SELECT ${column} AS value FROM awards WHERE id = ? AND deleted_at IS NULL`)
+    .bind(awardId)
+    .first<{ value: string | null }>();
+  if (!before) throw notFound('award');
+
+  const now = nowIso();
+  await db.batch([
+    db
+      .prepare(`UPDATE awards SET ${column} = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL`)
+      .bind(stamp, now, awardId),
+    auditStatement(db, ctx, {
+      action: 'award.amended',
+      entityType: 'award',
+      entityId: awardId,
+      // Clearing a mistaken date is a legitimate correction, and the audit row
+      // is what makes it a correction rather than a disappearance.
+      before: { [column]: before.value },
+      after: { [column]: stamp, actor_user_id: session.userId },
+    }),
+  ]);
+
+  return { awardId, document, receivedAt: stamp };
+}

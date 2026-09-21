@@ -85,6 +85,18 @@ export interface FileReportResponse {
 
 const enc = encodeURIComponent;
 
+export interface PendingAward {
+  id: string;
+  programName: string;
+  awardedAmountCents: number;
+  awardedAt: string;
+  /** When they may talk about it publicly. Null when there is no embargo. */
+  announcementDate: string | null;
+  termStart: string | null;
+  termEnd: string | null;
+  projectTitle: string | null;
+}
+
 export const granteeApi = {
   home: (signal?: AbortSignal) =>
     request<GranteeHomeResponse>('/api/grantee/home', signal ? { signal } : {}),
@@ -100,4 +112,24 @@ export const granteeApi = {
       method: 'POST',
       body: { answers },
     }),
+
+  pendingAwards: (signal?: AbortSignal) =>
+    request<{ awards: PendingAward[] }>('/api/my/awards', signal ? { signal } : {}),
+
+  /*
+   * The attestation text is sent BACK to the server, not just checked here.
+   * It lands on the audit row, so what the grantee actually agreed to survives
+   * a later change to the wording on this page.
+   */
+  acceptAward: (awardId: string, attestationText: string) =>
+    request<{ awardId: string; acceptedAt: string; reportPeriodsCreated: number }>(
+      `/api/my/awards/${enc(awardId)}/accept`,
+      { method: 'POST', body: { attestationText } },
+    ),
+
+  declineAward: (awardId: string, reason: string) =>
+    request<{ awardId: string; declinedAt: string }>(
+      `/api/my/awards/${enc(awardId)}/decline`,
+      { method: 'POST', body: { reason } },
+    ),
 };

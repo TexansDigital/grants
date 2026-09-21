@@ -1376,3 +1376,65 @@ wrong. And three harnesses waited for a heading that the loading branch also
 renders, then asserted "Loading…" was absent — a race. That is very likely the
 single unexplained `e2e:letters` failure recorded in this session; all three now
 wait for content that only exists once the data has arrived.
+
+## §42 — A grantee can accept, or refuse
+
+**Date:** 2026-09-21
+**Status:** In force
+
+**What this ends.** `awards.status` has admitted `active` — "accepted, term
+running, reports expected" — since 0012, and nothing could put an award into
+it. `award.accepted` has been a declared audit action since Phase 0 and nothing
+ever wrote it. Data health checks active awards for a missing W-9, agreement
+and media release, and those checks could never fire on anything. Most visibly,
+the award letter tells a grantee to sign in and see what is needed from them,
+and there was nothing there.
+
+**Acceptance is the grantee's act, not an admin's.** CLAUDE.md puts the W-9 and
+the media release at acceptance rather than application, which only means
+something if acceptance is a moment the grantee causes. An admin flipping a
+status is not that moment, and an award marked accepted by staff is a claim
+about somebody else's decision.
+
+**The attestation text is sent to the server and recorded on the audit row**,
+not a boolean. A button with no statement beside it produces an acceptance
+nobody can characterise later, and "what did they agree to" has to survive a
+later edit to the copy on the page.
+
+**Accepting generates the reporting schedule.** `active` means reports are
+expected, and an active award with no periods is a grantee who will be told
+they are overdue for something that was never scheduled. Generation is
+best-effort and does not roll back the acceptance: an award without term dates
+generates nothing and says so rather than inventing a deadline, and rolling
+back somebody's "yes" because our own scheduler had nothing to work from would
+sacrifice the wrong half.
+
+**A grantee can say no, and it is a plain button.** Terms do not always work, a
+project loses its other funding, an organization folds between the decision and
+the letter. Without a refusal path those awards sit `pending` forever, the
+committed total stays wrong, and the portfolio cannot say what happened. The
+award becomes `cancelled`, which the dashboard already excludes — so the money
+returns to the program's uncommitted balance the moment the grantee answers,
+not when somebody remembers to tidy up. A reason is required by the code and by
+the schema.
+
+**Document receipt is staff-side.** What is recorded is "we have it", and only
+the Foundation knows that. A grantee marking their own W-9 received would make
+the data health check that reads those columns meaningless. Clearing a mistaken
+date is allowed and audited, because that is a correction rather than a
+disappearance.
+
+**Ten mutants, nine killed on the first run.** The survivor — removing the
+"already accepted" guard — still refused, because the status check caught it a
+line later. What differed was the message: "this grant is no longer waiting on
+you" is what somebody sees when an award was withdrawn, and telling an accepted
+grantee that at the moment they double-click is alarming and untrue. The test
+now asserts the message and that a second attempt writes no second
+`award.accepted` row.
+
+**Known gaps.** The three documents are recorded as dates, not files —
+`attachments.parent_type` already admits `'award'`, so attaching them is the
+obvious next step and is not built. There is no staff screen for recording
+receipt yet; the route exists and the data-health list is where it belongs.
+Nothing emails a grantee when an award is refused, so an admin learns from the
+portfolio rather than from a notification.

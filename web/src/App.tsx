@@ -21,7 +21,12 @@ import { publicApi, type OpenCycle } from './publicApi';
 import { OpenCycles } from './OpenCycles';
 import { SignIn } from './SignIn';
 import { EligibilityForm } from './EligibilityForm';
-import { granteeApi, type GranteeHomeResponse, type ReportResponse } from './granteeApi';
+import {
+  granteeApi,
+  type GranteeHomeResponse,
+  type ReportResponse,
+  type PendingAward,
+} from './granteeApi';
 import { GranteeHome } from './GranteeHome';
 import { ReportForm } from './ReportForm';
 import { Home } from './Home';
@@ -36,6 +41,7 @@ import { ScoringSheet } from './ScoringSheet';
 import { Communications } from './Communications';
 import { Scorecards } from './Scorecards';
 import { Dashboard } from './Dashboard';
+import { AwardOffer } from './AwardOffer';
 import { ApplicationDetail } from './ApplicationDetail';
 import { Shell } from './Shell';
 import {
@@ -152,6 +158,10 @@ export function App(): ReactElement {
   const [form, setForm] = useState<FormDefinition | null>(null);
   const [draft, setDraft] = useState<DraftResponse | null>(null);
   const [portal, setPortal] = useState<GranteeHomeResponse | null>(null);
+  /** Awards this organization has been offered and not yet answered. */
+  const [pendingAwards, setPendingAwards] = useState<PendingAward[]>([]);
+  const [offerBusy, setOfferBusy] = useState(false);
+  const [offerError, setOfferError] = useState<string | null>(null);
   const [open, setOpen] = useState<{
     cycles: OpenCycle[];
     turnstileSiteKey: string | null;
@@ -356,7 +366,18 @@ export function App(): ReactElement {
             });
           }
         } else if (route?.name === 'portal') {
-          setPortal(await granteeApi.home(signal));
+          /*
+           * BOTH READS, TOGETHER. An unanswered award and the reporting
+           * schedule are the two things this page is about, and fetching them
+           * in sequence would show the reports first and then push them down
+           * the page as the offer arrives -- under somebody's thumb.
+           */
+          const [home, offers] = await Promise.all([
+            granteeApi.home(signal),
+            granteeApi.pendingAwards(signal),
+          ]);
+          setPortal(home);
+          setPendingAwards(offers.awards);
         } else if (route?.name === 'report') {
           setReport(await granteeApi.report(route.id, signal));
         }
@@ -505,6 +526,44 @@ export function App(): ReactElement {
     if (!portal) return <Message title="Loading"><p>Loading…</p></Message>;
     return (
       <PortalShell organization={portal.organization.name}>
+        {/*
+          * ABOVE the reports, deliberately. The portal's rule is that the
+          * outstanding thing is the first thing on the page with a button on
+          * it, and an unanswered award is more outstanding than a report that
+          * is not due for three months.
+          */}
+        <AwardOffer
+          awards={pendingAwards}
+          busy={offerBusy}
+          error={offerError}
+          onAccept={async (id, attestation) => {
+            setOfferBusy(true);
+            setOfferError(null);
+            try {
+              await granteeApi.acceptAward(id, attestation);
+              // Re-read the whole portal, not just the offer list: accepting
+              // generates the reporting schedule, and the reports section
+              // below is now wrong.
+              setReloadKey((k) => k + 1);
+            } catch (e) {
+              setOfferError(e instanceof ApiError ? e.message : String(e));
+            } finally {
+              setOfferBusy(false);
+            }
+          }}
+          onDecline={async (id, reason) => {
+            setOfferBusy(true);
+            setOfferError(null);
+            try {
+              await granteeApi.declineAward(id, reason);
+              setReloadKey((k) => k + 1);
+            } catch (e) {
+              setOfferError(e instanceof ApiError ? e.message : String(e));
+            } finally {
+              setOfferBusy(false);
+            }
+          }}
+        />
         <GranteeHome
           data={portal}
           onOpenReport={(id) => navigate(`/reports/${encodeURIComponent(id)}`)}
