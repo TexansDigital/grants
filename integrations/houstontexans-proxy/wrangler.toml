@@ -1,0 +1,39 @@
+# The Houston Texans site's read-only window onto Steward.
+#
+# A SEPARATE WORKER, DELIBERATELY. It is not part of Steward's deploy and must
+# never be: it holds no secrets, touches no database, and answers only to
+# houstontexans.com. Deploy it from THIS directory:
+#
+#   cd integrations/houstontexans-proxy && npx wrangler deploy
+#
+# It lives in the Steward repo anyway, because it depends on the exact shape of
+# Steward's public payloads. When those change, this has to change with them,
+# and one repo is what keeps that honest.
+
+name = "htx-grants-proxy"
+main = "src/index.ts"
+# Matches the date the installed wrangler's runtime supports. A date ahead of
+# the local binary fails to start with a message about workerd rather than
+# about the config, which is a confusing ten minutes.
+compatibility_date = "2025-01-15"
+
+[vars]
+# Where Steward answers. The applicant hostname, never the staff one -- this
+# Worker reads only public endpoints and the staff host is behind Access.
+STEWARD_ORIGIN = "https://apply.houstontexansfoundation.org"
+
+# The ONE origin allowed to read this. Verified rather than assumed: the Pocket
+# pagebuilder preview renders its blocks inside an iframe pointing at
+# houstontexans.com, so `location.origin` in the block is this, both live and
+# in preview. A second entry for the pagebuilder host would admit a caller that
+# never actually appears.
+ALLOWED_ORIGIN = "https://www.houstontexans.com"
+
+# How long a public page may show a stale answer. Five minutes is the house
+# pattern and is right for a deadline months out; see the note in index.ts
+# about the last day of a cycle.
+CACHE_SECONDS = "300"
+
+# How long a last-known-good copy is kept to serve when Steward cannot be
+# reached at all. A marketing page should degrade, not break.
+FALLBACK_SECONDS = "86400"
