@@ -871,3 +871,134 @@ describe('what state a report is in', () => {
     expect(closed.some(isOutstanding)).toBe(false);
   });
 });
+
+describe('the step an applicant is on', () => {
+  /**
+   * THE FLOW THAT WAS BROKEN, end to end at the HTTP layer.
+   *
+   * An Inspire Change application is two stages: a ten-question eligibility
+   * screen, then the thirty-four-question form. Submitting the first produced
+   * an application row, and the portal rendered it as "Grant application —
+   * Received. We have it. You do not need to do anything else for now."
+   *
+   * Both halves of that were wrong. It is not the grant application, and the
+   * full form had not been started -- nor could it be, because nothing in the
+   * UI called POST /api/applications, the one endpoint that starts the next
+   * stage. An applicant who passed eligibility had no route to the form they
+   * were waiting to fill in.
+   */
+  async function twoStageOrg() {
+    const g = await grantee();
+    const now = nowIso();
+
+    /*
+     * INSPIRE_CHANGE ALREADY HAS BOTH STAGES, and building a second one here
+     * hit the unique index on (program_id, stage_key) -- which is the schema
+     * saying so. The seeded program is the realistic fixture anyway: this is
+     * the shape a real applicant meets.
+     */
+    const stages = await db.prepare(
+      `SELECT ps.id, ps.stage_key, ps.sort_order, fd.id AS form_id
+         FROM program_stages ps
+         JOIN form_definitions fd ON fd.stage_id = ps.id AND fd.status='published'
+        WHERE ps.program_id = ? ORDER BY ps.sort_order`,
+    ).bind(g.programId).all<{ id: string; stage_key: string; sort_order: number; form_id: string }>();
+    expect(stages.results.length, 'the fixture needs two published stages').toBe(2);
+    const [first, second] = stages.results;
+
+    // Stage one, already submitted -- the state the eligibility screen leaves.
+    const app1 = newId();
+    await db.prepare(
+      `INSERT INTO applications (id, cycle_id, stage_id, organization_id,
+         form_definition_id, status, submitted_at, created_at, updated_at)
+       VALUES (?,?,?,?,?, 'submitted', ?,?,?)`,
+    ).bind(app1, g.cycleId, first!.id, g.orgId, first!.form_id, now, now, now).run();
+
+    await db.prepare(
+      `UPDATE cycles SET status='open', opens_at=?, closes_at=? WHERE id=?`,
+    ).bind(day('2020-01-01'), day('2099-01-01'), g.cycleId).run();
+
+    return { ...g, app1, stage2: second!.id, form2: second!.form_id, stage2Key: second!.stage_key };
+  }
+
+  it('does not call a finished eligibility screen a finished application', async () => {
+    const g = await twoStageOrg();
+    const res = await call('/api/grantee/home', { cookie: g.cookie });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      applications: { id: string; stageName: string | null; isFinalStage: boolean }[];
+    };
+    const row = body.applications.find((a) => a.id === g.app1);
+    expect(row, 'the submitted stage-one application is listed').toBeTruthy();
+    expect(row!.stageName).toBeTruthy();
+    expect(row!.isFinalStage, 'a later published stage exists, so this is not the end').toBe(false);
+  });
+
+  it('calls it final when there is genuinely nothing after it', async () => {
+    const g = await twoStageOrg();
+    // Retire the second stage's form. A stage with no published form is not a
+    // step anybody can take, and telling somebody otherwise is worse than
+    // saying nothing.
+    await db.prepare(`UPDATE form_definitions SET status='retired' WHERE id=?`)
+      .bind(g.form2).run();
+    const res = await call('/api/grantee/home', { cookie: g.cookie });
+    const body = (await res.json()) as { applications: { id: string; isFinalStage: boolean }[] };
+    expect(body.applications.find((a) => a.id === g.app1)!.isFinalStage).toBe(true);
+  });
+
+  it('starts the next stage, and it is the one the applicant has not done', async () => {
+    const g = await twoStageOrg();
+    const res = await call('/api/applications', {
+      method: 'POST', cookie: g.cookie, body: { cycleId: g.cycleId },
+    });
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { application: { id: string; stage_key: string } };
+    expect(body.application.stage_key).toBe(g.stage2Key);
+
+    // And it is a real draft this organization can open and fill in.
+    const draft = await call(`/api/applications/${body.application.id}/draft`, { cookie: g.cookie });
+    expect(draft.status).toBe(200);
+  });
+
+  it('stops calling the step outstanding once the next one is started', async () => {
+    /*
+     * isFinalStage says a next step EXISTS; it does not say whether the person
+     * has taken it. Without this distinction the portal kept offering
+     * "Continue your application" after the application had been started, and
+     * the endpoint behind that button answers 409 -- so the button was an
+     * invitation to an error. Found by driving the page twice.
+     */
+    const g = await twoStageOrg();
+    const before = (await (await call('/api/grantee/home', { cookie: g.cookie })).json()) as {
+      applications: { id: string; nextStageStarted: boolean }[];
+    };
+    expect(before.applications.find((a) => a.id === g.app1)!.nextStageStarted).toBe(false);
+
+    await call('/api/applications', { method: 'POST', cookie: g.cookie, body: { cycleId: g.cycleId } });
+
+    const after = (await (await call('/api/grantee/home', { cookie: g.cookie })).json()) as {
+      applications: { id: string; nextStageStarted: boolean }[];
+    };
+    expect(after.applications.find((a) => a.id === g.app1)!.nextStageStarted).toBe(true);
+  });
+
+  it('names the cycle each application belongs to, so continuing starts the right one', async () => {
+    // The first version of the portal button passed the first OPEN cycle
+    // rather than the application's own, which starts another programme's
+    // first stage the moment two cycles are open. A browser drive caught it.
+    const g = await twoStageOrg();
+    const body = (await (await call('/api/grantee/home', { cookie: g.cookie })).json()) as {
+      applications: { id: string; cycleId: string | null }[];
+    };
+    expect(body.applications.find((a) => a.id === g.app1)!.cycleId).toBe(g.cycleId);
+  });
+
+  it('refuses to start it twice', async () => {
+    const g = await twoStageOrg();
+    await call('/api/applications', { method: 'POST', cookie: g.cookie, body: { cycleId: g.cycleId } });
+    const again = await call('/api/applications', {
+      method: 'POST', cookie: g.cookie, body: { cycleId: g.cycleId },
+    });
+    expect(again.status).toBe(409);
+  });
+});

@@ -65,6 +65,14 @@ export interface ApplicationSummary {
   updatedAt: string | null;
   programName: string | null;
   cycleName: string | null;
+  /** The cycle this application belongs to, so "continue" starts the right one. */
+  cycleId: string | null;
+  /** The stage this row is, e.g. "Eligibility". Null for a single-stage program. */
+  stageName: string | null;
+  /** False when a later stage of the same program is published and still to come. */
+  isFinalStage: boolean;
+  /** True once a later stage of the same cycle has been started. */
+  nextStageStarted: boolean;
 }
 
 export interface GranteeHomeResponse {

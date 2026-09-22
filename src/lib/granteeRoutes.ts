@@ -36,6 +36,92 @@ import { formatCents } from './money';
 import { logError } from './errors';
 import type { StoredValue } from './fieldTypes';
 
+/**
+ * Which STEP each application is, and whether another one follows it.
+ *
+ * WHY THE PORTAL NEEDS THIS. A program with an eligibility screen produces two
+ * applications for one grant request, and both are rows in `applications`. The
+ * portal used to render a submitted eligibility screen as "Grant application —
+ * Received. We have it. You do not need to do anything else for now." Every
+ * word of that is wrong for the person reading it: it is not the grant
+ * application, and they very much do need to do something else.
+ *
+ * Fetched separately and joined in memory, for the same reason the program and
+ * cycle names are: a stage name is not sensitive, but it is not on the
+ * applicant column allowlist either, and widening that list to carry display
+ * text would make it mean "safe to send, plus these" rather than what it means
+ * now.
+ */
+interface StageLabel {
+  stageName: string | null;
+  /** False when a later stage exists in the same program. */
+  isFinalStage: boolean;
+  /** Needed to tell whether a LATER stage has already been started. */
+  sortOrder: number;
+}
+
+async function stageLabels(
+  db: D1Database,
+  stageIds: string[],
+): Promise<Map<string, StageLabel>> {
+  const out = new Map<string, StageLabel>();
+  const ids = [...new Set(stageIds.filter(Boolean))];
+  if (ids.length === 0) return out;
+  const { results } = await db
+    .prepare(
+      `SELECT ps.id, ps.name, ps.sort_order,
+              /*
+               * A later stage counts only if it has a PUBLISHED form. A stage
+               * configured but not yet built is not a step anybody can take,
+               * and telling an applicant there is more to do when there is
+               * nowhere to do it is worse than saying nothing.
+               */
+              EXISTS (SELECT 1 FROM program_stages later
+                        JOIN form_definitions fd
+                          ON fd.stage_id = later.id AND fd.status = 'published'
+                         AND fd.deleted_at IS NULL
+                       WHERE later.program_id = ps.program_id
+                         AND later.deleted_at IS NULL
+                         AND later.sort_order > ps.sort_order) AS has_later
+         FROM program_stages ps
+        WHERE ps.id IN (${ids.map(() => '?').join(',')})`,
+    )
+    .bind(...ids)
+    .all<{ id: string; name: string; sort_order: number; has_later: number }>();
+  for (const r of results ?? []) {
+    out.set(r.id, {
+      stageName: r.name,
+      isFinalStage: r.has_later === 0,
+      sortOrder: Number(r.sort_order),
+    });
+  }
+  return out;
+}
+
+/**
+ * Has this organization already started a LATER stage of the same cycle?
+ *
+ * WHY IT MATTERS. `isFinalStage` says a next step exists; it does not say
+ * whether the person has taken it. Without this the portal kept offering
+ * "Continue your application" after the application had been started, and the
+ * endpoint behind it answers 409 -- so the button was an invitation to an
+ * error. Caught by driving the page twice, which no unit test was doing.
+ */
+function laterStageStarted(
+  row: Record<string, unknown>,
+  all: Record<string, unknown>[],
+  stages: Map<string, StageLabel>,
+): boolean {
+  const mine = stages.get(String(row.stage_id ?? ''));
+  if (!mine) return false;
+  return all.some((other) => {
+    if (other === row) return false;
+    if (String(other.cycle_id ?? '') !== String(row.cycle_id ?? '')) return false;
+    const theirs = stages.get(String(other.stage_id ?? ''));
+    return theirs !== undefined && theirs.sortOrder > mine.sortOrder;
+  });
+}
+
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -134,6 +220,10 @@ export async function granteeHome(env: Env, session: Session): Promise<Response>
      * them an empty page.
      */
     const applications = await listApplicationsForExternal(env.DB, session);
+    const stages = await stageLabels(
+      env.DB,
+      applications.map((a) => String(a.stage_id ?? '')),
+    );
     return json({
       organization: { name: organization?.legal_name ?? null },
       awards: [],
@@ -145,6 +235,17 @@ export async function granteeHome(env: Env, session: Session): Promise<Response>
         updatedAt: a.updated_at === null ? null : String(a.updated_at),
         programName: null,
         cycleName: null,
+        /*
+         * WHICH CYCLE, and it is not decoration. The portal offers to start
+         * the next stage of an application, and it has to name the cycle that
+         * application belongs to. Taking the first open cycle instead -- which
+         * is what the first version of that button did -- starts the wrong
+         * programme's first stage the moment two cycles are open at once.
+         */
+        cycleId: a.cycle_id === null ? null : String(a.cycle_id),
+        stageName: stages.get(String(a.stage_id ?? ''))?.stageName ?? null,
+        isFinalStage: stages.get(String(a.stage_id ?? ''))?.isFinalStage ?? true,
+        nextStageStarted: laterStageStarted(a, applications, stages),
       })),
     });
   }
@@ -309,6 +410,8 @@ export async function granteeHome(env: Env, session: Session): Promise<Response>
     }
   }
 
+  const stages = await stageLabels(env.DB, applications.map((a) => String(a.stage_id ?? '')));
+
   return json({
     organization: { name: organization?.legal_name ?? null },
     applications: applications.map((a) => ({
@@ -319,6 +422,10 @@ export async function granteeHome(env: Env, session: Session): Promise<Response>
       updatedAt: a.updated_at === null ? null : String(a.updated_at),
       programName: cycleNames.get(String(a.cycle_id ?? ''))?.programName ?? null,
       cycleName: cycleNames.get(String(a.cycle_id ?? ''))?.cycleName ?? null,
+      cycleId: a.cycle_id === null ? null : String(a.cycle_id),
+      stageName: stages.get(String(a.stage_id ?? ''))?.stageName ?? null,
+      isFinalStage: stages.get(String(a.stage_id ?? ''))?.isFinalStage ?? true,
+      nextStageStarted: laterStageStarted(a, applications, stages),
     })),
     awards: (awards ?? []).map((a) => ({
       id: a.id,

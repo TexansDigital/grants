@@ -628,6 +628,9 @@ export function App(): ReactElement {
           openCycles={portalCycles}
           onStartApplication={() => navigate('/apply')}
           onOpenApplication={(id) => navigate(`/apply/${encodeURIComponent(id)}`)}
+          onContinue={async (cycleId) =>
+            (await applicantApi.startApplication(cycleId)).application.id
+          }
         />
       </PortalShell>
     );

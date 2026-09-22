@@ -24,6 +24,7 @@
  * the server has not sent.
  */
 
+import { useState } from 'react';
 import type { ReactElement } from 'react';
 import type { ApplicationSummary } from './granteeApi';
 import type { OpenCycle } from './publicApi';
@@ -35,6 +36,11 @@ interface Props {
   openCycles: OpenCycle[];
   onStartApplication: () => void;
   onOpenApplication: (id: string) => void;
+  /**
+   * Continue to the next stage of an open cycle. Resolves to the new
+   * application's id; the server decides WHICH stage that is.
+   */
+  onContinue: (cycleId: string) => Promise<string>;
 }
 
 /**
@@ -69,14 +75,73 @@ const STATE: Record<string, { chip: string; tone: 'todo' | 'late' | 'resting'; l
   withdrawn: { chip: 'Withdrawn', tone: 'resting', line: 'Withdrawn at your request.' },
 };
 
+/**
+ * A step that is finished but is not the end of the road.
+ *
+ * WHAT THIS FIXES. A program with an eligibility screen files two applications
+ * for one grant request. A submitted eligibility screen was rendering as
+ * "Grant application — Received. We have it. You do not need to do anything
+ * else for now." It is not the grant application, and they do need to do
+ * something else: the thirty-four-question form has not been started.
+ *
+ * `isFinalStage` comes from the server, which knows whether a later stage
+ * exists AND has a published form. A stage configured but not built is not a
+ * step anybody can take.
+ */
+function isUnfinishedStep(a: ApplicationSummary): boolean {
+  // cycleId is required, not incidental: continuing means starting the next
+  // stage OF THAT CYCLE, and a row that cannot name its cycle cannot be
+  // continued. Offering a button that would start something else is worse
+  // than offering none.
+  return (
+    !a.isFinalStage &&
+    // Already taken. Without this the portal kept offering to start a stage
+    // that was started, and the endpoint behind the button answers 409 -- an
+    // invitation to an error. Caught by driving the page twice.
+    !a.nextStageStarted &&
+    a.status !== 'draft' &&
+    a.status !== 'withdrawn' &&
+    a.cycleId !== null
+  );
+}
+
 export function PortalApplications({
   applications,
   openCycles,
   onStartApplication,
   onOpenApplication,
+  onContinue,
 }: Props): ReactElement | null {
   const drafts = applications.filter((a) => a.status === 'draft');
   const sent = applications.filter((a) => a.status !== 'draft');
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+
+  /*
+   * The next step, if there is one. A cycle is offered as "continue" rather
+   * than "apply again" when this organization has finished an earlier stage
+   * of it and not yet started the next.
+   *
+   * The button calls the server either way; this only decides the wording.
+   * Working out entitlement here would be a second copy of a rule that lives
+   * in createApplication, and the two would disagree the first time a program
+   * used three stages.
+   */
+  const unfinished = sent.find(isUnfinishedStep);
+
+  async function go(cycleId: string): Promise<void> {
+    setBusy(true);
+    setProblem(null);
+    try {
+      onOpenApplication(await onContinue(cycleId));
+    } catch (e) {
+      setProblem(
+        e instanceof Error && e.message ? e.message : 'That could not be started. Please try again.',
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
 
   // Nothing to say and nowhere to go: render nothing rather than an empty
   // heading. The portal's own empty state already speaks.
@@ -103,7 +168,10 @@ export function PortalApplications({
                 <div className="portal-report-row">
                   <div>
                     <p className="portal-report-title">
-                      {a.projectTitle ?? a.programName ?? 'Grant application'}
+                      {a.projectTitle ??
+                        (a.isFinalStage
+                          ? (a.programName ?? 'Grant application')
+                          : `${a.stageName ?? 'First step'}${a.programName ? ` — ${a.programName}` : ''}`)}
                       <span className="portal-chip" data-tone={state.tone}>
                         {state.chip}
                       </span>
@@ -112,7 +180,14 @@ export function PortalApplications({
                       {[a.programName, a.cycleName].filter(Boolean).join(' · ')}
                       {a.submittedAt && ` · Sent ${formatDay(a.submittedAt)}`}
                     </p>
-                    {state.line && <p className="portal-due">{state.line}</p>}
+                    {!a.isFinalStage && !a.nextStageStarted && a.status === 'submitted' ? (
+                      <p className="portal-due">
+                        {a.stageName ?? 'That step'} is done. The full application is the next
+                        step, and it has not been started yet.
+                      </p>
+                    ) : (
+                      state.line && <p className="portal-due">{state.line}</p>
+                    )}
                   </div>
                   {/*
                     A DRAFT IS THE ONLY ONE WITH A BUTTON. A submitted
@@ -139,16 +214,51 @@ export function PortalApplications({
         </ul>
       )}
 
+      {problem && (
+        <p className="banner danger" role="alert">
+          {problem}
+        </p>
+      )}
+
       {openCycles.length > 0 && (
         <div className="portal-apply">
+          {/*
+            TWO DIFFERENT OFFERS, and conflating them is what left an applicant
+            stranded. "Apply for another grant" sent them back to the open-cycles
+            page and round the eligibility screen they had already passed; there
+            was no route to the form they were waiting to fill in. When a step is
+            outstanding the button starts it, through the endpoint that decides
+            which step that is.
+          */}
           <p className="portal-meta">
-            {openCycles.length === 1
-              ? `${openCycles[0]!.programName} is accepting applications.`
-              : `${openCycles.length} programs are accepting applications.`}
+            {unfinished && openCycles.some((c) => c.id === unfinished.cycleId)
+              ? 'You can carry on with the full application now.'
+              : openCycles.length === 1
+                ? `${openCycles[0]!.programName} is accepting applications.`
+                : `${openCycles.length} programs are accepting applications.`}
           </p>
-          <button type="button" className="btn secondary" onClick={onStartApplication}>
-            {applications.length === 0 ? 'See open grant programs' : 'Apply for another grant'}
-          </button>
+          {/*
+            THE UNFINISHED APPLICATION'S OWN CYCLE, not the first open one.
+            A browser drive caught this: with another cycle open, the button
+            started that programme's eligibility screen instead of the
+            application the person was waiting to fill in. It is also gated on
+            that cycle still being open -- a step whose deadline passed is not
+            something to offer.
+          */}
+          {unfinished && openCycles.some((c) => c.id === unfinished.cycleId) ? (
+            <button
+              type="button"
+              className="btn"
+              disabled={busy}
+              onClick={() => void go(unfinished.cycleId!)}
+            >
+              {busy ? 'Opening…' : 'Continue your application'}
+            </button>
+          ) : (
+            <button type="button" className="btn secondary" onClick={onStartApplication}>
+              {applications.length === 0 ? 'See open grant programs' : 'Apply for another grant'}
+            </button>
+          )}
         </div>
       )}
     </section>

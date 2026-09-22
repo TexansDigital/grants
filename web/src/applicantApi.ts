@@ -58,7 +58,31 @@ export const reportDraftPathFor = (reportPeriodId: string) =>
 export const reportUploadPathFor = (reportPeriodId: string) =>
   `/api/grantee/reports/${enc(reportPeriodId)}/uploads`;
 
+export interface StartedApplication {
+  application: { id: string; status: string; stage_key: string };
+}
+
 export const applicantApi = {
+  /**
+   * Start, or continue to, the next stage of an application.
+   *
+   * THE SERVER DECIDES WHICH STAGE. This does not say "the full application"
+   * and must not: the endpoint walks the program's stages, finds the first one
+   * this organization has not started, and checks the gate on the one before
+   * it. A client that worked out the answer itself would be a second copy of
+   * that rule, and the two would disagree the first time a program used three
+   * stages.
+   *
+   * It answers 409 when every stage is already started and 403 when the
+   * previous step is not finished. Both carry a message written for an
+   * applicant, so the caller shows it rather than inventing one.
+   */
+  startApplication: (cycleId: string) =>
+    // `body` is the OBJECT, not a string: request() serializes it and sets the
+    // content-type. Passing a string here double-encodes it into a JSON string
+    // and the Worker reads no cycleId at all.
+    request<StartedApplication>('/api/applications', { method: 'POST', body: { cycleId } }),
+
   draft: (applicationId: string, signal?: AbortSignal) =>
     request<DraftResponse>(
       `/api/applications/${enc(applicationId)}/draft`,
