@@ -44,7 +44,8 @@
     "e2e:offer": "node scripts/e2e-offer.mjs",
     "e2e:a11y": "node scripts/e2e-a11y.mjs",
     "restore": "node scripts/restore.mjs",
-    "backup:pull": "node scripts/pull-backup.mjs"
+    "backup:pull": "node scripts/pull-backup.mjs",
+    "backfill:stage": "node scripts/backfill-stage.mjs"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.12.21",

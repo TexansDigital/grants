@@ -12,6 +12,36 @@ status has moved on. Struck-through items are done or reversed, with what
 replaced them.
 
 
+
+## Found on the deployed preview, 22 September — open
+
+**A single-stage program silently submits an incomplete application.**
+
+CLAUDE.md lists three program shapes: "Single application, eligibility screen
+then full application, or LOI then invited full application." The entry flow
+only handles the second.
+
+`listOpenCycles` hands `/apply/start/:cycleId` the lowest-`sort_order` stage
+with a published form. For a one-stage program that is the full application,
+and `EligibilityForm` renders all of it — with uploads disabled, because no
+application row exists yet, and with upload requirements relaxed because a
+preview cannot satisfy them. `submitEligibility` then flips the application
+straight to `submitted`. A nonprofit would fill in thirty-four questions,
+press submit, and have an application on file with none of its three required
+documents and no way back to add them.
+
+Found because preview's Inspire Change had drifted to one stage — the
+eligibility screen was added to the seed after preview was seeded. That data
+drift is fixed by `npm run backfill:stage`. The code gap is not, and it is
+there for any program the Foundation sets up as a single application.
+
+The fix: when the first stage IS the application, `/apply/start` should
+collect an email plus Turnstile only, create a draft, and mail a link to it —
+never render the full form before there is somewhere to attach files.
+
+Phase-sized, on Phase 2's path, and not to be compressed.
+
+
 ## Found by the authorization census, 22 September — open
 
 **Two functions in `src/lib/scope.ts` have no production caller.**
