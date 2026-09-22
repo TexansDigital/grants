@@ -149,14 +149,19 @@ and "works in production":
   The Worker's CSP had blocked its script and its challenge iframe outright, so
   bot protection on the public endpoints had never once run. Fixed, deployed,
   and seen returning Success on `apply.` in a real browser.
-- **No file has ever been uploaded to a real R2 bucket.** Keys and CORS were
-  set on 22 September; every presigned PUT before that was against a stub. Two
-  faults on this exact path have already been found by opening a console rather
-  than by any test. See `BLOCKED-ON-YOU.md` §1.4b.
+- ~~**No file has ever been uploaded to a real R2 bucket.**~~ **CONFIRMED
+  22 September, 20:31 CDT.** A submitted application on preview carries three
+  attachments, and one was read back out of `steward-preview-files` with
+  `wrangler r2 object get`: 218,056 bytes, matching `size_bytes` exactly, and
+  `file(1)` identifies it as a PDF 1.4. Presigned PUT from a browser, against
+  a real bucket with real credentials, stored, and readable. Every test before
+  this intercepted the PUT against a hostname that does not exist, so what was
+  proven was what the browser SENDS; this is the first time R2 accepted one.
 
 **Still owed by the Foundation:** the impact metrics CSV, decline wording (the
-machinery does not need it; the first real send does), the security review, the
-backup restore test, and answers to CLAUDE.md's open decisions #1, #2, #5 and
+machinery does not need it; the first real send does), the security review,
+a restore drill against the PREVIEW bucket's nightly export (the drill has been
+run end to end, but against an export taken locally), and answers to CLAUDE.md's open decisions #1, #2, #5 and
 #7. Decision #4 is answered — see DECISIONS §37.
 
 ## The schema already commits to things that do not exist

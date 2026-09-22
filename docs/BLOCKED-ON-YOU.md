@@ -43,7 +43,7 @@ production.
 | 0a | ~~Migrations 0022–0025, redeploy, Turnstile~~ | **DONE 21–22 Sep.** Turnstile confirmed rendering in a real browser. |
 | 1 | ~~`apply.` DNS record, and Resend's DNS records~~ | **DONE 20 Sep.** Both hostnames live, domain verified, SPF/DKIM/DMARC published. |
 | 2 | ~~Resend API key, as a Wrangler secret~~ | **DONE 20 Sep.** A sign-in link was sent, delivered, and used to reach the grantee portal. |
-| 3 | ~~R2 key + secret, bucket CORS~~ → **the first real upload** | Keys and CORS done 22 Sep. No file has ever been PUT to a real bucket — see §1.4b. |
+| 3 | ~~R2 key + secret, bucket CORS, the first real upload~~ | **DONE 22 Sep.** A submitted application carries three attachments; one was read back out of the bucket at 218,056 bytes and identifies as a PDF. The upload path has been exercised end to end. |
 | 3a | A Google Shared Drive, from IT | Nothing today. Uploads stay on R2 until it exists — see §1.4a |
 | 4 | Your impact metrics, as a CSV | What grantee reports ASK. The machinery is finished. |
 | 5 | The scoring rubric, as a CSV or XLSX | The entire review and scoring module |
