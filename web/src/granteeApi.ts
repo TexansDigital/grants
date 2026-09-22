@@ -49,9 +49,29 @@ export interface AwardSummary {
   reports: ReportSummary[];
 }
 
+/**
+ * One of this organization's applications, as the applicant may see it.
+ *
+ * `status` is MASKED server-side: an application reads `under_review` until a
+ * human has actually communicated the decision, however long ago an admin
+ * recorded it. Nothing on this surface should re-derive an outcome from any
+ * other field.
+ */
+export interface ApplicationSummary {
+  id: string;
+  status: string;
+  projectTitle: string | null;
+  submittedAt: string | null;
+  updatedAt: string | null;
+  programName: string | null;
+  cycleName: string | null;
+}
+
 export interface GranteeHomeResponse {
   organization: { name: string | null };
   awards: AwardSummary[];
+  /** Every application this organization has, newest first. */
+  applications: ApplicationSummary[];
 }
 
 export interface ReportResponse {

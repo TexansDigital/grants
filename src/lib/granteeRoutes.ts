@@ -21,7 +21,7 @@
 
 import type { Env, RequestContext, Session } from '../types';
 import { notFound } from './errors';
-import { sessionOrgId } from './scope';
+import { sessionOrgId, listApplicationsForExternal } from './scope';
 import { loadFormDefinition } from './loadForm';
 import { allFields } from './forms';
 import {
@@ -127,7 +127,26 @@ export async function granteeHome(env: Env, session: Session): Promise<Response>
     )
       .bind(organizationId)
       .first<{ legal_name: string }>();
-    return json({ organization: { name: organization?.legal_name ?? null }, awards: [] });
+    /*
+     * NO AWARDS IS NOT NO APPLICATIONS. This early return existed because the
+     * page was only ever about grants; an applicant who has applied and holds
+     * nothing yet is the commonest visitor to it, and this branch was sending
+     * them an empty page.
+     */
+    const applications = await listApplicationsForExternal(env.DB, session);
+    return json({
+      organization: { name: organization?.legal_name ?? null },
+      awards: [],
+      applications: applications.map((a) => ({
+        id: String(a.id),
+        status: String(a.status ?? ''),
+        projectTitle: a.project_title === null ? null : String(a.project_title),
+        submittedAt: a.submitted_at === null ? null : String(a.submitted_at),
+        updatedAt: a.updated_at === null ? null : String(a.updated_at),
+        programName: null,
+        cycleName: null,
+      })),
+    });
   }
 
   /*
@@ -250,8 +269,57 @@ export async function granteeHome(env: Env, session: Session): Promise<Response>
     .bind(organizationId)
     .first<{ legal_name: string }>();
 
+  /*
+   * THEIR APPLICATIONS, WHICH THIS PAGE HAS NEVER SHOWN.
+   *
+   * `listApplicationsForExternal` was written in Phase 1, correctly scoped and
+   * correctly masked, and nothing ever called it. So an applicant who
+   * submitted and then closed the tab had no page anywhere that said so: the
+   * portal listed awards and nothing else, the read-back lived at a URL they
+   * would have had to keep, and signing in again landed them on "there are no
+   * grants on this account yet". The single most common question an applicant
+   * has after submitting -- did it go through -- had no answer in the product.
+   *
+   * THE STATUS IS MASKED BY THAT FUNCTION, and that is why this uses it rather
+   * than a query written here. An application becomes 'declined' the moment an
+   * admin records the decision, days before a human finishes the letter; the
+   * applicant sees 'under_review' until somebody has actually told them.
+   * Re-implementing the read here would be re-implementing that rule, and
+   * getting it wrong is a nonprofit learning it was declined from a badge.
+   *
+   * The program and cycle NAMES are fetched separately and joined in memory.
+   * They are public -- they are on the open-cycles page for anyone to read --
+   * but they are not on the applicant column allowlist, and widening that list
+   * to carry them would make it mean "safe to send, plus these" rather than
+   * what it means now.
+   */
+  const applications = await listApplicationsForExternal(env.DB, session);
+  const cycleIds = [...new Set(applications.map((a) => String(a.cycle_id ?? '')).filter(Boolean))];
+  const cycleNames = new Map<string, { cycleName: string; programName: string }>();
+  if (cycleIds.length > 0) {
+    const { results } = await env.DB.prepare(
+      `SELECT c.id, c.name AS cycleName, p.name AS programName
+         FROM cycles c JOIN programs p ON p.id = c.program_id
+        WHERE c.id IN (${cycleIds.map(() => '?').join(',')})`,
+    )
+      .bind(...cycleIds)
+      .all<{ id: string; cycleName: string; programName: string }>();
+    for (const r of results ?? []) {
+      cycleNames.set(r.id, { cycleName: r.cycleName, programName: r.programName });
+    }
+  }
+
   return json({
     organization: { name: organization?.legal_name ?? null },
+    applications: applications.map((a) => ({
+      id: String(a.id),
+      status: String(a.status ?? ''),
+      projectTitle: a.project_title === null ? null : String(a.project_title),
+      submittedAt: a.submitted_at === null ? null : String(a.submitted_at),
+      updatedAt: a.updated_at === null ? null : String(a.updated_at),
+      programName: cycleNames.get(String(a.cycle_id ?? ''))?.programName ?? null,
+      cycleName: cycleNames.get(String(a.cycle_id ?? ''))?.cycleName ?? null,
+    })),
     awards: (awards ?? []).map((a) => ({
       id: a.id,
       program: a.program_name,

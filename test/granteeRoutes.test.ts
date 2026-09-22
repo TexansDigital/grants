@@ -106,6 +106,11 @@ async function grantee(opts: { termEnd?: string; awards?: number } = {}) {
     orgId, awardIds, programId: p.programId, email, userId, session,
     cookie: `${SESSION_COOKIE}=${sessionToken}`,
     periodId: period!.id,
+    // The APPLICATION form and its cycle. This fixture's awards are imported
+    // ones with no application behind them, so a test about applications has
+    // to make its own.
+    cycleId: Object.values(p.cycleIds)[0]!,
+    applicationFormId: p.formDefinitionIds.application!,
   };
 }
 
@@ -550,6 +555,135 @@ describe('the receipt', () => {
 });
 
 // ---------------------------------------------------------------------------
+describe('the applications on the portal', () => {
+  /** An application for this organization, in whatever state the test needs. */
+  async function applicationFor(
+    g: { orgId: string; cycleId: string; applicationFormId: string },
+    opts: { status: string; title: string; decided?: boolean },
+  ): Promise<string> {
+    const id = newId();
+    const now = nowIso();
+    // A decision records WHO and WHEN together or not at all -- the schema
+    // refuses a decided_at with no decided_by, which is the same rule an award
+    // acceptance follows and for the same reason.
+    const decider = opts.decided ? await staffUser() : null;
+    await db
+      .prepare(
+        `INSERT INTO applications (id, cycle_id, stage_id, organization_id, form_definition_id,
+           status, submitted_at, decided_at, decided_by, project_title, created_at, updated_at)
+         SELECT ?, ?, fd.stage_id, ?, fd.id, ?, ?, ?, ?, ?, ?, ?
+           FROM form_definitions fd WHERE fd.id = ?`,
+      )
+      .bind(
+        id, g.cycleId, g.orgId, opts.status, now, opts.decided ? now : null, decider,
+        opts.title, now, now, g.applicationFormId,
+      )
+      .run();
+    return id;
+  }
+
+  /** An admin row, because decided_by is a foreign key into users. */
+  async function staffUser(): Promise<string> {
+    const id = newId();
+    const now = nowIso();
+    await db
+      .prepare(
+        `INSERT INTO users (id, email, role, organization_id, is_active, created_at, updated_at)
+         VALUES (?,?, 'admin', NULL, 1, ?, ?)`,
+      )
+      .bind(id, `portal-admin-${crypto.randomUUID().slice(0, 8)}@example.org`, now, now)
+      .run();
+    return id;
+  }
+
+  /*
+   * WHY THIS EXISTS. `listApplicationsForExternal` was written in Phase 1,
+   * correctly scoped and correctly masked, and nothing ever called it. So
+   * somebody who submitted an application and closed the tab had no page
+   * anywhere that said so: the portal listed awards only, the read-back lived
+   * at a URL they would have had to keep, and signing in again landed them on
+   * "there are no grants on this account yet". Did it go through is the
+   * commonest question an applicant has, and the product had no answer.
+   */
+
+  it('lists the organization own applications, with the program that they are for', async () => {
+    const g = await grantee();
+    const appId = await applicationFor(g, { status: 'submitted', title: 'Literacy Lab' });
+
+    const res = await call('/api/grantee/home', { cookie: g.cookie });
+    const body = await res.json<{
+      applications: {
+        id: string; status: string; projectTitle: string | null; programName: string | null;
+      }[];
+    }>();
+    const mine = body.applications.find((a) => a.id === appId);
+    expect(mine?.status).toBe('submitted');
+    expect(mine?.projectTitle).toBe('Literacy Lab');
+    // The program name is fetched separately and joined in memory, because it
+    // is not on the applicant column allowlist and widening that list would
+    // make it mean "safe to send, plus these".
+    expect(mine?.programName).toBeTruthy();
+  });
+
+  it('never shows a decision the Foundation has not delivered', async () => {
+    /*
+     * THE BUG THIS PREVENTS, and the reason this reads through
+     * listApplicationsForExternal rather than a query written for this page.
+     * `applications.status` becomes 'declined' the instant an admin records
+     * the decision -- days before a human finishes the letter, and after the
+     * Foundation deliberately built a human-release gate on that email so it
+     * would not happen. Re-implementing the read here would be
+     * re-implementing the mask, and getting it wrong is a nonprofit learning
+     * it was declined from a status chip.
+     */
+    const g = await grantee();
+    const appId = await applicationFor(g, {
+      status: 'declined', title: 'Quietly declined', decided: true,
+    });
+
+    const res = await call('/api/grantee/home', { cookie: g.cookie });
+    const body = await res.json<{ applications: { id: string; status: string }[] }>();
+    expect(body.applications.find((a) => a.id === appId)?.status).toBe('under_review');
+    expect(JSON.stringify(body)).not.toContain('decision_communicated_at');
+  });
+
+  it('does not list another organization applications', async () => {
+    const mine = await grantee();
+    const theirs = await grantee();
+    await applicationFor(mine, { status: 'submitted', title: 'Not yours to read' });
+
+    const res = await call('/api/grantee/home', { cookie: theirs.cookie });
+    expect(JSON.stringify(await res.json())).not.toContain('Not yours to read');
+  });
+
+  it('carries applications for an organization holding no grants at all', async () => {
+    /*
+     * THE EARLY-RETURN BRANCH, which is the one that matters most. It existed
+     * because this page was only ever about grants, and it returned an empty
+     * payload the moment an organization had no awards -- which is exactly
+     * the applicant who has applied and holds nothing yet, the commonest
+     * visitor to this page and the one who most needs to know their
+     * application arrived.
+     */
+    const g = await grantee();
+    const appId = await applicationFor(g, { status: 'submitted', title: 'Applied, no grant yet' });
+    // Soft-delete the fixture's award, so the organization has applied and
+    // holds nothing -- which is what a first-time applicant looks like.
+    await db
+      .prepare(`UPDATE awards SET deleted_at = ? WHERE organization_id = ?`)
+      .bind(nowIso(), g.orgId)
+      .run();
+
+    const res = await call('/api/grantee/home', { cookie: g.cookie });
+    const body = await res.json<{
+      awards: unknown[]; applications: { id: string; projectTitle: string | null }[];
+    }>();
+    expect(body.awards).toEqual([]);
+    expect(body.applications.find((a) => a.id === appId)?.projectTitle)
+      .toBe('Applied, no grant yet');
+  });
+});
+
 describe('attaching a file to a report', () => {
   const intent = {
     fieldKey: 'supporting_files',

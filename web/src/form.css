@@ -1137,3 +1137,25 @@ td.row-actions .btn {
     color: #5b6871;
   }
 }
+
+/* ---- applying again, from inside the portal ------------------------------ */
+/*
+ * The way out of the portal. It had none: the shell carries no navigation,
+ * which was right when this page was only a grantee's reporting page and there
+ * was genuinely nowhere else to go. There are three external destinations now.
+ */
+.portal-apply {
+  margin-top: var(--space-4);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--line);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+.portal-apply .portal-meta {
+  /* Takes the slack so the button sits at the end on a wide screen and wraps
+     underneath on a phone, rather than being pushed off the edge. */
+  flex: 1 1 14rem;
+  margin: 0;
+}

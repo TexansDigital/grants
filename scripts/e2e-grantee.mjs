@@ -579,6 +579,34 @@ check('the signed read forces a download rather than a render',
 check('the grantee stayed on their own page',
   new URL(page.url()).pathname, '/reports');
 
+/*
+ * THE WAY OUT OF THIS PAGE, which it did not have.
+ *
+ * The portal shell carries no navigation -- correct when this was only a
+ * grantee's reporting page and there was genuinely nowhere else to go. There
+ * are three external destinations now, and a signed-in nonprofit wanting to
+ * apply again, or to check whether an application went through, reached a dead
+ * end and had to be sent a link or type a path.
+ */
+const applyRegion = page.locator('section', {
+  has: page.getByRole('heading', { name: /Your applications|Apply for a grant/ }),
+});
+const hasApplySection = (await applyRegion.count()) > 0;
+note('applications section present', String(hasApplySection));
+if (hasApplySection) {
+  /*
+   * WHICH BUTTON IS SHOWN DEPENDS ON WHETHER A CYCLE IS OPEN, and this
+   * database may have none. Both wordings are acceptable; what is not
+   * acceptable is a page with neither, which is what shipped.
+   */
+  const out = await applyRegion.getByRole('button', {
+    name: /See open grant programs|Apply for another grant|Carry on|View/,
+  }).count();
+  truthy('the portal offers somewhere to go', out > 0);
+} else {
+  note('no applications and no open cycle', 'section correctly renders nothing');
+}
+
 check('no console errors', consoleErrors, []);
 check('nothing on the page 404s', notFound, []);
 

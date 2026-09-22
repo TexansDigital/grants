@@ -29,6 +29,7 @@ import {
   type PendingAward,
 } from './granteeApi';
 import { GranteeHome } from './GranteeHome';
+import { PortalApplications } from './PortalApplications';
 import { ReportForm } from './ReportForm';
 import { Home } from './Home';
 import { FormRenderer } from './FormRenderer';
@@ -168,6 +169,8 @@ export function App(): ReactElement {
   const [form, setForm] = useState<FormDefinition | null>(null);
   const [draft, setDraft] = useState<DraftResponse | null>(null);
   const [portal, setPortal] = useState<GranteeHomeResponse | null>(null);
+  /** Open cycles, read on the portal so a signed-in nonprofit can reach them. */
+  const [portalCycles, setPortalCycles] = useState<OpenCycle[]>([]);
   /** Awards this organization has been offered and not yet answered. */
   const [pendingAwards, setPendingAwards] = useState<PendingAward[]>([]);
   const [offerBusy, setOfferBusy] = useState(false);
@@ -384,12 +387,25 @@ export function App(): ReactElement {
            * in sequence would show the reports first and then push them down
            * the page as the offer arrives -- under somebody's thumb.
            */
-          const [home, offers] = await Promise.all([
+          /*
+           * THREE READS, TOGETHER. The two this page was always about -- an
+           * unanswered award and the reporting schedule -- plus the open
+           * cycles, which are public and are what makes "apply again" a
+           * button rather than a path somebody has to be told.
+           *
+           * The cycles read is allowed to fail on its own. It is the least
+           * important of the three, and a nonprofit should not lose sight of
+           * a report that is due because the public cycle list had a bad
+           * minute.
+           */
+          const [home, offers, cycles] = await Promise.all([
             granteeApi.home(signal),
             granteeApi.pendingAwards(signal),
+            publicApi.cycles(signal).catch(() => ({ cycles: [] as OpenCycle[] })),
           ]);
           setPortal(home);
           setPendingAwards(offers.awards);
+          setPortalCycles(cycles.cycles);
         } else if (route?.name === 'report') {
           setReport(await granteeApi.report(route.id, signal));
         }
@@ -594,6 +610,24 @@ export function App(): ReactElement {
         <GranteeHome
           data={portal}
           onOpenReport={(id) => navigate(`/reports/${encodeURIComponent(id)}`)}
+        />
+        {/*
+          BELOW the grants and the reports, and that ordering is the portal's
+          one rule: the outstanding thing is the first thing on the page with a
+          button on it. An application already sent is not outstanding; a
+          report due in three weeks is.
+
+          It is here at all because there was no way out of this page. The
+          shell carries no navigation -- correct when the portal was only a
+          grantee's reporting page -- so a nonprofit signing in to reapply, or
+          to check whether an application went through, reached a dead end and
+          had to be sent a link.
+        */}
+        <PortalApplications
+          applications={portal.applications ?? []}
+          openCycles={portalCycles}
+          onStartApplication={() => navigate('/apply')}
+          onOpenApplication={(id) => navigate(`/apply/${encodeURIComponent(id)}`)}
         />
       </PortalShell>
     );
