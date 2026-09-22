@@ -39,7 +39,7 @@ public endpoints had never actually run.
 | 0 | Apply migration 0025 and redeploy (§0) | The grant report reminder |
 | 1 | ~~`apply.` DNS record, and Resend's DNS records~~ | **DONE 20 Sep.** Both hostnames live, domain verified, SPF/DKIM/DMARC published. |
 | 2 | ~~Resend API key, as a Wrangler secret~~ | **DONE 20 Sep.** A sign-in link was sent, delivered, and used to reach the grantee portal. |
-| 3 | ~~R2 key + secret~~ → **bucket CORS, and the first real upload** | Every file upload. Keys set 22 Sep; CORS and a real PUT are what remain. |
+| 3 | ~~R2 key + secret, bucket CORS~~ → **the first real upload** | Keys and CORS done 22 Sep. No file has ever been PUT to a real bucket — see §1.4b. |
 | 3a | A Google Shared Drive, from IT | Nothing today. Uploads stay on R2 until it exists — see §1.4a |
 | 4 | Your impact metrics, as a CSV | What grantee reports ASK. The machinery is finished. |
 | 5 | The scoring rubric, as a CSV or XLSX | The entire review and scoring module |
@@ -122,12 +122,13 @@ difference between having backups and believing you do.
 
 ### 1.4 R2 storage credentials
 
-**Status: keys DONE 22 September. CORS and one real upload remain.**
+**Status: keys and CORS DONE 22 September. One real upload remains.**
 
 `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY` are all set, the
-last two as Wrangler secrets that never passed through a conversation. What is
-left is the bucket's CORS policy and the fact that **no file has ever been
-uploaded through this system to a real bucket** — see 1.4b.
+last two as Wrangler secrets that never passed through a conversation, and
+`steward-preview-files` carries its CORS rules. What is left is the fact that
+**no file has ever been uploaded through this system to a real bucket** — see
+1.4b.
 
 The token setup below is kept because production needs its own, and the
 reasoning behind each setting is the part worth not re-deriving.
@@ -173,12 +174,18 @@ rather than an omission: a download is a top-level navigation to the signed
 URL, and navigations are not subject to CORS. Adding `GET` there would widen
 the bucket for no behaviour.
 
-**Expect the CORS command to fail**, and `npm run whoami` says why: wrangler's
-OAuth login does not request an R2 scope and re-authenticating will not produce
-one. If it does, set it in the dashboard instead — R2 → `steward-preview-files`
-→ Settings → CORS Policy → Edit — with `PUT` from
+**That command works**, and it was predicted here that it would not. The
+prediction came from `npm run whoami` reporting no R2 scope on the OAuth token
+— which is true, and is why `wrangler r2 bucket create` fails — but the scope
+wrangler needs to set a CORS policy is not the same one. Recorded because the
+wrong half of that rule was about to be repeated for production.
+
+If it ever does refuse, the dashboard does the same job: R2 →
+`steward-preview-files` → Settings → CORS Policy → Edit, with `PUT` from
 `https://apply.houstontexansfoundation.org` and from `http://localhost:8787`,
 and nothing else.
+
+**Done 22 September** on `steward-preview-files`, two rules.
 
 `GET` is deliberately absent. A download is a top-level navigation to the
 signed URL, and navigations are not subject to CORS, so listing it there would
