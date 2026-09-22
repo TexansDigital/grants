@@ -232,18 +232,55 @@ numbers are ordering, not reservations.)
    fail-fast screen that never collects a full application from an ineligible
    organization. Published form definitions are immutable, so changing this
    later means a new version while applicants may be mid-draft.
-5. **Applicant login: magic link plus what.** The link is a prior decision and
+5. **Embedding `apply` and the reporting portal in the CMS.** Requested 22
+   September, for a Pocket CMS site. Not decided, and it cannot be until two
+   facts are known: what registrable domain the CMS site is served from, and
+   whether it sits behind Cloudflare.
+
+   Two things in this system refuse an embed today, both deliberately:
+
+   - `frame-ancestors 'none'` and `X-Frame-Options: DENY` on every response.
+     Clickjacking protection on a surface that submits money requests and
+     uploads financial statements.
+   - `__Host-steward_session` is `SameSite=Lax`. In a CROSS-SITE iframe the
+     browser does not send it, so the page loads and nobody can be signed in.
+
+   The second one is where the domain question decides everything. An iframe
+   of `apply.houstontexansfoundation.org` inside a page on
+   `houstontexansfoundation.org` is same-SITE, the Lax cookie is sent, and
+   only `frame-ancestors` has to change. An iframe inside a page on any other
+   registrable domain is third-party: Safari blocks the cookie outright and
+   Chrome is removing it, so sign-in would fail for a large share of
+   nonprofits and would fail differently per browser, which is the worst
+   possible way for it to fail.
+
+   The options, shortest to longest: link out from a CMS page (no change, no
+   risk, what most funders do); frame a same-site subdomain (one header
+   change); mount Steward on a path of the main site through a Cloudflare
+   Worker route (truly same-origin, no framing, touches the main site); or
+   serve the app from the CMS origin and open the API up with CORS (the most
+   work and the weakest posture).
+
+   Worth saying separately from the security: a forty-field form filled over
+   an hour is a poor thing to put in an iframe. Nested scrolling, an autosave
+   indicator that can sit off-screen, file pickers that behave badly in frames
+   on iOS, and a back button that does not do what the reader expects. The
+   reporting portal is a better candidate than the application.
+
+6. **Applicant login: magic link plus what.** The link is a prior decision and
    stands. The open question is the fallback, because corporate scanners follow
    links in mail and burn a single-use token before the applicant clicks. A code
    alongside the link, or a link that survives a HEAD or prefetch.
 
 **Not yet blocking, but cheap now and expensive later:**
 
-6. Retention policy for uploaded financials (open decision #3) — sets the R2
+7. Retention policy for uploaded financials (open decision #3) — sets the R2
    lifecycle rules and key layout, so it wants answering before item 8.
-7. Concurrency on awards: optimistic locking, or last-write-wins in writing.
-8. Grace rule for drafts started before close (open decision #6) — blocks 14.
-9. Whether declined applicants keep portal access (open decision #4) — shapes 5.
+8. ~~Concurrency on awards: optimistic locking, or last-write-wins in
+   writing.~~ RESOLVED — optimistic locking, built in 0024.
+9. Grace rule for drafts started before close (open decision #6) — blocks 14.
+10. ~~Whether declined applicants keep portal access (open decision #4).~~
+    RESOLVED — they keep it, and the portal now offers them a way to reapply.
 
 ## Not proposed
 
