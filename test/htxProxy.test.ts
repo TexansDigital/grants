@@ -228,6 +228,28 @@ describe('who may read it', () => {
     expect(res.headers.get('access-control-allow-origin')).toBeNull();
   });
 
+  /*
+   * THE BRANCH THAT ACTUALLY MATTERS, and the one Vary was missing from.
+   *
+   * The allowed-origin response carries an ACAO naming the Texans site, so a
+   * shared cache handing it elsewhere leaks nothing readable. The response to
+   * any OTHER origin has no ACAO at all -- and without Vary a proxy between
+   * the visitor and here may store it under the bare URL and later serve it
+   * to www.houstontexans.com, where the browser blocks the block's own fetch
+   * and the module renders nothing. Intermittently, for some visitors, with
+   * no error anywhere anyone would look.
+   *
+   * Found on the deployed Worker, not here: `vary` was present on one curl
+   * and absent on the next.
+   */
+  it('varies on Origin even when it refuses, so a cache cannot poison the block', async () => {
+    const d = deps({ fetch: upstreamOk });
+    for (const origin of ['https://evil.example', undefined]) {
+      const res = await handle(get('/grants/cycles', origin), ENV, d.deps);
+      expect(res.headers.get('vary'), `origin ${origin ?? 'absent'}`).toBe('Origin');
+    }
+  });
+
   it('never answers with a wildcard', async () => {
     for (const origin of [TEXANS, 'https://evil.example', undefined]) {
       const d = deps({ fetch: upstreamOk });

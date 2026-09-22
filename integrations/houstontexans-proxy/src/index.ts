@@ -73,12 +73,28 @@ const num = (value: string | undefined, fallback: number): number => {
  */
 function corsHeaders(request: Request, env: Env): Record<string, string> {
   const origin = request.headers.get('origin');
-  if (origin !== env.ALLOWED_ORIGIN) return {};
+  /*
+   * `Vary: Origin` ON BOTH BRANCHES, and the reason is the opposite of the
+   * obvious one.
+   *
+   * This header used to sit inside the allowed-origin return, which is the
+   * branch where it matters least: that response carries an ACAO naming
+   * houstontexans.com, so a shared cache handing it to some other site gives
+   * that site nothing it can read.
+   *
+   * The direction that actually hurts is the other one. A response to any
+   * other origin has NO ACAO, and without Vary a shared cache -- a corporate
+   * proxy, an ISP, anything between the visitor and here -- may store it under
+   * the bare URL and later serve it to www.houstontexans.com. The browser
+   * then blocks the block's own fetch and the module renders nothing, for some
+   * visitors, intermittently, with no error anywhere anyone would look.
+   *
+   * Found by running the three curls against the deployed Worker and noticing
+   * that `vary` was present on one response and absent on the next.
+   */
+  if (origin !== env.ALLOWED_ORIGIN) return { vary: 'Origin' };
   return {
     'access-control-allow-origin': env.ALLOWED_ORIGIN,
-    // The response differs by Origin, so a shared cache must not serve one
-    // origin's copy to another. Cheap, and the classic way a locked-down
-    // endpoint quietly becomes an open one.
     vary: 'Origin',
     'access-control-allow-methods': 'GET, OPTIONS',
     'access-control-max-age': '86400',
