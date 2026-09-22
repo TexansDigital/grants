@@ -254,18 +254,34 @@ numbers are ordering, not reservations.)
    nonprofits and would fail differently per browser, which is the worst
    possible way for it to fail.
 
-   The options, shortest to longest: link out from a CMS page (no change, no
-   risk, what most funders do); frame a same-site subdomain (one header
-   change); mount Steward on a path of the main site through a Cloudflare
-   Worker route (truly same-origin, no framing, touches the main site); or
-   serve the app from the CMS origin and open the API up with CORS (the most
-   work and the weakest posture).
+   **RESOLVED 22 September, and the answer is not an embed at all.** The CMS
+   site is `houstontexans.com` and Steward is on
+   `houstontexansfoundation.org` -- different registrable domains, so any
+   iframe is third-party and the session cookie is a third-party cookie.
+   Safari blocks those outright and Chrome is removing them. Sign-in would
+   fail for a large share of nonprofits, differently per browser, which is the
+   worst way for anything to fail.
+
+   So: NATIVE POCKET BLOCKS in the Deep Steel Thunder design system, reading
+   Steward's public data and linking out. No iframe, no header change, no
+   cookie change. It looks native because it IS their design system, and it is
+   their existing workflow rather than a new pattern.
+
+   The data goes through `texansdigital.workers.dev` rather than being fetched
+   from Steward directly: their Worker calls Steward server-side, where CORS
+   does not apply, and serves the page under the CORS lock and five-minute
+   cache they already use. **Steward changes nothing at all.**
+
+   Lives in a Foundation or `/community` section. Three blocks are worth
+   having: open cycles with real deadlines, a reporting signpost for grantees,
+   and the funded-grants list from `/api/public/grants`.
 
    Worth saying separately from the security: a forty-field form filled over
-   an hour is a poor thing to put in an iframe. Nested scrolling, an autosave
-   indicator that can sit off-screen, file pickers that behave badly in frames
-   on iOS, and a back button that does not do what the reader expects. The
-   reporting portal is a better candidate than the application.
+   an hour is a poor thing to put in an iframe even where cookies work. Nested
+   scrolling, an autosave indicator that can sit off-screen, file pickers that
+   behave badly in frames on iOS, and a back button that does not do what the
+   reader expects. Linking out is the better experience here, not merely the
+   only one that works.
 
 6. **Applicant login: magic link plus what.** The link is a prior decision and
    stands. The open question is the fallback, because corporate scanners follow
