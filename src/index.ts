@@ -73,6 +73,7 @@ import {
   organizationHistoryForStaff,
 } from './lib/scope';
 import { searchApplications } from './lib/search';
+import { reindexAllApplications } from './lib/reindex';
 import {
   reportPortfolio, readReportForStaff, acceptReport, requestReportRevisions, waiveReport,
 } from './lib/reportAdmin';
@@ -682,6 +683,25 @@ const routes: readonly Route[] = [
   // ADMIN_ONLY, and the reason is the aggregate rather than any single row: a
   // reviewer is scoped to the applications assigned to them, and this is every
   // organization's award compliance and EIN state across every program.
+  {
+    /*
+     * Rebuild the full-text index.
+     *
+     * ADMIN ONLY, and a POST because it writes. It exists for one situation:
+     * after a restore. The nightly export skips virtual tables, so a restored
+     * database has an empty application_fts and a fully populated
+     * application_search_state -- an index that reports itself current and
+     * finds nothing. Nothing else in this system could rebuild it.
+     *
+     * Not on a schedule. A rebuild is cheap here but it is not free, and a
+     * nightly one would mask exactly the kind of indexing bug it exists to
+     * recover from.
+     */
+    method: 'POST',
+    path: '/api/search/reindex',
+    roles: ADMIN_ONLY,
+    handler: async ({ env, ctx }) => json(await reindexAllApplications(env.DB, ctx), ctx),
+  },
   {
     method: 'GET',
     path: '/api/data-health',

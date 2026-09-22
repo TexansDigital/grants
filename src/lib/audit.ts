@@ -132,6 +132,15 @@ export type AuditAction =
   | 'attachment.retention_held'
   // the nightly D1 export
   | 'data.exported'
+  /*
+   * The full-text index, rebuilt from the applications table.
+   *
+   * Audited because it is the one operation that silently changes what staff
+   * can FIND without changing a single application row. A cycle where search
+   * suddenly returns different results needs a line saying who rebuilt it and
+   * when, or the next person is debugging a ghost.
+   */
+  | 'search.reindexed'
   | 'user.created'
   | 'user.deactivated'
   | 'auth.magic_link_requested'
@@ -159,7 +168,11 @@ export type EntityType =
   | 'report_period'
   | 'report_submission'
   | 'attachment'
-  | 'export';
+  | 'export'
+  // The full-text index. Not a row anyone can open, which is the point: a
+  // rebuild has to be attributable to somebody even though it touches no
+  // record a person could name.
+  | 'search_index';
 
 export interface AuditInput {
   action: AuditAction;

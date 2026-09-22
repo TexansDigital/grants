@@ -42,7 +42,9 @@
     "e2e:scorecards": "node scripts/e2e-scorecards.mjs",
     "e2e:dashboard": "node scripts/e2e-dashboard.mjs",
     "e2e:offer": "node scripts/e2e-offer.mjs",
-    "e2e:a11y": "node scripts/e2e-a11y.mjs"
+    "e2e:a11y": "node scripts/e2e-a11y.mjs",
+    "restore": "node scripts/restore.mjs",
+    "backup:pull": "node scripts/pull-backup.mjs"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.12.21",
