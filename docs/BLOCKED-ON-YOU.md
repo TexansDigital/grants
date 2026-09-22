@@ -4,19 +4,25 @@ One list, kept current. Everything here blocks work that is otherwise ready to
 start, or blocks the platform going live. Nothing here is something I can do
 myself, decide on your behalf, or work around.
 
-Last updated: 21 September 2026.
+Last updated: 22 September 2026.
 
 ---
 
-## 0. Waiting on your terminal — nothing, as of 22 September
+## 0. Waiting on your terminal — migration 0026 and a redeploy
 
-All 25 migrations are applied to preview, the deployed Worker is running
-current code, R2 keys and CORS are set, and the Turnstile widget was confirmed
-rendering on `apply.` in a real browser. Nothing in this section is
-outstanding.
+Migrations 0001–0025 are applied to preview and the deployed Worker was
+current as of 22 September. Since then:
 
-Kept as a section because it is the first thing to re-read after a pull. The
-command, when there is something to apply, is:
+- **0026** adds two triggers refusing a form field named after an
+  internal-only column. It is what lets the new external-payload guard fail
+  closed without ever tripping on a legitimate answer.
+- The Worker now inspects every applicant and grantee response for
+  internal-only fields before it leaves, and carries a new admin endpoint,
+  `POST /api/search/reindex`.
+
+Neither is urgent — nothing is broken without them — but the guard is the
+belt-and-braces on non-negotiable 5, so it may as well go out with the next
+deploy:
 
 ```
 npm run whoami
@@ -33,7 +39,8 @@ production.
 
 | | What | Blocks |
 |---|---|---|
-| 0 | ~~Migrations 0022–0025, redeploy, Turnstile~~ | **DONE 21–22 Sep.** All 25 migrations applied; preview runs current code; Turnstile confirmed rendering. |
+| 0 | Migration **0026** and a redeploy | Nothing today. The external-payload guard and the reindex endpoint reach preview when you run it. |
+| 0a | ~~Migrations 0022–0025, redeploy, Turnstile~~ | **DONE 21–22 Sep.** Turnstile confirmed rendering in a real browser. |
 | 1 | ~~`apply.` DNS record, and Resend's DNS records~~ | **DONE 20 Sep.** Both hostnames live, domain verified, SPF/DKIM/DMARC published. |
 | 2 | ~~Resend API key, as a Wrangler secret~~ | **DONE 20 Sep.** A sign-in link was sent, delivered, and used to reach the grantee portal. |
 | 3 | ~~R2 key + secret, bucket CORS~~ → **the first real upload** | Keys and CORS done 22 Sep. No file has ever been PUT to a real bucket — see §1.4b. |
