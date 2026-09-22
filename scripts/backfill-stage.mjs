@@ -85,11 +85,28 @@ if (!programId) throw new Error(`could not find the program id in ${SEED}`);
  * ids are deterministic, but writing one into this script would make it a
  * script about one stage of one program forever.
  */
+/*
+ * EVERY stage in the seed, not just the one being added.
+ *
+ * The seed is the authority on what order the stages go in, and a database
+ * that lost one has almost certainly renumbered the survivors -- preview's
+ * Application sits at sort_order 0 because it was the only stage when preview
+ * was seeded. Reading them all is what makes the collision below detectable.
+ */
+const seedStages = lines
+  .filter((l) => l.startsWith('INSERT INTO program_stages'))
+  .map((l) => {
+    const m = /VALUES \('([0-9a-f-]+)','([0-9a-f-]+)','([^']+)','([^']*)',(\d+)/.exec(l);
+    if (!m) throw new Error(`could not parse a program_stages row in ${SEED}`);
+    return { id: m[1], key: m[3], name: m[4], sortOrder: Number(m[5]) };
+  });
+
 const stageLine = lines.find(
   (l) => l.startsWith('INSERT INTO program_stages') && l.includes(`'${STAGE_KEY}'`),
 );
 if (!stageLine) throw new Error(`no stage with key "${STAGE_KEY}" in ${SEED}`);
 const stageId = /VALUES \('([0-9a-f-]+)'/.exec(stageLine)[1];
+const stageSortOrder = seedStages.find((st) => st.key === STAGE_KEY).sortOrder;
 
 const formLine = lines.find(
   (l) => l.startsWith('INSERT INTO form_definitions') && l.includes(`'${stageId}'`),
@@ -135,7 +152,7 @@ if (program.length === 0) {
 console.log(`  Target holds: ${program[0].name}`);
 
 const existing = query(
-  `SELECT id, name, sort_order FROM program_stages
+  `SELECT id, stage_key, name, sort_order FROM program_stages
     WHERE program_id='${programId}' AND deleted_at IS NULL ORDER BY sort_order`,
 );
 console.log(`  Stages now:   ${existing.map((s) => `${s.sort_order}:${s.name}`).join(', ') || 'none'}`);
@@ -144,6 +161,62 @@ if (existing.some((s) => s.id === stageId)) {
   console.log('\nThe stage is already there. Nothing to do.');
   process.exit(0);
 }
+
+/*
+ * THE RENUMBER, and the reason this script would otherwise have made things
+ * worse.
+ *
+ * Preview's Application stage sits at sort_order 0 -- it was the only stage
+ * when preview was seeded. The seed puts Eligibility at 0 and Application at
+ * 1. Inserting the seed's row as-is would leave TWO stages at 0, and
+ * (program_id, sort_order) is a plain index, not a unique one, so nothing in
+ * the database would stop it.
+ *
+ * listOpenCycles selects the stage whose sort_order equals MIN(sort_order).
+ * With a tie that matches both, the LEFT JOIN emits the cycle twice, /apply
+ * lists the programme twice, and /apply/start gets whichever formDefinitionId
+ * the client happened to take. That is worse than the problem being fixed.
+ *
+ * So the ordering is reconciled against the seed first, matched by stage_key
+ * rather than by id: the seed says where each stage belongs, and a database
+ * that lost a stage is not a database whose numbering can be trusted.
+ */
+const renumber = [];
+for (const row of existing) {
+  const want = seedStages.find((st) => st.key === row.stage_key);
+  if (!want) continue;
+  if (Number(row.sort_order) !== want.sortOrder) {
+    renumber.push({ id: row.id, name: row.name, from: Number(row.sort_order), to: want.sortOrder });
+  }
+}
+if (renumber.length > 0) {
+  console.log('\n  Ordering to reconcile against the seed:');
+  for (const r of renumber) console.log(`      ${r.name}: ${r.from} -> ${r.to}`);
+}
+
+/*
+ * The planned end state, checked BEFORE anything is written. A collision here
+ * means the seed and this database disagree in a way this script was not
+ * written for, and guessing would be worse than stopping.
+ */
+const planned = [
+  ...existing.map((r) => {
+    const moved = renumber.find((x) => x.id === r.id);
+    return { name: r.name, order: moved ? moved.to : Number(r.sort_order) };
+  }),
+  { name: `${STAGE_KEY} (new)`, order: stageSortOrder },
+];
+const orders = planned.map((p) => p.order);
+if (new Set(orders).size !== orders.length) {
+  console.error(
+    `\nthat would leave two stages sharing a sort_order: ` +
+      `${planned.map((p) => `${p.order}:${p.name}`).join(', ')}.\n` +
+      'listOpenCycles takes MIN(sort_order) and a tie matches both, which lists\n' +
+      'the cycle twice and makes which form an applicant gets undefined. Stopping.',
+  );
+  process.exit(1);
+}
+console.log(`  Would become: ${planned.sort((a, b) => a.order - b.order).map((p) => `${p.order}:${p.name}`).join(', ')}`);
 
 /*
  * A COLLISION CHECK BEFORE WRITING, not an error caught afterwards.
@@ -167,11 +240,35 @@ if (clashes.length > 0) {
   process.exit(1);
 }
 
+/*
+ * THE RENUMBER GOES FIRST, in the same file and therefore the same
+ * transaction. Between moving Application out of slot 0 and putting
+ * Eligibility into it, the two must never both be visible: a request landing
+ * in that window would see the tie this whole check exists to prevent.
+ *
+ * Each move carries an audit row. CLAUDE.md: every write that changes what a
+ * programme looks like is attributable. A stage silently changing position is
+ * exactly the change nobody can explain six months later.
+ */
+const stamp = new Date().toISOString();
+const renumberSql = renumber.flatMap((r) => [
+  `UPDATE program_stages SET sort_order = ${r.to}, updated_at = '${stamp}' ` +
+    `WHERE id = '${r.id}' AND sort_order = ${r.from};`,
+  `INSERT INTO audit_log (id, actor_user_id, actor_kind, actor_role, actor_organization_id, ` +
+    `action, entity_type, entity_id, before_json, after_json, changed_fields_json, ` +
+    `request_id, ip, user_agent, created_at) ` +
+    `SELECT '${crypto.randomUUID()}', NULL, 'system', NULL, NULL, 'program_stage.updated', ` +
+    `'program_stage', '${r.id}', '{"sort_order":${r.from}}', '{"sort_order":${r.to}}', ` +
+    `'["sort_order"]', 'backfill-stage-${STAGE_KEY}', NULL, NULL, '${stamp}' ` +
+    `WHERE EXISTS (SELECT 1 FROM program_stages WHERE id = '${r.id}' AND sort_order = ${r.to});`,
+]);
+
 const tmp = join(mkdtempSync(join(tmpdir(), 'steward-backfill-')), `${STAGE_KEY}.sql`);
-writeFileSync(tmp, `${selected.join('\n')}\n`);
+writeFileSync(tmp, `${[...renumberSql, ...selected].join('\n')}\n`);
 
 if (!APPLY) {
-  console.log(`\n  Would apply ${selected.length} statements from ${SEED}.`);
+  console.log(`\n  Would apply ${renumberSql.length} renumbering statements ` +
+              `and ${selected.length} from ${SEED}.`);
   console.log(`  The SQL is at ${tmp} if you want to read it first.`);
   console.log(`\n  Re-run with --apply to write it.`);
   process.exit(0);
@@ -197,10 +294,35 @@ for (const r of after) {
   console.log(`      ${r.sort_order}  ${r.stage} — ${r.form ?? 'no form'} (${r.status ?? '—'}, ${r.fields ?? 0} fields)`);
 }
 
-const first = after[0];
-const ok = first && first.stage !== 'Application' && first.status === 'published';
+/*
+ * THE ASSERTION THAT MATTERS, phrased the way listOpenCycles asks the
+ * question rather than the way a person would read the list above. "The first
+ * row looks right" is satisfied by two stages tied at zero.
+ */
+const resolved = query(
+  `SELECT ps.name AS stage, fd.name AS form, fd.status
+     FROM program_stages ps
+     LEFT JOIN form_definitions fd
+            ON fd.stage_id = ps.id AND fd.status='published' AND fd.deleted_at IS NULL
+    WHERE ps.program_id='${programId}' AND ps.deleted_at IS NULL
+      AND ps.sort_order = (SELECT MIN(sort_order) FROM program_stages
+                            WHERE program_id='${programId}' AND deleted_at IS NULL)`,
+);
+const tied = resolved.length !== 1;
+const first = resolved[0];
+const ok = !tied && first && first.stage !== 'Application' && first.status === 'published';
+if (tied) {
+  console.log(
+    `\n  MIN(sort_order) matches ${resolved.length} stages: ` +
+      `${resolved.map((r) => r.stage).join(', ')}.\n` +
+      '  listOpenCycles would list the cycle once per match and the form an\n' +
+      '  applicant gets would be undefined. This needs fixing before anyone applies.',
+  );
+} else {
+  console.log(`\n  An applicant starting now gets: ${first?.stage ?? 'nothing'} — ${first?.form ?? 'no form'}`);
+}
 console.log(
-  `\n${ok ? 'Done.' : 'APPLIED, BUT THE FIRST STAGE IS STILL NOT WHAT YOU WANTED — look above.'}`,
+  `\n${ok ? 'Done.' : 'APPLIED, BUT THE ENTRY STAGE IS STILL NOT WHAT YOU WANTED — look above.'}`,
 );
 console.log('\nThe public list caches nothing, so /apply/start should render the short');
 console.log('screen on the next load. Check it before telling anyone to use it.');
