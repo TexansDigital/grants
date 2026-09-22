@@ -39,7 +39,7 @@ public endpoints had never actually run.
 | 0 | Apply migration 0025 and redeploy (§0) | The grant report reminder |
 | 1 | ~~`apply.` DNS record, and Resend's DNS records~~ | **DONE 20 Sep.** Both hostnames live, domain verified, SPF/DKIM/DMARC published. |
 | 2 | ~~Resend API key, as a Wrangler secret~~ | **DONE 20 Sep.** A sign-in link was sent, delivered, and used to reach the grantee portal. |
-| 3 | R2 key + secret, `steward-staging-backups`, bucket CORS | Every file upload. (Account id and `steward-preview-backups` are done.) |
+| 3 | ~~R2 key + secret~~ → **bucket CORS, and the first real upload** | Every file upload. Keys set 22 Sep; CORS and a real PUT are what remain. |
 | 3a | A Google Shared Drive, from IT | Nothing today. Uploads stay on R2 until it exists — see §1.4a |
 | 4 | Your impact metrics, as a CSV | What grantee reports ASK. The machinery is finished. |
 | 5 | The scoring rubric, as a CSV or XLSX | The entire review and scoring module |
@@ -122,13 +122,15 @@ difference between having backups and believing you do.
 
 ### 1.4 R2 storage credentials
 
-**Status: partly done. This is now the single largest blocker left.**
+**Status: keys DONE 22 September. CORS and one real upload remain.**
 
-`R2_ACCOUNT_ID` is filled in. There is still no R2 access key or secret, so
-every presigned upload refuses rather than half-working — which blocks an
-Inspire Change application outright, since it requires three file uploads.
+`R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY` are all set, the
+last two as Wrangler secrets that never passed through a conversation. What is
+left is the bucket's CORS policy and the fact that **no file has ever been
+uploaded through this system to a real bucket** — see 1.4b.
 
-**What I need — and the first line is the important one.**
+The token setup below is kept because production needs its own, and the
+reasoning behind each setting is the part worth not re-deriving.
 
 **Do not send me the key or the secret.** Not in chat, not in a screenshot, not
 in a file. `wrangler secret put` reads them from your terminal and hands them
@@ -171,10 +173,41 @@ rather than an omission: a download is a top-level navigation to the signed
 URL, and navigations are not subject to CORS. Adding `GET` there would widen
 the bucket for no behaviour.
 
-**To check it worked**, start an application on `apply.` and attach a file. A
-working upload shows a progress bar and then the filename with an "Open" link
-beside it; a missing key refuses at the presign step, before the browser tries
-anything, and says so on the page rather than failing silently.
+**Expect the CORS command to fail**, and `npm run whoami` says why: wrangler's
+OAuth login does not request an R2 scope and re-authenticating will not produce
+one. If it does, set it in the dashboard instead — R2 → `steward-preview-files`
+→ Settings → CORS Policy → Edit — with `PUT` from
+`https://apply.houstontexansfoundation.org` and from `http://localhost:8787`,
+and nothing else.
+
+`GET` is deliberately absent. A download is a top-level navigation to the
+signed URL, and navigations are not subject to CORS, so listing it there would
+widen the bucket for no behaviour at all.
+
+### 1.4b The first real upload, which has never happened
+
+**This is the line that matters now.** Every presigned PUT this system has ever
+made has been against a stub. The rules it follows are the ones CLAUDE.md calls
+"learned the hard way" — `aws4fetch` rather than the AWS SDK, the signature in
+the query string, and no `Content-Type` from the browser, because signing with
+`signQuery` signs only the host header and an extra header produces a 403 that
+does not reproduce in curl.
+
+Two faults on this path have already been found and fixed without a real bucket
+being involved: the page's CSP refused every PUT before it was made, and
+Turnstile's script was blocked the same way. Both were invisible to the test
+suite and visible in a browser console in one second.
+
+So: start an application on `apply.`, reach Documents, attach a PDF.
+
+| What you see | What it means |
+|---|---|
+| Progress bar, then the filename with **Open** and **Remove** | It works. Click Open; the file should download. |
+| Refused at the presign step, before the browser tries anything | A key is wrong. The page says so rather than failing silently. |
+| Presign succeeds, upload fails with nothing useful on screen | CORS. The console (F12) carries the real message. |
+
+Report the console line either way. A 403 on this path has a small number of
+causes and the message distinguishes them.
 
 **One fault already found and fixed, before you spend an afternoon on it.** The
 page's Content-Security-Policy said `connect-src 'self'`, so the browser refused
