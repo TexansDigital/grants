@@ -8,9 +8,15 @@ Last updated: 21 September 2026.
 
 ---
 
-## 0. Waiting on your terminal, not on a decision
+## 0. Waiting on your terminal — nothing, as of 22 September
 
-**Apply migration 0025 and redeploy:**
+All 25 migrations are applied to preview, the deployed Worker is running
+current code, R2 keys and CORS are set, and the Turnstile widget was confirmed
+rendering on `apply.` in a real browser. Nothing in this section is
+outstanding.
+
+Kept as a section because it is the first thing to re-read after a pull. The
+command, when there is something to apply, is:
 
 ```
 npm run whoami
@@ -18,17 +24,8 @@ npm run migrate:preview
 npm run deploy:preview
 ```
 
-`0025_report_reminders` records which reports have been chased and when, which
-is what the compliance desk's new "Chased" column reads. Until it is applied
-the reminder job has nowhere to write that down.
-
-**Nothing here touches production.** `migrate:preview` runs against the preview
-database, which is what `npm run whoami` prints before you commit to anything.
-
-**Done on 21–22 September:** migrations 0022 to 0024 applied, and the Turnstile
-widget confirmed rendering on `apply.` with a real browser — the Worker's CSP
-had been blocking its script and its challenge iframe, so bot protection on the
-public endpoints had never actually run.
+`whoami` prints the database name before anything writes. Nothing here touches
+production.
 
 ---
 
@@ -36,7 +33,7 @@ public endpoints had never actually run.
 
 | | What | Blocks |
 |---|---|---|
-| 0 | Apply migration 0025 and redeploy (§0) | The grant report reminder |
+| 0 | ~~Migrations 0022–0025, redeploy, Turnstile~~ | **DONE 21–22 Sep.** All 25 migrations applied; preview runs current code; Turnstile confirmed rendering. |
 | 1 | ~~`apply.` DNS record, and Resend's DNS records~~ | **DONE 20 Sep.** Both hostnames live, domain verified, SPF/DKIM/DMARC published. |
 | 2 | ~~Resend API key, as a Wrangler secret~~ | **DONE 20 Sep.** A sign-in link was sent, delivered, and used to reach the grantee portal. |
 | 3 | ~~R2 key + secret, bucket CORS~~ → **the first real upload** | Keys and CORS done 22 Sep. No file has ever been PUT to a real bucket — see §1.4b. |

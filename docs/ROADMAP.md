@@ -94,14 +94,16 @@ and "works in production":
   performing it is a human step that has not happened.
 - **No human security review.** See `docs/BLOCKED-ON-YOU.md`.
 
-- **The Turnstile widget has never rendered.** The Worker's CSP blocked its
-  script and its iframe outright, so bot protection on the public endpoints has
-  never actually run. The policy is fixed and tested; confirming the widget
-  appears needs a browser with a real route to Cloudflare, which the build
-  environment does not have. See `BLOCKED-ON-YOU.md` §0.
+- ~~**The Turnstile widget has never rendered.**~~ **CONFIRMED 22 September.**
+  The Worker's CSP had blocked its script and its challenge iframe outright, so
+  bot protection on the public endpoints had never once run. Fixed, deployed,
+  and seen returning Success on `apply.` in a real browser.
+- **No file has ever been uploaded to a real R2 bucket.** Keys and CORS were
+  set on 22 September; every presigned PUT before that was against a stub. Two
+  faults on this exact path have already been found by opening a console rather
+  than by any test. See `BLOCKED-ON-YOU.md` §1.4b.
 
-**Still owed by the Foundation:** three migrations applied and a redeploy
-(`BLOCKED-ON-YOU.md` §0), the impact metrics CSV, decline wording (the
+**Still owed by the Foundation:** the impact metrics CSV, decline wording (the
 machinery does not need it; the first real send does), the security review, the
 backup restore test, and answers to CLAUDE.md's open decisions #1, #2, #5 and
 #7. Decision #4 is answered — see DECISIONS §37.
