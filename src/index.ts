@@ -66,6 +66,7 @@ import {
 import { requireStaffSession } from './lib/auth';
 import { loadFormDefinition } from './lib/loadForm';
 import {
+  assertNoInternalFields,
   getApplicationDetailForStaff,
   listApplicationsForReviewer,
   listApplicationsForStaff,
@@ -1987,7 +1988,63 @@ async function dispatch(request: Request, env: Env, ctx: RequestContext): Promis
   ctx.session = session;
   authorizeRoute(route, session);
 
-  return route.handler({ request, env, ctx, url, params, session });
+  const response = await route.handler({ request, env, ctx, url, params, session });
+
+  /*
+   * THE LAST GATE BEFORE A NONPROFIT'S BROWSER.
+   *
+   * CLAUDE.md, non-negotiable 5: reviewer scores, internal notes and decision
+   * rationale "never appear in an applicant or grantee API response. Not
+   * hidden in the UI. Absent from the payload."
+   *
+   * assertNoInternalFields has enforced exactly that since Phase 1, with
+   * thorough tests -- and was never called by anything that serves a request.
+   * It was reachable only from its own test file. Every external handler
+   * builds its payload by naming columns explicitly, which is why nothing has
+   * leaked; but "every handler is careful" is a property that holds until
+   * somebody writes the next handler.
+   *
+   * Applied HERE, on route.auth, so it covers the routes that exist and the
+   * ones added later without anybody having to remember. Staff responses are
+   * left alone: internal notes are exactly what a staff response is for.
+   *
+   * IT FAILS CLOSED, which is the deliberate part. A leak turns into a 500 and
+   * a fatal log line rather than a nonprofit reading what a reviewer wrote
+   * about them. The one legitimate payload that could trip it -- an answers
+   * map keyed by a form field someone named `comment` -- is refused at the
+   * point the form is built, by 0026, rather than at the point an applicant
+   * submits.
+   */
+  if (route.auth === 'applicant') return await guardExternalPayload(response);
+  return response;
+}
+
+/**
+ * Inspect an external JSON response for internal-only fields before it leaves.
+ *
+ * Reads a CLONE. Consuming the body here would hand the caller a used stream,
+ * and the symptom -- an empty response on a route whose handler is correct --
+ * is a long way from the cause.
+ *
+ * Non-JSON responses pass through untouched: app shells, redirects and signed
+ * URLs are not payloads this can reason about, and parsing them would only
+ * add a failure mode. Error responses pass through too; their shape is built
+ * by the error boundary from a fixed template and carries no row data.
+ */
+async function guardExternalPayload(response: Response): Promise<Response> {
+  if (!response.ok) return response;
+  const type = response.headers.get('content-type') ?? '';
+  if (!type.includes('application/json')) return response;
+  let parsed: unknown;
+  try {
+    parsed = await response.clone().json();
+  } catch {
+    // A response that claims JSON and is not one is a bug, but it is not this
+    // function's bug, and swallowing the body would turn it into one.
+    return response;
+  }
+  assertNoInternalFields(parsed);
+  return response;
 }
 
 export default {

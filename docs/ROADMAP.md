@@ -11,6 +11,27 @@ its reasoning, preserved because the reasoning still holds even where the
 status has moved on. Struck-through items are done or reversed, with what
 replaced them.
 
+
+## Found by the authorization census, 22 September — open
+
+**Two functions in `src/lib/scope.ts` have no production caller.**
+`getApplicationForExternal` and `getApplicationForStaff` are thoroughly
+tested in `test/scope.test.ts` and reached by nothing that serves a request.
+The live equivalents are `readDraft` (applicant) and
+`getApplicationDetailForStaff` (staff), both of which scope correctly and
+name their columns explicitly — so this is not a hole. It is worse in one
+specific way: a reader auditing `scope.ts` sees careful, well-tested
+scoping and moves on, without noticing the routes go somewhere else.
+
+Discovered by mutation: breaking the `organization_id` predicate in
+`getApplicationForExternal` did not fail a single test in the new route
+census, because nothing the census can reach calls it.
+
+Decision needed: delete both, or wire `getApplicationForExternal` into a
+read-only single-application endpoint the portal could use. Not done
+unilaterally — deleting tested authorization code is the user's call.
+
+
 ## Where we actually are
 
 **Last updated 21 September 2026.** This section is rewritten whenever it stops
