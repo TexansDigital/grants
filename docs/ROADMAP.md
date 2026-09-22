@@ -59,6 +59,15 @@ the Formstack/awards importer, the nightly D1 export to R2, and a retention
 policy that destroys applicants' financial documents 90 days after their
 application is decided.
 
+**Grantees are now told their reports are due.** A nightly job on the existing
+cron mails a ladder of reminders through Resend -- two weeks out, three days
+out, the day itself, then weekly while overdue, and it stops after three
+months. One letter per grantee listing every report they owe, carrying no
+sign-in token, and the compliance desk shows how many times each report has
+been chased. This is deliberately NOT Eloqua: that is still the right home for
+it, and it needs six things from a marketing admin that do not exist yet. Until
+they do, a portal nobody is sent to is a portal nobody files in.
+
 **Not built:** the Eloqua opt-in sync, a server-generated PDF -- the browser's
 own print-to-PDF is what exists, and the print stylesheet is now its design
 rather than an afterthought -- EIN verification against the IRS file

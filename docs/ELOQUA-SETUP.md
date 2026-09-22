@@ -124,6 +124,26 @@ real endpoint rather than a guessed one.
 
 ---
 
+## Form B is now running through Resend in the meantime
+
+**Not a replacement, and not a relitigation of the decision.** Eloqua is still
+the right home for a scheduled bulk nudge and this document still describes
+what to build. What changed is that the six things above need a marketing admin
+who has not been asked yet, and in the meantime the reporting portal was a page
+nobody was ever sent to -- so a report nobody asked for is a report nobody
+files, and the compliance policy then blocks that organization's next
+application over a silence the Foundation caused.
+
+So the reminder runs on the nightly cron through Resend, on the transactional
+domain that already carries the sign-in link. The volume settles it: 100 to 300
+grantees a cycle on a ladder of a few sends each is far inside the free tier.
+It carries no sign-in token, for the reason this document already gives.
+
+**When Eloqua is ready**, the swap is one job in the cron handler and the
+ladder logic moves to a segment. Nothing else changes, and `report_periods`
+already records what was chased and when, so the two cannot both nag the same
+grantee without it being visible.
+
 ## What is true today
 
 Nothing above is built. The opt-in **is captured and stored** on

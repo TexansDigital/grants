@@ -466,6 +466,9 @@ export interface PortfolioRow {
   fundsSpentCents: number | null;
   daysUntilDue: number;
   overdue: boolean;
+  /** How many times this report has been chased, and when last. */
+  reminderCount: number;
+  reminderLastSentAt: string | null;
 }
 
 export interface StaffReport {

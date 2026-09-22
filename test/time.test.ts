@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { formatInZone, isCycleAcceptingSubmission } from '../src/lib/time';
+import { formatInZone, formatDayInZone, isCycleAcceptingSubmission } from '../src/lib/time';
 
 describe('deadlines', () => {
   it('renders a UTC instant in Central time', () => {
@@ -97,5 +97,54 @@ describe('deadlines', () => {
         now: '2026-03-02T00:00:01.000Z',
       }).accepted,
     ).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+describe('a date that is a day, not a moment', () => {
+  const CENTRAL = 'America/Chicago';
+
+  it('carries no hour, minute or zone name', async () => {
+    /*
+     * THE BUG THIS PREVENTS, which shipped and was found by reading a rendered
+     * subject line. `formatInZone` merges the caller's options OVER defaults
+     * that include an hour, a minute and a zone name -- so passing
+     * `{ year, month, day }` re-specifies the date parts and leaves the time
+     * parts standing. Three callers wanted a date and got a timestamp:
+     *
+     *   - the retention notice, directly against its own comment, which reads
+     *     "a deletion date is a day, not a moment";
+     *   - the award letter's EMBARGO date, which is the date a grantee is
+     *     asked not to announce before -- "you may announce this on November
+     *     5, 2026 at 12:00 PM CST" reads as an hour they must wait for, on the
+     *     letter CLAUDE.md calls the highest-reputation-risk output here;
+     *   - the report reminder, which is what surfaced it.
+     */
+    const out = formatDayInZone('2026-11-05T18:00:00.000Z', CENTRAL);
+    expect(out).toBe('November 5, 2026');
+    for (const shape of [/\bAM\b/, /\bPM\b/, /\bC[SD]T\b/, /:/]) {
+      expect(out, `a day must not carry ${String(shape)}`).not.toMatch(shape);
+    }
+  });
+
+  it('still lands on the Central day, not the UTC one', async () => {
+    // 1 AM UTC on the 6th is 7 PM Central on the 5th. A due date that silently
+    // moves a day either way is a deadline nobody can rely on.
+    expect(formatDayInZone('2026-11-06T01:00:00.000Z', CENTRAL)).toBe('November 5, 2026');
+    expect(formatDayInZone('2026-11-06T13:00:00.000Z', CENTRAL)).toBe('November 6, 2026');
+  });
+
+  it('is what formatInZone with date options was NOT', async () => {
+    /*
+     * The two side by side, so the difference is on the record rather than in
+     * a comment. This is not asserting that formatInZone is wrong -- a
+     * timestamp is what most of its callers want -- only that asking it for a
+     * date does not produce one.
+     */
+    const asked = formatInZone('2026-11-05T18:00:00.000Z', CENTRAL, {
+      year: 'numeric', month: 'long', day: 'numeric',
+    });
+    expect(asked).toMatch(/\bPM\b/);
+    expect(formatDayInZone('2026-11-05T18:00:00.000Z', CENTRAL)).not.toMatch(/\bPM\b/);
   });
 });

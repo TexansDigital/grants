@@ -29,7 +29,7 @@
 
 import type { Env, RequestContext, Session } from '../types';
 import { AppError, notFound, logError } from './errors';
-import { nowIso, formatInZone } from './time';
+import { nowIso, formatInZone, formatDayInZone } from './time';
 import { auditStatement } from './audit';
 import { sendEmail, transportFor } from './email';
 import { AWARD_NOTIFICATION, DECLINE_NOTIFICATION } from './emailTemplates';
@@ -276,10 +276,16 @@ export async function sendAwardNotification(
         projectTitle: row.projectTitle,
         programName: row.programName,
         amountDisplay: formatCents(row.awardedAmountCents),
+        /*
+         * A DAY, and this was carrying a time. The embargo is the date a
+         * grantee is asked not to announce before; "November 5, 2026 at 12:00
+         * PM CST" reads as an hour they must wait for, on the letter CLAUDE.md
+         * calls the highest-reputation-risk output in the system. formatInZone
+         * merges over defaults that include the time, so passing the date
+         * parts never removed it.
+         */
         announcementDisplay: row.announcementDate
-          ? formatInZone(row.announcementDate, env.DISPLAY_TIMEZONE, {
-              year: 'numeric', month: 'long', day: 'numeric',
-            })
+          ? formatDayInZone(row.announcementDate, env.DISPLAY_TIMEZONE)
           : null,
         portalUrl: `${(env.APPLICANT_BASE_URL ?? '').trim()}/reports`,
         supportEmail: (env.EMAIL_REPLY_TO ?? '').trim(),

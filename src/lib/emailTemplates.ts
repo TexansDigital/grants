@@ -858,12 +858,156 @@ export const DECLINE_NOTIFICATION: EmailTemplate<DeclineNotificationVars> = {
   },
 };
 
+// ---------------------------------------------------------------------------
+// report_reminder
+// ---------------------------------------------------------------------------
+
+export interface ReminderLine {
+  /** "Final report", "Year 2 annual". */
+  label: string;
+  programName: string;
+  dueDisplay: string;
+  /** Negative means overdue. Used for wording, not shown as a number. */
+  daysUntilDue: number;
+}
+
+export interface ReportReminderVars {
+  organizationName: string;
+  lines: ReminderLine[];
+  /** The reporting page. A plain URL, never a token. */
+  portalUrl: string;
+  supportEmail: string;
+}
+
+/**
+ * "Your grant report is due."
+ *
+ * THE LINK CARRIES NO TOKEN, and that is the whole security design of this
+ * message rather than a detail. A reminder is a bulk send: it goes to a list,
+ * it gets forwarded inside an organization, and it sits in mailboxes for
+ * months. A sign-in token in it would be a credential with all of those
+ * properties. So the letter points at the page, and the page mints a link when
+ * the person asks for one -- which also means a reminder forwarded to a
+ * colleague works correctly, because the colleague signs in as themselves.
+ *
+ * ONE LETTER PER GRANTEE, not one per report. An organization holding three
+ * grants gets one message listing three reports. Three separate emails arriving
+ * together is how a sender teaches a recipient to filter them, and the one that
+ * matters is then filtered too.
+ *
+ * OVERDUE IS SAID PLAINLY AND WITHOUT THREAT. The Foundation's compliance
+ * policy can refuse a new application over an unfiled report, so the letter
+ * says that -- once, as a fact, at the end. What it does not do is imply the
+ * grantee has done something wrong: the most common reason a report is late is
+ * that nobody was ever told it was due, which is the gap this very message
+ * exists to close.
+ *
+ * NO AMOUNTS, NO NARRATIVE, NO REPORT CONTENT. A reminder is an envelope. It
+ * names the organization, the report and the date, and nothing a forwarded copy
+ * should not carry.
+ */
+export const REPORT_REMINDER: EmailTemplate<ReportReminderVars> = {
+  key: 'report_reminder',
+  render(v) {
+    const overdue = v.lines.filter((l) => l.daysUntilDue < 0);
+    const soon = v.lines.filter((l) => l.daysUntilDue >= 0);
+    const many = v.lines.length > 1;
+
+    const subject = overdue.length > 0
+      ? many
+        ? `${v.lines.length} grant reports are outstanding`
+        : 'Your grant report is overdue'
+      : many
+        ? `${v.lines.length} grant reports are due soon`
+        : `Your ${v.lines[0]?.label.toLowerCase() ?? 'grant report'} is due ${v.lines[0]?.dueDisplay ?? 'soon'}`;
+
+    const lead = overdue.length > 0
+      ? `The Houston Texans Foundation is waiting on ${many ? 'reports' : 'a report'} from ` +
+        `${v.organizationName}.`
+      : `${v.organizationName} has ${many ? 'grant reports' : 'a grant report'} due.`;
+
+    /** "Final report (Inspire Change) — due 31 March. Overdue." */
+    const line = (l: ReminderLine): string => {
+      const state =
+        l.daysUntilDue < 0
+          ? ' Overdue.'
+          : l.daysUntilDue === 0
+            ? ' Due today.'
+            : l.daysUntilDue === 1
+              ? ' Due tomorrow.'
+              : ` Due in ${l.daysUntilDue} days.`;
+      return `${l.label} (${l.programName}) — ${l.dueDisplay}.${state}`;
+    };
+
+    const howTo =
+      'Open the reporting page and enter your email address. We will send you a ' +
+      'link to sign in. There is no password, and this email does not contain one.';
+
+    const consequence =
+      overdue.length > 0
+        ? 'An outstanding report can hold up a new application from your organization, ' +
+          'so it is worth filing even if it is late.'
+        : '';
+
+    const askForHelp =
+      `If a report is not yours to file, or the dates look wrong, reply to this message ` +
+      `or write to ${v.supportEmail} and we will sort it out.`;
+
+    return {
+      subject,
+      text: textBlock([
+        lead,
+        '',
+        ...v.lines.map((l) => `  ${line(l)}`),
+        '',
+        howTo,
+        '',
+        v.portalUrl,
+        ...(consequence ? ['', consequence] : []),
+        '',
+        askForHelp,
+      ]),
+      html: layout({
+        preview: lead,
+        heading: overdue.length > 0 ? 'A grant report is outstanding' : 'A grant report is due',
+        blocks: [
+          escapeHtml(lead),
+          `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%">` +
+            v.lines
+              .map(
+                (l) =>
+                  `<tr><td style="padding:6px 0;font-size:15px;line-height:1.5;">` +
+                  `<strong>${escapeHtml(l.label)}</strong> &middot; ${escapeHtml(l.programName)}<br>` +
+                  `<span style="color:${INK_SOFT};">${escapeHtml(l.dueDisplay)}.` +
+                  `${escapeHtml(
+                    l.daysUntilDue < 0
+                      ? ' Overdue.'
+                      : l.daysUntilDue === 0
+                        ? ' Due today.'
+                        : l.daysUntilDue === 1
+                          ? ' Due tomorrow.'
+                          : ` Due in ${l.daysUntilDue} days.`,
+                  )}</span></td></tr>`,
+              )
+              .join('') +
+            `</table>`,
+          escapeHtml(howTo),
+          ...(consequence ? [escapeHtml(consequence)] : []),
+        ],
+        action: { label: 'Open the reporting page', url: v.portalUrl },
+        footer: askForHelp,
+      }),
+    };
+  },
+};
+
 export const TEMPLATES = {
   [SIGN_IN_PROBLEM.key]: SIGN_IN_PROBLEM,
   [SIGN_IN_LINK.key]: SIGN_IN_LINK,
   [APPLICATION_RECEIVED.key]: APPLICATION_RECEIVED,
   [REPORT_RECEIVED.key]: REPORT_RECEIVED,
   [FILES_DUE_FOR_DELETION.key]: FILES_DUE_FOR_DELETION,
+  [REPORT_REMINDER.key]: REPORT_REMINDER,
   [AWARD_NOTIFICATION.key]: AWARD_NOTIFICATION,
   [DECLINE_NOTIFICATION.key]: DECLINE_NOTIFICATION,
 } as const;

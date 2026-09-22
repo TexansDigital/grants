@@ -807,6 +807,21 @@ describe('templates', () => {
       truncated: 0,
       reviewUrl: 'https://grants.example.org/retention',
     },
+    report_reminder: {
+      organizationName: 'Bayou Reach Collective',
+      lines: [
+        {
+          label: 'Final report', programName: 'Inspire Change',
+          dueDisplay: 'March 31, 2027', daysUntilDue: 3,
+        },
+        {
+          label: 'Year 1 report', programName: 'Inspire Change',
+          dueDisplay: 'January 14, 2027', daysUntilDue: -14,
+        },
+      ],
+      portalUrl: 'https://apply.example.org/reports',
+      supportEmail: 'grants@example.org',
+    },
   };
 
   it('every registered template renders a subject, a text body and HTML', () => {

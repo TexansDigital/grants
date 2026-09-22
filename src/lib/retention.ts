@@ -36,7 +36,7 @@ import { nowIso } from './time';
 import { auditStatement } from './audit';
 import { sendEmail, transportFor } from './email';
 import { FILES_DUE_FOR_DELETION } from './emailTemplates';
-import { formatInZone } from './time';
+import { formatDayInZone } from './time';
 
 /**
  * Ninety days after the decision.
@@ -396,11 +396,15 @@ async function sendRetentionNotices(
   ).all<{ id: string; email: string }>();
   if (!admins || admins.length === 0) return 0;
 
-  // A deletion date is a day, not a moment. Showing "11:04 PM CDT" on a
-  // retention notice invites somebody to believe the minute matters.
-  const dateOnly: Intl.DateTimeFormatOptions = {
-    year: 'numeric', month: 'long', day: 'numeric',
-  };
+  /*
+   * A deletion date is a day, not a moment. Showing "11:04 PM CDT" on a
+   * retention notice invites somebody to believe the minute matters.
+   *
+   * THIS COMMENT WAS TRUE AND THE CODE WAS NOT. It passed `{year, month, day}`
+   * to formatInZone, which merges over defaults that include the time -- so
+   * every notice since this was written has carried an hour on a date that has
+   * none. `formatDayInZone` is the function that does what this paragraph says.
+   */
   const day = now.toISOString().slice(0, 10);
   const transport = transportFor(env);
   const soonest = files.reduce(
@@ -419,11 +423,11 @@ async function sendRetentionNotices(
         idempotencyKey: `retention_notice:${admin.id}:${day}`,
         vars: {
           fileCount: files.length,
-          soonestDueDisplay: formatInZone(soonest, env.DISPLAY_TIMEZONE, dateOnly),
+          soonestDueDisplay: formatDayInZone(soonest, env.DISPLAY_TIMEZONE),
           lines: files.slice(0, 40).map((f) => ({
             organization: f.organization_name,
             filename: f.filename,
-            dueDisplay: formatInZone(f.effective_due_at, env.DISPLAY_TIMEZONE, dateOnly),
+            dueDisplay: formatDayInZone(f.effective_due_at, env.DISPLAY_TIMEZONE),
           })),
           truncated: Math.max(0, files.length - 40),
           reviewUrl: `${(env.STAFF_BASE_URL ?? '').trim()}/retention`,

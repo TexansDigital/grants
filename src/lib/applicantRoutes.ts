@@ -36,7 +36,7 @@ import { sendEmail, transportFor } from './email';
 import { APPLICATION_RECEIVED } from './emailTemplates';
 import { readBackLines } from './answerDisplay';
 import { formatCents } from './money';
-import { formatInZone } from './time';
+import { formatInZone, formatDayInZone } from './time';
 import { logError } from './errors';
 import { isAcceptingApplications } from './eligibility';
 import { assertCompliant } from './compliance';
@@ -395,14 +395,11 @@ export async function sendConfirmation(
           confirmationCode: confirmationCode(applicationId),
           ...(row.decision_due_at
             ? {
-                decisionByDisplay: formatInZone(row.decision_due_at, env.DISPLAY_TIMEZONE, {
-                  year: 'numeric',
-                  month: 'long',
-                  day: 'numeric',
-                  hour: undefined,
-                  minute: undefined,
-                  timeZoneName: undefined,
-                }),
+                // The three `undefined`s this replaces were correct and
+                // unobvious: they existed to cancel formatInZone's time
+                // defaults. Naming the intent removes the trap for the next
+                // caller, three of whom fell into it.
+                decisionByDisplay: formatDayInZone(row.decision_due_at, env.DISPLAY_TIMEZONE),
               }
             : {}),
           answers: readBackLines(definition, answers),

@@ -20,6 +20,7 @@ import { newRequestId } from './lib/ids';
 import { AppError, logError, notFound, toErrorResponse, validationFailed } from './lib/errors';
 import { nowIso, formatInZone } from './lib/time';
 import { scheduledBackup } from './lib/backup';
+import { runReportReminders } from './lib/reportReminders';
 import { securityHeaders, htmlHeaders } from './lib/httpHeaders';
 import { readSessionCookie, resolveSession } from './lib/sessions';
 import {
@@ -2032,6 +2033,15 @@ export default {
     for (const job of [
       { name: 'backup', run: () => scheduledBackup(env, ctx) },
       { name: 'retention', run: () => runRetention(env, ctx) },
+      /*
+       * REMINDERS LAST. They are the only job here that writes to people
+       * rather than to storage, and a night where the export or the retention
+       * pass has already failed is a night when the least useful thing to do
+       * is mail two hundred nonprofits. Ordering it after both means a failure
+       * upstream is visible in the dashboard before the send goes out, and the
+       * loop below still gives it its own turn.
+       */
+      { name: 'reminders', run: () => runReportReminders(env, ctx) },
     ]) {
       try {
         await job.run();

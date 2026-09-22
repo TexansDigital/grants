@@ -56,6 +56,37 @@ export function formatInZone(
 }
 
 /**
+ * A DAY, with no time on it.
+ *
+ * WHY THIS IS ITS OWN FUNCTION. `formatInZone` merges the caller's options
+ * over defaults that include an hour, a minute and a zone name. So passing
+ * `{ year, month, day }` does not remove the time -- it re-specifies the date
+ * parts and leaves the time parts standing. Three callers wanted a date and
+ * got "October 3, 2026 at 11:04 PM CDT":
+ *
+ *   - the retention notice, directly against its own comment, which reads "a
+ *     deletion date is a day, not a moment";
+ *   - the AWARD LETTER'S EMBARGO DATE, which is the date a grantee is asked
+ *     not to announce before, on the highest-reputation-risk output in the
+ *     system;
+ *   - the report reminder, which is what surfaced it.
+ *
+ * A fourth caller, the applicant's decision-by date, had already worked around
+ * it by passing `hour: undefined, minute: undefined, timeZoneName: undefined`
+ * -- correct, unobvious, and a sign the helper was the wrong shape rather than
+ * the caller. Saying `formatDayInZone` says the intent, and there is nothing
+ * to get subtly wrong at the next call site.
+ */
+export function formatDayInZone(iso: string, timeZone: string): string {
+  return new Intl.DateTimeFormat('en-US', {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+    timeZone,
+  }).format(new Date(iso));
+}
+
+/**
  * Whether a cycle is accepting submissions right now.
  *
  * `graceHours` is the per-cycle grace rule for drafts started before close.

@@ -62,6 +62,14 @@ export interface PortfolioRow {
   /** Negative when the due date has passed and nothing has been filed. */
   daysUntilDue: number;
   overdue: boolean;
+  /*
+   * HAS ANYBODY ASKED? An overdue row on its own is ambiguous between a
+   * nonprofit ignoring us and a nonprofit nobody ever contacted, and those
+   * call for opposite conversations. 0025 records both, and the desk shows
+   * them next to the red.
+   */
+  reminderCount: number;
+  reminderLastSentAt: string | null;
 }
 
 export interface PortfolioFilters {
@@ -122,7 +130,9 @@ export async function reportPortfolio(
            rp.due_date AS dueDate, rp.status,
            a.organization_id AS organizationId, a.awarded_amount_cents AS awardedAmountCents,
            o.legal_name AS organizationName, p.name AS programName,
-           rs.submitted_at AS submittedAt, rs.funds_spent_cents AS fundsSpentCents
+           rs.submitted_at AS submittedAt, rs.funds_spent_cents AS fundsSpentCents,
+           rp.reminder_count AS reminderCount,
+           rp.reminder_last_sent_at AS reminderLastSentAt
       FROM report_periods rp
       JOIN awards a ON a.id = rp.award_id
       JOIN organizations o ON o.id = a.organization_id

@@ -152,6 +152,7 @@ export function Reports({ programs, isAdmin, query, onQueryChange }: Props): Rea
                 <th scope="col">Report</th>
                 <th scope="col">Due</th>
                 <th scope="col">Status</th>
+                <th scope="col">Chased</th>
                 <th scope="col">Award</th>
                 <th scope="col">Spent</th>
               </tr>
@@ -182,6 +183,31 @@ export function Reports({ programs, isAdmin, query, onQueryChange }: Props): Rea
                     <span className={`badge badge-${r.status}`}>
                       {STATUS_LABEL[r.status] ?? r.status}
                     </span>
+                  </td>
+                  <td>
+                    {/*
+                      HAVE WE ASKED? An overdue row on its own is ambiguous
+                      between a nonprofit ignoring us and a nonprofit nobody
+                      ever contacted, and those call for opposite
+                      conversations. "Not yet" next to a red date is the
+                      Foundation's problem, not the grantee's.
+                    */}
+                    {r.reminderCount === 0 ? (
+                      r.overdue ? (
+                        <span className="meta strong" data-overdue="true">
+                          Not yet
+                        </span>
+                      ) : (
+                        <span className="meta">&mdash;</span>
+                      )
+                    ) : (
+                      <>
+                        {r.reminderCount}
+                        {r.reminderLastSentAt && (
+                          <span className="meta"> {formatDay(r.reminderLastSentAt)}</span>
+                        )}
+                      </>
+                    )}
                   </td>
                   <td className="num">{formatCents(r.awardedAmountCents)}</td>
                   <td className="num">
