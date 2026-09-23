@@ -19,7 +19,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { ReactElement } from 'react';
 import { ApiError, api } from './api';
-import type { HealthCheck, HealthReport, HealthRow } from './api';
+import type { HealthCheck, HealthReport, HealthRow, StorageUsage } from './api';
 import { formatCents } from '../../src/lib/money';
 import { formatWhen } from './reportWording';
 import { Duplicates } from './Duplicates';
@@ -35,6 +35,7 @@ const DUPLICATES = 'duplicate_organizations';
 
 export function DataHealth({ isAdmin, onNavigate }: Props): ReactElement {
   const [report, setReport] = useState<HealthReport | null>(null);
+  const [storage, setStorage] = useState<StorageUsage | null>(null);
   const [error, setError] = useState<ApiError | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
 
@@ -48,6 +49,17 @@ export function DataHealth({ isAdmin, onNavigate }: Props): ReactElement {
         if (e instanceof DOMException && e.name === 'AbortError') return;
         setError(e instanceof ApiError ? e : new ApiError(0, 'INTERNAL', String(e), null));
       });
+    /*
+     * Storage loads BESIDE the report, not inside it, and its failure is
+     * swallowed on purpose. It is a cost figure; a 500 from it must not take
+     * down the screen that says whether money can move. The panel simply does
+     * not render, which is honest -- better than a zero, which would read as
+     * "nothing stored" rather than "could not ask".
+     */
+    api
+      .storage(controller.signal)
+      .then(setStorage)
+      .catch(() => undefined);
     return () => controller.abort();
   }, [reloadKey]);
 
@@ -131,6 +143,13 @@ export function DataHealth({ isAdmin, onNavigate }: Props): ReactElement {
           </article>
         </section>
       ))}
+
+      {/*
+        AFTER the findings, not before. This screen's premise is that what is
+        blocking comes first; a cost figure above the blocking rows pushes them
+        down for something nobody opened the page to read.
+      */}
+      {storage && <StoragePanel usage={storage} />}
     </>
   );
 }
@@ -205,5 +224,74 @@ function Reference({
       {row.kind === 'organization' ? 'Applications' : 'Open'}
       <span className="sr-only"> for {row.title}</span>
     </button>
+  );
+}
+
+/** Whole gigabytes read better than 1,073,741,824. */
+function formatSize(bytes: number): string {
+  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+  const mb = bytes / (1024 * 1024);
+  if (mb < 1024) return `${Math.round(mb)} MB`;
+  return `${(mb / 1024).toFixed(1)} GB`;
+}
+
+/**
+ * What R2 is holding, and what it costs.
+ *
+ * WHY IT IS ON THIS SCREEN AT ALL. The endpoint behind it has existed for a
+ * day and nothing rendered it, which makes a request to "flag it if this goes
+ * over five dollars a month" impossible to honour: a figure nobody can see
+ * flags nothing. This is the panel that makes the promise keepable.
+ *
+ * The two numbers underneath the cost are the ones that decide whether it
+ * grows. Media is never scheduled for deletion by design, so it only ever goes
+ * up; the unretained figure is everything on a report that carries no deletion
+ * date at all. Both are stated rather than implied, because the decision they
+ * point at -- how long a grantee's files are kept -- is one somebody has to
+ * take deliberately, and it is much easier to take before there is real
+ * footage of real children attached to it.
+ */
+function StoragePanel({ usage }: { usage: StorageUsage }): ReactElement {
+  const cost = usage.estimatedMonthlyUsd;
+  return (
+    <section className="panel" aria-labelledby="storage-heading">
+      <article
+        className="storage-usage"
+        data-over={usage.overWatchThreshold ? 'true' : 'false'}
+      >
+        <div className="check-head">
+          <h3 id="storage-heading">Files in storage</h3>
+          <span className="tag">{formatSize(usage.totalBytes)}</span>
+        </div>
+
+        <p className="meta">
+          About {cost < 0.01 ? 'less than a cent' : `$${cost.toFixed(2)}`} a month at R2&rsquo;s
+          published rate.{' '}
+          {usage.overWatchThreshold
+            ? 'This is past the $5 a month worth a conversation.'
+            : 'Below the $5 a month worth a conversation.'}
+        </p>
+
+        <ul className="meta">
+          <li>
+            {usage.mediaFiles === 0
+              ? 'No photographs or video yet.'
+              : `${usage.mediaFiles} photo${usage.mediaFiles === 1 ? '' : 's'} and video, ` +
+                `${formatSize(usage.mediaBytes)}. Nothing ever deletes these.`}
+          </li>
+          <li>
+            {usage.unretainedBytes === 0
+              ? 'Every file on a report has a deletion date.'
+              : `${formatSize(usage.unretainedBytes)} attached to reports has no deletion ` +
+                'date, so it stays until somebody removes it by hand.'}
+          </li>
+        </ul>
+
+        <p className="meta">
+          Applicants&rsquo; financial documents are destroyed on a schedule after a decision.
+          Files a grantee sends back are not, until a retention period is set for them.
+        </p>
+      </article>
+    </section>
   );
 }

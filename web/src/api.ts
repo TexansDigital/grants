@@ -988,7 +988,11 @@ export const api = {
 export interface StorageUsage {
   totalBytes: number;
   byParent: { parentType: string; files: number; bytes: number }[];
+  /** Report bytes carrying no deletion date: what nothing will ever remove. */
   unretainedBytes: number;
+  /** Photographs and video. The part that actually grows. */
+  mediaBytes: number;
+  mediaFiles: number;
   estimatedMonthlyUsd: number;
   overWatchThreshold: boolean;
 }

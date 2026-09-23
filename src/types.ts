@@ -96,6 +96,8 @@ export interface Env {
    * a typo here would otherwise destroy documents on the day of the decision.
    */
   RETENTION_DAYS?: string;
+  /** Days after a report is ACCEPTED before its documents are purged. Unset means never. */
+  REPORT_RETENTION_DAYS?: string;
   EMAIL_FROM?: string;
   EMAIL_REPLY_TO?: string;
   /**

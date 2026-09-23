@@ -130,12 +130,103 @@ export async function recomputeDueDates(
   return res.meta.changes ?? 0;
 }
 
+/**
+ * Retention for files attached to a GRANT REPORT, which is a different problem.
+ *
+ * WHY THIS IS NOT THE SAME RULE WITH A DIFFERENT NUMBER. An applicant's audited
+ * accounts are collected from three hundred organizations in order to fund
+ * fifty, and once the decision is made the Foundation's reason for holding
+ * them is over: everything after that is exposure with no purpose. A photo of
+ * the thing the grant paid for is the opposite. It is not evidence gathered to
+ * reach a decision, it is the deliverable -- the reason for asking. Purging it
+ * on a ninety-day clock would destroy exactly what it was collected for, and a
+ * grantee who sent a video of their summer program would find it gone before
+ * the annual report that was supposed to carry it.
+ *
+ * So media is never scheduled for deletion here. Not "kept for a long time":
+ * never scheduled, at all. A photo or a video leaves only when an admin purges
+ * that one file deliberately, through purgeAttachmentNow, which already exists
+ * and already writes an audit row.
+ *
+ * WHY IT IS OFF UNLESS SOMEBODY TURNS IT ON. Documents attached to a report --
+ * a financial summary, an evaluation -- are closer to the application case, and
+ * a retention window for them is defensible. It is also decision 3.8 in
+ * docs/BLOCKED-ON-YOU.md, which is the Foundation's to make. Building it with a
+ * default would be deciding it by whichever behaviour got written first, which
+ * is the failure mode CLAUDE.md names for exactly this kind of fork. With
+ * REPORT_RETENTION_DAYS unset nothing is scheduled and nothing is deleted; the
+ * data-health screen reports the files as unretained so the absence is visible
+ * rather than assumed.
+ *
+ * WHAT COUNTS AS MEDIA. The stored mime type, which is the same value
+ * mimeForUpload resolved at upload and the same one every other surface reads.
+ * A budget scanned to a PNG is therefore treated as media and kept. That is the
+ * safe direction to be wrong in: the cost of keeping a file too long is known
+ * and bounded, and the cost of destroying somebody's only copy is not.
+ */
+export function reportRetentionDays(env: Env): number | null {
+  const raw = Number((env.REPORT_RETENTION_DAYS ?? '').toString().trim());
+  if (!Number.isInteger(raw) || raw < 1) return null;
+  return raw;
+}
+
+/**
+ * Schedule report DOCUMENTS for deletion, measured from acceptance.
+ *
+ * From acceptance rather than from submission: a report under review is a
+ * report somebody may still have to read, and the attachment is part of what
+ * they are reading. An unaccepted report yields NULL and is never scheduled --
+ * the same shape as an undecided application above, and for the same reason.
+ *
+ * Returns the number of rows touched, or 0 when no window is configured.
+ */
+export async function recomputeReportDueDates(
+  db: D1Database,
+  days: number | null,
+): Promise<number> {
+  // No window, no schedule. Not "a very long window": none.
+  if (days === null) return 0;
+  const res = await db
+    .prepare(
+      `UPDATE attachments
+          SET purge_due_at = (
+            SELECT CASE
+              WHEN rs.accepted_at IS NULL THEN NULL
+              ELSE strftime('%Y-%m-%dT%H:%M:%fZ', rs.accepted_at, '+' || ? || ' days')
+            END
+            FROM report_submissions rs
+           WHERE rs.id = attachments.parent_id AND rs.deleted_at IS NULL
+          )
+        WHERE parent_type = 'report_submission'
+          AND parent_id IS NOT NULL
+          AND purged_at IS NULL
+          AND deleted_at IS NULL
+          -- Media is never scheduled. See the note above; this is the line
+          -- that keeps a grantee's photographs out of the purge queue, and
+          -- deleting it would put every one of them in it.
+          AND COALESCE(mime_type, '') NOT LIKE 'image/%'
+          AND COALESCE(mime_type, '') NOT LIKE 'video/%'`,
+    )
+    .bind(days)
+    .run();
+  return res.meta.changes ?? 0;
+}
+
 export interface DueFile {
   id: string;
   filename: string;
   organization_name: string;
   project_title: string | null;
-  application_id: string;
+  /*
+   * Null for a file attached to a grant report. A report document has no
+   * application behind it -- an award can outlive the application that earned
+   * it, and a renewal has none of its own -- so this is a link where one
+   * exists and nothing where one does not, rather than an id invented to keep
+   * the column non-null.
+   */
+  application_id: string | null;
+  /** 'application' or 'report_submission'. What the file is attached to. */
+  parent_type: string;
   effective_due_at: string;
   download_url_first_issued_at: string | null;
   /** When this file was last named in a notice. Null means never. */
@@ -159,20 +250,36 @@ export async function filesDueWithin(
 ): Promise<DueFile[]> {
   const { results } = await db
     .prepare(
+      /*
+       * BOTH kinds of attachment, in one list, because there is one person
+       * deciding and they should get one email. The joins are LEFT and the
+       * organization name is coalesced across them: a row that matches neither
+       * side would otherwise vanish from the warning while staying perfectly
+       * eligible for deletion, which is the one combination that must not
+       * happen -- a file destroyed without ever appearing in a notice.
+       */
       `SELECT a.id, a.filename, a.download_url_first_issued_at,
-              a.retention_notice_sent_at,
+              a.retention_notice_sent_at, a.parent_type,
               ${EFFECTIVE_DUE} AS effective_due_at,
-              app.id AS application_id, app.project_title,
-              o.legal_name AS organization_name
+              app.id AS application_id,
+              COALESCE(app.project_title, rp.label) AS project_title,
+              COALESCE(o.legal_name, ro.legal_name, '(unknown organization)')
+                AS organization_name
          FROM attachments a
-         JOIN applications app  ON app.id = a.parent_id
-         JOIN organizations o   ON o.id = app.organization_id
-        WHERE a.parent_type = 'application'
+         LEFT JOIN applications app       ON app.id = a.parent_id
+                                         AND a.parent_type = 'application'
+         LEFT JOIN organizations o        ON o.id = app.organization_id
+         LEFT JOIN report_submissions rs  ON rs.id = a.parent_id
+                                         AND a.parent_type = 'report_submission'
+         LEFT JOIN report_periods rp      ON rp.id = rs.report_period_id
+         LEFT JOIN awards w               ON w.id = rp.award_id
+         LEFT JOIN organizations ro       ON ro.id = w.organization_id
+        WHERE a.parent_type IN ('application', 'report_submission')
           AND a.purge_due_at IS NOT NULL
           AND a.purged_at IS NULL
           AND a.deleted_at IS NULL
           AND ${EFFECTIVE_DUE} <= strftime('%Y-%m-%dT%H:%M:%fZ', ?, '+' || ? || ' days')
-        ORDER BY effective_due_at, o.legal_name, a.filename`,
+        ORDER BY effective_due_at, organization_name, a.filename`,
     )
     .bind(nowIsoStr, horizonDays)
     .all<DueFile>();
@@ -180,21 +287,37 @@ export async function filesDueWithin(
 }
 
 /** Files whose time is up. Same expression, no horizon. */
-export async function filesPastDue(db: D1Database, nowIsoStr: string): Promise<
-  { id: string; r2_key: string; filename: string; organization_id: string | null; parent_id: string | null }[]
-> {
+export interface PastDueFile {
+  id: string;
+  r2_key: string;
+  filename: string;
+  organization_id: string | null;
+  parent_id: string | null;
+  parent_type: string;
+}
+
+export async function filesPastDue(db: D1Database, nowIsoStr: string): Promise<PastDueFile[]> {
   const { results } = await db
     .prepare(
-      `SELECT a.id, a.r2_key, a.filename, a.organization_id, a.parent_id
+      /*
+       * The set here MUST be the same set filesDueWithin warns about, or a file
+       * is destroyed that nobody was told about. That is why both read
+       * EFFECTIVE_DUE and why both list the same parent types; the two queries
+       * disagreeing is the failure this pair is arranged to prevent.
+       *
+       * A report's photographs never reach here, because nothing ever writes
+       * them a purge_due_at. See recomputeReportDueDates.
+       */
+      `SELECT a.id, a.r2_key, a.filename, a.organization_id, a.parent_id, a.parent_type
          FROM attachments a
-        WHERE a.parent_type = 'application'
+        WHERE a.parent_type IN ('application', 'report_submission')
           AND a.purge_due_at IS NOT NULL
           AND a.purged_at IS NULL
           AND a.deleted_at IS NULL
           AND ${EFFECTIVE_DUE} <= ?`,
     )
     .bind(nowIsoStr)
-    .all<{ id: string; r2_key: string; filename: string; organization_id: string | null; parent_id: string | null }>();
+    .all<PastDueFile>();
   return results ?? [];
 }
 
@@ -324,12 +447,28 @@ export async function runRetention(
   const days = retentionDays(env);
 
   const recomputed = await recomputeDueDates(env.DB, days);
+  /*
+   * Returns 0 and writes nothing unless REPORT_RETENTION_DAYS is set. Report
+   * documents have no retention window until the Foundation chooses one, and a
+   * grantee's photographs have none at all by design.
+   */
+  const reportDays = reportRetentionDays(env);
+  await recomputeReportDueDates(env.DB, reportDays);
 
   let purged = 0;
   let purgeFailures = 0;
   for (const file of await filesPastDue(env.DB, nowStr)) {
     try {
-      await purgeOne(env, ctx, file, `retention: ${days} days after the decision`, null);
+      /*
+       * The reason is written onto the audit row, so it has to be true of THIS
+       * file. "90 days after the decision" on a report document would describe
+       * a decision that never happened to it.
+       */
+      const reason =
+        file.parent_type === 'report_submission'
+          ? `retention: ${reportDays} days after the report was accepted`
+          : `retention: ${days} days after the decision`;
+      await purgeOne(env, ctx, file, reason, null);
       purged += 1;
     } catch (err) {
       purgeFailures += 1;
@@ -619,11 +758,26 @@ export async function retentionScreen(
   const upcoming = await filesDueWithin(db, nowIsoStr, WARN_HORIZON_DAYS);
   const { results: purged } = await db
     .prepare(
-      `SELECT a.id, a.filename, a.purged_at, o.legal_name AS organization_name,
+      /*
+       * LEFT, not INNER. This is the record of what was destroyed, and an
+       * INNER JOIN quietly drops any purged file whose parent is not an
+       * application -- so a report document deleted last month would be absent
+       * from the one screen whose whole job is answering "what happened to the
+       * file we had from them".
+       */
+      `SELECT a.id, a.filename, a.purged_at, a.parent_type,
+              COALESCE(o.legal_name, ro.legal_name, '(unknown organization)')
+                AS organization_name,
               app.id AS application_id
          FROM attachments a
-         JOIN applications app ON app.id = a.parent_id
-         JOIN organizations o  ON o.id = app.organization_id
+         LEFT JOIN applications app      ON app.id = a.parent_id
+                                        AND a.parent_type = 'application'
+         LEFT JOIN organizations o       ON o.id = app.organization_id
+         LEFT JOIN report_submissions rs ON rs.id = a.parent_id
+                                        AND a.parent_type = 'report_submission'
+         LEFT JOIN report_periods rp     ON rp.id = rs.report_period_id
+         LEFT JOIN awards w              ON w.id = rp.award_id
+         LEFT JOIN organizations ro      ON ro.id = w.organization_id
         WHERE a.purged_at IS NOT NULL AND a.deleted_at IS NULL
         ORDER BY a.purged_at DESC
         LIMIT 200`,

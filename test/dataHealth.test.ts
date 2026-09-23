@@ -566,7 +566,7 @@ describe('duplicates come from the merge tool, not a second copy of its rules', 
 });
 
 describe('what R2 is holding, and what it costs', () => {
-  async function withFiles(files: { parent: string; bytes: number; purged?: boolean }[]) {
+  async function withFiles(files: { parent: string; bytes: number; purged?: boolean; mime?: string; dueAt?: string | null }[]) {
     const now = nowIso();
     const orgId = newId();
     await db.prepare(
@@ -578,10 +578,11 @@ describe('what R2 is holding, and what it costs', () => {
       const id = newId();
       await db.prepare(
         `INSERT INTO attachments (id, parent_type, parent_id, organization_id, r2_key,
-           filename, mime_type, size_bytes, uploaded_at, purged_at)
-         VALUES (?,?,NULL,?,?,?, 'application/pdf', ?, ?, ?)`,
-      ).bind(id, f.parent, orgId, `k/${id}`, `${id}.pdf`, f.bytes, now,
-             f.purged ? now : null).run();
+           filename, mime_type, size_bytes, uploaded_at, purged_at, purge_due_at)
+         VALUES (?,?,NULL,?,?,?,?,?,?,?,?)`,
+      ).bind(id, f.parent, orgId, `k/${id}`, `${id}.pdf`,
+             f.mime ?? 'application/pdf', f.bytes, now,
+             f.purged ? now : null, f.dueAt ?? null).run();
     }
     return orgId;
   }
@@ -632,5 +633,63 @@ describe('what R2 is holding, and what it costs', () => {
 
   it('is admin only, like everything else on this screen', async () => {
     await expect(storageUsage(db, reviewerSession())).rejects.toThrow();
+  });
+});
+
+describe('what the storage figure actually counts', () => {
+  async function put(rows: { parent: string; bytes: number; mime?: string; dueAt?: string | null }[]) {
+    const now = nowIso();
+    const orgId = newId();
+    await db.prepare(
+      `INSERT INTO organizations (id, legal_name, ein, status, created_at, updated_at)
+       VALUES (?,?,?,'active',?,?)`,
+    ).bind(orgId, `Media Org ${crypto.randomUUID().slice(0, 6)}`,
+           String(960000000 + Math.floor(Math.random() * 9999)), now, now).run();
+    for (const r of rows) {
+      const id = newId();
+      await db.prepare(
+        `INSERT INTO attachments (id, parent_type, parent_id, organization_id, r2_key,
+           filename, mime_type, size_bytes, uploaded_at, purge_due_at)
+         VALUES (?,?,NULL,?,?,?,?,?,?,?)`,
+      ).bind(id, r.parent, orgId, `k/${id}`, `${id}.bin`,
+             r.mime ?? 'application/pdf', r.bytes, now, r.dueAt ?? null).run();
+    }
+  }
+
+  it('stops calling a report document unretained once it has a deletion date', async () => {
+    /*
+     * This read the parent type and called every report attachment unretained.
+     * That was true while report files had no retention path at all, and stops
+     * being true the moment a window is configured -- at which point the figure
+     * would overstate the permanent footprint forever, which is the opposite of
+     * what somebody watching a bill wants.
+     */
+    const before = (await storageUsage(db, adminSession())).unretainedBytes;
+    await put([
+      { parent: 'report_submission', bytes: 1_000_000, dueAt: '2027-01-01T00:00:00.000Z' },
+      { parent: 'report_submission', bytes: 4_000_000, dueAt: null },
+    ]);
+    const usage = await storageUsage(db, adminSession());
+    expect(usage.unretainedBytes - before).toBe(4_000_000);
+  });
+
+  it('counts a photograph as unretained, because nothing will ever delete it', async () => {
+    const before = (await storageUsage(db, adminSession())).unretainedBytes;
+    await put([{ parent: 'report_submission', bytes: 3_000_000, mime: 'image/heic' }]);
+    expect((await storageUsage(db, adminSession())).unretainedBytes - before).toBe(3_000_000);
+  });
+
+  it('reports media separately, because video is what fills a bucket', async () => {
+    const before = await storageUsage(db, adminSession());
+    await put([
+      { parent: 'report_submission', bytes: 180_000_000, mime: 'video/mp4' },
+      { parent: 'report_submission', bytes: 6_000_000, mime: 'image/jpeg' },
+      { parent: 'report_submission', bytes: 500_000, mime: 'application/pdf' },
+    ]);
+    const after = await storageUsage(db, adminSession());
+    // The PDF is not media, and counting it here would blur the one number
+    // that answers what a decision about video would actually save.
+    expect(after.mediaBytes - before.mediaBytes).toBe(186_000_000);
+    expect(after.mediaFiles - before.mediaFiles).toBe(2);
   });
 });

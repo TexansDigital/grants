@@ -405,6 +405,27 @@ async function stubApi(page, { role }) {
       return json(route, report);
     }
 
+    /*
+     * Storage. Deliberately shaped like the state that actually exists today:
+     * photographs and video that nothing will ever delete, a cost well under
+     * the threshold, and a report document that DOES carry a deletion date so
+     * the two figures cannot be the same number by accident.
+     */
+    if (p === '/api/storage') {
+      return json(route, {
+        totalBytes: 1_400_000_000,
+        byParent: [
+          { parentType: 'application', files: 12, bytes: 200_000_000 },
+          { parentType: 'report_submission', files: 9, bytes: 1_200_000_000 },
+        ],
+        unretainedBytes: 1_150_000_000,
+        mediaBytes: 1_100_000_000,
+        mediaFiles: 7,
+        estimatedMonthlyUsd: 0.02,
+        overWatchThreshold: false,
+      });
+    }
+
     if (p === '/api/organizations/duplicates') {
       // After a merge the pair is gone, which is how "the list re-read itself"
       // is observable at all.
@@ -462,6 +483,29 @@ async function main() {
 
     await stubApi(page, { role: 'admin' });
     await page.goto(`${base}/data-health`);
+
+    /*
+     * The storage panel. Its endpoint existed for a day with nothing rendering
+     * it, which is the same fault shape as every other one this week: a
+     * correct half nobody had joined to anything. The request was "flag it if
+     * this goes over $5 a month", and a figure on no screen flags nothing.
+     */
+    const storage = page.locator('article.storage-usage');
+    await storage.waitFor();
+    const storageText = await storage.innerText();
+    truthy('the storage panel renders', await storage.isVisible());
+    truthy('it says how much is stored', storageText.includes('1.3 GB'));
+    truthy('it says what that costs', storageText.includes('$0.02'));
+    truthy('it says whether that is past the figure worth a conversation',
+      /below the \$5/i.test(storageText));
+    truthy('it names the photographs and video separately', storageText.includes('7 photos and video'));
+    truthy('and says plainly that nothing deletes them',
+      /nothing ever deletes these/i.test(storageText));
+    truthy('it reports what carries no deletion date at all',
+      /1\.1 GB attached to reports has no deletion date/i.test(storageText));
+    // The two figures are different facts and must not be printed as one.
+    truthy('media and unretained are not the same number',
+      !storageText.includes('1.1 GB attached to reports has no deletion date, 1.1 GB'));
 
     const panel = page.locator('article.check', { hasText: 'Possible duplicate organizations' });
     await panel.waitFor();

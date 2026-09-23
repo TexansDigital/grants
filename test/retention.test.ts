@@ -30,6 +30,8 @@ import {
   retentionScreen,
   retentionDays,
   noticeIsDue,
+  recomputeReportDueDates,
+  reportRetentionDays,
   RETENTION_DAYS_DEFAULT,
   WARN_HORIZON_DAYS,
   type DueFile,
@@ -415,6 +417,7 @@ describe('telling the admins', () => {
     organization_name: 'Invented Trust',
     project_title: null,
     application_id: newId(),
+    parent_type: 'application',
     effective_due_at: iso(dueInDays * DAY),
     download_url_first_issued_at: retrieved ? nowIso() : null,
     retention_notice_sent_at: warned ? nowIso() : null,
@@ -610,5 +613,173 @@ describe('the screen', () => {
     const screen = await retentionScreen(db, nowIso());
     expect(screen.upcoming.some((f) => f.id === a.attachmentId)).toBe(true);
     expect((await filesPastDue(db, nowIso())).some((f) => f.id === a.attachmentId)).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+/*
+ * Files attached to a grant REPORT.
+ *
+ * A different problem from an applicant's financial statements, and the tests
+ * are here to keep it a different problem. An audited statement is collected to
+ * reach a decision and is exposure once the decision is made. A photograph of
+ * the thing the grant paid for IS the deliverable -- destroying it on a
+ * ninety-day clock would throw away the reason for asking.
+ */
+describe('retention for what a grantee sends back', () => {
+  async function acceptedReport(opts: { acceptedAt: string | null }) {
+    const p = await seedProgram(db, ctxFor(adminSession()), {
+      ...INSPIRE_CHANGE, slug: `rep-${newId().slice(0, 8)}`,
+    });
+    const now = nowIso();
+    const orgId = newId();
+    const awardId = newId();
+    /*
+     * A real admin row. accepted_by is a foreign key, so a session object with
+     * an id nothing points at is not enough -- somebody accepted this report
+     * and the schema wants to know who.
+     */
+    const adminId = adminSession().userId;
+    await db.prepare(
+      `INSERT OR IGNORE INTO users (id, email, role, organization_id, is_active,
+         created_at, updated_at)
+       VALUES (?,?, 'admin', NULL, 1, ?, ?)`,
+    ).bind(adminId, `retention-admin-${adminId.slice(0, 8)}@example-invented.org`, now, now).run();
+    const periodId = newId();
+    const submissionId = newId();
+    await db.prepare(
+      `INSERT INTO organizations (id, legal_name, ein, status, created_at, updated_at)
+       VALUES (?,?,?,'active',?,?)`,
+    ).bind(orgId, 'Invented Bayou Collective', String(700000000 + Math.floor(Math.random() * 1000)), now, now).run();
+    await db.prepare(
+      /*
+       * An imported historical award: no application behind it. The schema
+       * insists an award names either an application or where it came from,
+       * which is why this carries source_system -- and it is also the exact
+       * shape of the awards the past-grantee claim queue connects people to.
+       */
+      `INSERT INTO awards (id, organization_id, program_id, awarded_amount_cents,
+         awarded_at, status, source_system, source_reference, created_at, updated_at)
+       VALUES (?,?,?,?,?,'active','spreadsheet',?,?,?)`,
+    ).bind(awardId, orgId, p.programId, 2_500_000, now, `RET-${awardId.slice(0, 8)}`, now, now).run();
+    await db.prepare(
+      `INSERT INTO report_periods (id, award_id, label, period_type, due_date, created_at, updated_at)
+       VALUES (?,?,?,'final',?,?,?)`,
+    ).bind(periodId, awardId, 'Final report', '2027-01-31T00:00:00.000Z', now, now).run();
+    await db.prepare(
+      `INSERT INTO report_submissions (id, report_period_id, submitted_at, accepted_at,
+         accepted_by, created_at, updated_at)
+       VALUES (?,?,?,?,?,?,?)`,
+    ).bind(
+      submissionId, periodId, now, opts.acceptedAt,
+      opts.acceptedAt === null ? null : adminId, now, now,
+    ).run();
+
+    const attach = async (filename: string, mime: string) => {
+      const id = newId();
+      await db.prepare(
+        `INSERT INTO attachments (id, parent_type, parent_id, organization_id, r2_key,
+           filename, mime_type, size_bytes, uploaded_at)
+         VALUES (?, 'report_submission', ?, ?, ?, ?, ?, 10, ?)`,
+      ).bind(id, submissionId, orgId, objectKey(orgId, id), filename, mime, now).run();
+      return id;
+    };
+
+    return {
+      orgId, awardId, submissionId,
+      pdf: await attach('evaluation.pdf', 'application/pdf'),
+      photo: await attach('summer-day.jpg', 'image/jpeg'),
+      video: await attach('opening.mp4', 'video/mp4'),
+      heic: await attach('IMG_4821.HEIC', 'image/heic'),
+    };
+  }
+
+  const dueFor = async (id: string) =>
+    (await db.prepare(`SELECT purge_due_at AS d FROM attachments WHERE id=?`)
+      .bind(id).first<{ d: string | null }>())!.d;
+
+  it('schedules nothing at all when no window is configured', async () => {
+    // The Foundation has not chosen a retention period for report documents.
+    // Until they do, the correct number of files scheduled for destruction is
+    // zero -- not a default somebody has to discover later.
+    const r = await acceptedReport({ acceptedAt: nowIso() });
+    expect(await recomputeReportDueDates(db, null)).toBe(0);
+    expect(await dueFor(r.pdf)).toBeNull();
+  });
+
+  it('never schedules a photograph, even when a window IS configured', async () => {
+    // The assertion this whole block exists for.
+    const r = await acceptedReport({ acceptedAt: nowIso() });
+    await recomputeReportDueDates(db, 90);
+    expect(await dueFor(r.photo)).toBeNull();
+    expect(await dueFor(r.video)).toBeNull();
+    expect(await dueFor(r.heic)).toBeNull();
+  });
+
+  it('schedules a document from the date the report was ACCEPTED', async () => {
+    const acceptedAt = '2026-01-10T00:00:00.000Z';
+    const r = await acceptedReport({ acceptedAt });
+    await recomputeReportDueDates(db, 30);
+    expect(await dueFor(r.pdf)).toBe('2026-02-09T00:00:00.000Z');
+  });
+
+  it('leaves a report still under review alone', async () => {
+    // A report nobody has accepted is a report somebody may still have to
+    // read, and the attachment is part of what they are reading.
+    const r = await acceptedReport({ acceptedAt: null });
+    await recomputeReportDueDates(db, 30);
+    expect(await dueFor(r.pdf)).toBeNull();
+  });
+
+  it('warns about a report document before it destroys one', async () => {
+    /*
+     * The pair that must not disagree. A file eligible for deletion that never
+     * appears in a notice is destroyed without anybody being told, which is the
+     * single worst outcome this module can produce.
+     */
+    const r = await acceptedReport({ acceptedAt: '2026-01-10T00:00:00.000Z' });
+    await recomputeReportDueDates(db, 30);
+    const at = '2026-02-09T01:00:00.000Z';
+
+    const warned = await filesDueWithin(db, at, WARN_HORIZON_DAYS);
+    const pastDue = await filesPastDue(db, at);
+    expect(warned.map((f) => f.id)).toContain(r.pdf);
+    expect(pastDue.map((f) => f.id)).toContain(r.pdf);
+    // Every file about to be destroyed was named in the warning list.
+    for (const f of pastDue) expect(warned.map((w) => w.id)).toContain(f.id);
+  });
+
+  it('names the grantee organization on the notice, not "(unknown)"', async () => {
+    // The email says who each file belongs to. A LEFT JOIN that found nothing
+    // would still produce a line, and the line would be useless.
+    const r = await acceptedReport({ acceptedAt: '2026-01-10T00:00:00.000Z' });
+    await recomputeReportDueDates(db, 30);
+    const warned = await filesDueWithin(db, '2026-02-09T01:00:00.000Z', WARN_HORIZON_DAYS);
+    const line = warned.find((f) => f.id === r.pdf)!;
+    expect(line.organization_name).toBe('Invented Bayou Collective');
+    expect(line.project_title).toBe('Final report');
+    expect(line.parent_type).toBe('report_submission');
+    // No application behind a report document, and none invented to fill it.
+    expect(line.application_id).toBeNull();
+  });
+
+  it('still lists a purged report document on the screen that records deletions', async () => {
+    // retentionScreen answers "what happened to the file we had from them".
+    // An INNER JOIN to applications drops every report file from that answer.
+    const r = await acceptedReport({ acceptedAt: '2026-01-10T00:00:00.000Z' });
+    await db.prepare(`UPDATE attachments SET purged_at=? WHERE id=?`)
+      .bind(nowIso(), r.pdf).run();
+    const screen = await retentionScreen(db, nowIso());
+    expect(screen.purged.map((row) => row.id)).toContain(r.pdf);
+  });
+
+  it('reads the window from configuration, and refuses nonsense', () => {
+    expect(reportRetentionDays({ REPORT_RETENTION_DAYS: '365' } as unknown as Env)).toBe(365);
+    expect(reportRetentionDays({} as unknown as Env)).toBeNull();
+    expect(reportRetentionDays({ REPORT_RETENTION_DAYS: '' } as unknown as Env)).toBeNull();
+    expect(reportRetentionDays({ REPORT_RETENTION_DAYS: '0' } as unknown as Env)).toBeNull();
+    expect(reportRetentionDays({ REPORT_RETENTION_DAYS: 'soon' } as unknown as Env)).toBeNull();
+    // A negative window would mean "delete files accepted in the future".
+    expect(reportRetentionDays({ REPORT_RETENTION_DAYS: '-30' } as unknown as Env)).toBeNull();
   });
 });

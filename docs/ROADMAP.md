@@ -13,6 +13,50 @@ replaced them.
 
 
 
+## Fixed 23 September — files a grantee sends back were retained by nobody
+
+Retention covered `parent_type = 'application'` and nothing else. Every file
+attached to a grant report — including the 200 MB videos enabled the same day —
+had no deletion path at all, and nobody had decided that.
+
+The fix is deliberately not "the same rule with a different number". An
+applicant's audited accounts are collected from three hundred organizations to
+fund fifty, and once the decision is made holding them is exposure with no
+purpose. A photograph of the thing a grant paid for is the opposite: it is the
+deliverable, the reason for asking. A ninety-day clock on it would destroy
+exactly what it was collected for.
+
+So:
+
+- **Media is never scheduled for deletion.** Not "kept a long time" — never
+  scheduled. A photo or video leaves only when an admin purges that one file
+  through `purgeAttachmentNow`, which already audits. The discriminator is the
+  stored mime type, so a budget scanned to a PNG is treated as media and kept:
+  the safe direction to be wrong in.
+- **Report documents are opt-in.** `REPORT_RETENTION_DAYS` unset means nothing
+  is scheduled and nothing is deleted. That is decision 3.8 in
+  `BLOCKED-ON-YOU.md` and it is the Foundation's; building it with a default
+  would be deciding it by whichever behaviour was written first, which is the
+  failure CLAUDE.md names for exactly this fork.
+- When a window IS set, it runs from the report's **acceptance**, and the
+  warning path was widened with it — `filesDueWithin` and `filesPastDue` now
+  cover the same set, so nothing can be destroyed that was never warned about.
+- `retentionScreen`'s purged list used an INNER JOIN to applications, which
+  would have dropped every report file from the one screen whose job is
+  answering "what happened to the file we had from them". Now LEFT.
+
+Two things the same pass turned up:
+
+- `GET /api/storage` had existed for a day with **no screen rendering it**,
+  which makes "flag it if R2 goes over $5 a month" impossible to honour. It is
+  now a panel on Data Health. `unretainedBytes` also read the parent type,
+  which stops being true the moment a window is configured; it now reads
+  `purge_due_at IS NULL` and means what it says. Media is broken out
+  separately, because it is the number that answers what this will cost.
+- The storage panel first shipped as `article.check`, making it a health
+  finding to anything reading the DOM, and sat above the blocking rows on a
+  screen whose premise is blocking first. Caught by the harness in one run.
+
 ## Fixed 23 September — the photo a nonprofit could not attach
 
 The report form's photos-and-video field built its `accept` attribute from mime

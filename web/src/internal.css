@@ -664,6 +664,21 @@ th.num {
    stripe down "none" is the screen contradicting itself. */
 .check[data-found='false'] { border-left-color: var(--line); }
 
+/*
+ * Storage is a FACT, not a finding, and it must not be either.
+ *
+ * It first shipped as `article.check`, which made it a health check to
+ * everything that reads the DOM -- the harness counting checks found one too
+ * many, and it sat above the blocking rows on a screen whose entire premise is
+ * blocking first. It borrows the visual treatment and takes its own class, so
+ * a list of findings stays a list of findings.
+ */
+.storage-usage {
+  border-left: 3px solid var(--accent);
+  padding-left: var(--space-4);
+}
+.storage-usage[data-over='true'] { border-left-color: var(--warn-ink); }
+
 .check-head {
   display: flex;
   align-items: baseline;

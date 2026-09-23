@@ -452,8 +452,28 @@ export interface StorageUsage {
   totalBytes: number;
   /** The same, split by what the file is attached to. */
   byParent: { parentType: string; files: number; bytes: number }[];
-  /** Report attachments specifically: the part nothing ever deletes. */
+  /*
+   * Bytes on report attachments that carry NO deletion date -- the part
+   * nothing will ever remove on its own.
+   *
+   * Computed from purge_due_at rather than from the parent type, which is what
+   * it used to read. The two agreed while report files had no retention path
+   * at all; they stop agreeing the moment REPORT_RETENTION_DAYS is set, and a
+   * figure that kept counting documents with a deletion date would overstate
+   * the permanent footprint forever.
+   */
   unretainedBytes: number;
+  /**
+   * Photographs and video specifically.
+   *
+   * Broken out because it is the number that answers "what is this actually
+   * going to cost". A financial statement is under a megabyte; three minutes
+   * of phone video is two hundred. Media is also never scheduled for deletion
+   * by design -- see recomputeReportDueDates -- so this figure only ever grows
+   * until somebody decides otherwise.
+   */
+  mediaBytes: number;
+  mediaFiles: number;
   /** US dollars per month, at R2's published storage rate. */
   estimatedMonthlyUsd: number;
   /** True once the estimate passes the figure worth a conversation. */
@@ -486,15 +506,37 @@ export async function storageUsage(
     bytes: Number(r.bytes),
   }));
   const totalBytes = byParent.reduce((n, r) => n + r.bytes, 0);
-  const unretainedBytes = byParent
-    .filter((r) => r.parentType === 'report_submission')
-    .reduce((n, r) => n + r.bytes, 0);
+
+  const unretained = await db
+    .prepare(
+      `SELECT COALESCE(SUM(size_bytes), 0) AS bytes
+         FROM attachments
+        WHERE parent_type = 'report_submission'
+          AND purge_due_at IS NULL
+          AND purged_at IS NULL
+          AND deleted_at IS NULL`,
+    )
+    .first<{ bytes: number }>();
+
+  const media = await db
+    .prepare(
+      `SELECT COUNT(*) AS files, COALESCE(SUM(size_bytes), 0) AS bytes
+         FROM attachments
+        WHERE purged_at IS NULL
+          AND deleted_at IS NULL
+          AND (mime_type LIKE 'image/%' OR mime_type LIKE 'video/%')`,
+    )
+    .first<{ files: number; bytes: number }>();
+
+  const unretainedBytes = Number(unretained?.bytes ?? 0);
   const estimatedMonthlyUsd = (totalBytes / (1024 ** 3)) * R2_USD_PER_GB_MONTH;
 
   return {
     totalBytes,
     byParent,
     unretainedBytes,
+    mediaBytes: Number(media?.bytes ?? 0),
+    mediaFiles: Number(media?.files ?? 0),
     // Rounded to cents for display; compared before rounding, so a figure
     // that displays as $5.00 having been $4.996 does not read as over.
     estimatedMonthlyUsd: Math.round(estimatedMonthlyUsd * 100) / 100,
