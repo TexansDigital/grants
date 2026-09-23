@@ -5,7 +5,38 @@ import { db, ctxFor, adminSession } from './helpers';
 import { seedProgram } from '../src/seed/seedProgram';
 import { INSPIRE_CHANGE } from '../src/seed/inspireChange';
 import { createSession, SESSION_COOKIE } from '../src/lib/sessions';
-import { presignUpload, objectKey, PRESIGN_TTL_SECONDS } from '../src/lib/uploads';
+import {
+  presignUpload, objectKey, PRESIGN_TTL_SECONDS, MAX_PRESIGN_TTL_SECONDS, presignTtlFor,
+} from '../src/lib/uploads';
+import {
+  validateUploadIntent, describeAllowed, mimeForUpload,
+  MEDIA_UPLOAD_MIME, MAX_MEDIA_BYTES, DEFAULT_UPLOAD_MIME,
+} from '../src/lib/fieldTypes';
+import type { FieldDef } from '../src/lib/fieldTypes';
+
+/** A field that takes photos and video; what a grantee shows their work with. */
+const mediaField = (): FieldDef => ({
+  id: newId(),
+  field_key: 'project_media',
+  label: 'Photos and video',
+  field_type: 'file_upload',
+  is_required: 0,
+  sort_order: 0,
+  options: null,
+  validation: { allowed_mime: MEDIA_UPLOAD_MIME, max_size_bytes: MAX_MEDIA_BYTES, max_files: 6 },
+  help_text: null,
+  conditional_on_field_id: null,
+  conditional_value: null,
+  maps_to: null,
+});
+
+/** A field that takes evidence; what a grantee proves their work with. */
+const documentField = (): FieldDef => ({
+  ...mediaField(),
+  field_key: 'financial_statements',
+  label: 'Financial statements',
+  validation: { allowed_mime: DEFAULT_UPLOAD_MIME },
+});
 import { newId } from '../src/lib/ids';
 import { nowIso } from '../src/lib/time';
 import type { Env, Session } from '../src/types';
@@ -288,5 +319,73 @@ describe('scoping and lifecycle', () => {
     expect(err!.code).toBe('FORBIDDEN');
     expect(err!.publicMessage).toMatch(/not linked to an organization/);
     expect(err!.message).toMatch(/no organization on the session/);
+  });
+});
+
+describe('media, and files the browser would not name', () => {
+  it('describes what is allowed from the FIELD, not from a hardcoded sentence', () => {
+    // The message read "must be a PDF, Word, Excel, CSV, or image file" for
+    // every upload field in the system. True of the default list, and a lie
+    // the moment a field accepts video -- a grantee told their MP4 must be a
+    // PDF, on a field labelled "Photos and video".
+    expect(describeAllowed(MEDIA_UPLOAD_MIME)).toBe('a image or video file');
+    expect(describeAllowed(['application/pdf'])).toBe('a PDF file');
+    expect(describeAllowed([])).toBe('a supported file');
+  });
+
+  it('accepts a phone video on a media field and refuses it on a documents field', () => {
+    const media = mediaField();
+    const docs = documentField();
+    const clip = { fieldKey: 'x', filename: 'IMG_0421.mov', mimeType: 'video/quicktime', sizeBytes: 40_000_000 };
+    expect(validateUploadIntent(media, clip).ok).toBe(true);
+    const refused = validateUploadIntent(docs, clip);
+    expect(refused.ok).toBe(false);
+    if (!refused.ok) expect(refused.message).not.toContain('video');
+  });
+
+  it('names a file the browser gave no type at all', () => {
+    // .heic off a phone and .mov off a camera both arrive with an empty
+    // file.type on some browsers. An empty string matches no allow-list, so
+    // the upload was refused for a file that was exactly what was asked for.
+    expect(mimeForUpload('IMG_1234.HEIC', '')).toBe('image/heic');
+    expect(mimeForUpload('clip.mov', '')).toBe('video/quicktime');
+    // A declared type always wins: this fills blanks, it does not overrule.
+    expect(mimeForUpload('clip.mov', 'video/mp4')).toBe('video/mp4');
+    expect(mimeForUpload('mystery.xyz', '')).toBe('');
+    expect(validateUploadIntent(mediaField(), {
+      fieldKey: 'x', filename: 'IMG_1234.HEIC', mimeType: '', sizeBytes: 3_000_000,
+    }).ok).toBe(true);
+  });
+
+  it('refuses a file over the media ceiling, and says the ceiling correctly', () => {
+    const tooBig = validateUploadIntent(mediaField(), {
+      fieldKey: 'x', filename: 'long.mp4', mimeType: 'video/mp4', sizeBytes: MAX_MEDIA_BYTES + 1,
+    });
+    expect(tooBig.ok).toBe(false);
+    if (!tooBig.ok) expect(tooBig.message).toContain('200 MB');
+  });
+
+  it('rounds a size limit UP, because flooring understates the rule', () => {
+    // Math.floor turned a 1.5 MB limit into "smaller than 1 MB" -- a rule the
+    // form does not enforce, told to somebody trying to obey it.
+    const field = { ...mediaField(), validation: { max_size_bytes: 1_500_000 } };
+    const r = validateUploadIntent(field, {
+      fieldKey: 'x', filename: 'a.png', mimeType: 'image/png', sizeBytes: 2_000_000,
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.message).toContain('2 MB');
+  });
+});
+
+describe('how long a presigned upload stays valid', () => {
+  it('gives a small file the floor and a large one more', () => {
+    expect(presignTtlFor(1_000_000)).toBe(PRESIGN_TTL_SECONDS);
+    // 200 MB at the assumed 250 KB/s floor needs well over ten minutes, and
+    // the old constant would have expired mid-upload with nothing to show.
+    expect(presignTtlFor(MAX_MEDIA_BYTES)).toBeGreaterThan(PRESIGN_TTL_SECONDS);
+  });
+
+  it('never exceeds the cap, because the URL is a bearer token', () => {
+    expect(presignTtlFor(10 * MAX_MEDIA_BYTES)).toBe(MAX_PRESIGN_TTL_SECONDS);
   });
 });

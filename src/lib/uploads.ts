@@ -26,7 +26,7 @@ import { nowIso } from './time';
 import { auditStatement } from './audit';
 import { allFields } from './forms';
 import { loadFormDefinition } from './loadForm';
-import { validateUploadIntent } from './fieldTypes';
+import { validateUploadIntent, mimeForUpload } from './fieldTypes';
 import { loadGranteePeriod, isPeriodFileable } from './reportSubmit';
 
 /**
@@ -36,6 +36,32 @@ import { loadGranteePeriod, isPeriodFileable } from './reportSubmit';
  * pasted into a chat is useless by the time anyone reads it.
  */
 export const PRESIGN_TTL_SECONDS = 600;
+
+/** Never longer than this, whatever the file. See presignTtlFor. */
+export const MAX_PRESIGN_TTL_SECONDS = 1800;
+
+/**
+ * How long this particular upload's signature should live.
+ *
+ * WHY IT CANNOT BE A CONSTANT ANY MORE. Ten minutes is ample for an 8 MB
+ * budget spreadsheet and hopeless for a 200 MB video: a nonprofit on a rural
+ * connection would upload for twelve minutes and be refused by R2 at the end,
+ * with nothing to show for it and no way to tell why. The file they are
+ * sending is the thing that decides how long they need.
+ *
+ * 250 KB/s is the assumed floor -- slow, but a speed a poor connection
+ * actually sustains. Anything faster finishes early and the signature simply
+ * expires unused.
+ *
+ * CAPPED AT THIRTY MINUTES, because a presigned URL is a bearer token for one
+ * object and every extra minute is another minute it is live if it leaks. A
+ * file too big to send in thirty minutes at that floor is a file this system
+ * should not be accepting.
+ */
+export function presignTtlFor(sizeBytes: number): number {
+  const needed = Math.ceil(sizeBytes / (250 * 1024));
+  return Math.min(MAX_PRESIGN_TTL_SECONDS, Math.max(PRESIGN_TTL_SECONDS, needed));
+}
 
 export interface UploadIntent {
   fieldKey: string;
@@ -188,8 +214,10 @@ async function presignForField(
 
   const client = r2Client(env);
   const endpoint = `${r2Origin(bucket, accountId)}/${key}`;
+  // Sized to the file, not to a constant: see presignTtlFor.
+  const ttl = presignTtlFor(intent.sizeBytes);
   const signed = await client.sign(
-    new Request(`${endpoint}?X-Amz-Expires=${PRESIGN_TTL_SECONDS}`, { method: 'PUT' }),
+    new Request(`${endpoint}?X-Amz-Expires=${ttl}`, { method: 'PUT' }),
     {
       aws: {
         // Puts the signature in the query string, which is what makes a plain
@@ -208,7 +236,12 @@ async function presignForField(
     ).bind(
       attachmentId, parentType,
       organizationId, field.id, key,
-      intent.filename, intent.mimeType, intent.sizeBytes, session.userId, now,
+      // The RESOLVED type, not the declared one. A phone that sends an empty
+      // Content-Type would otherwise leave mime_type as '' on the row, which
+      // is a NOT NULL column technically satisfied and useless to every reader
+      // of it afterwards.
+      intent.filename, mimeForUpload(intent.filename, intent.mimeType),
+      intent.sizeBytes, session.userId, now,
     ),
     auditStatement(env.DB, ctx, {
       action: 'attachment.uploaded',
@@ -229,7 +262,7 @@ async function presignForField(
   return {
     attachmentId,
     uploadUrl: signed.url,
-    expiresAt: new Date(Date.now() + PRESIGN_TTL_SECONDS * 1000).toISOString(),
+    expiresAt: new Date(Date.now() + ttl * 1000).toISOString(),
     headers: {},
   };
 }

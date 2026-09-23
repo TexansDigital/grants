@@ -487,6 +487,99 @@ export const DEFAULT_UPLOAD_MIME = [
 
 export const DEFAULT_MAX_UPLOAD_BYTES = 15 * 1024 * 1024; // 15 MB
 
+/**
+ * What a grantee may send to SHOW what a grant did, as opposed to prove it.
+ *
+ * Documents are evidence and are read; media is testimony and is watched. The
+ * two want different limits, so they are different lists rather than one
+ * list that has grown until it means nothing.
+ *
+ * HEIC is here because an iPhone photographs in it by default, and a nonprofit
+ * photographing their own programme on a phone is the single most likely way a
+ * picture reaches this system. Refusing it would mean telling somebody their
+ * photo is the wrong kind of photo.
+ */
+export const MEDIA_UPLOAD_MIME = [
+  'image/png',
+  'image/jpeg',
+  'image/webp',
+  'image/heic',
+  'image/heif',
+  'video/mp4',
+  'video/quicktime',
+  'video/webm',
+];
+
+/**
+ * 200 MB. A few minutes of phone video, and no more.
+ *
+ * WHY NOT MORE. R2 storage is cheap enough that the ceiling is not about cost
+ * -- a hundred files this size is about fifteen cents a month -- it is about
+ * what a nonprofit on a rural connection can actually finish uploading, and
+ * about how long a presigned URL has to stay valid to let them. Every extra
+ * minute of validity is another minute that URL is a bearer token.
+ */
+export const MAX_MEDIA_BYTES = 200 * 1024 * 1024;
+
+/**
+ * The allowed kinds, in words somebody can act on.
+ *
+ * Derived from the field's own list rather than hardcoded. The message used to
+ * read "must be a PDF, Word, Excel, CSV, or image file" for every upload field
+ * in the system, which was true of the default list and would have been a lie
+ * the moment a field accepted video -- an applicant being told their MP4 must
+ * be a PDF, on a field labelled "Photos and video".
+ */
+export function describeAllowed(allowed: readonly string[]): string {
+  const kinds: string[] = [];
+  if (allowed.some((m) => m === 'application/pdf')) kinds.push('PDF');
+  if (allowed.some((m) => m.includes('word'))) kinds.push('Word');
+  if (allowed.some((m) => m.includes('excel') || m.includes('spreadsheet'))) kinds.push('Excel');
+  if (allowed.includes('text/csv')) kinds.push('CSV');
+  if (allowed.some((m) => m.startsWith('image/'))) kinds.push('image');
+  if (allowed.some((m) => m.startsWith('video/'))) kinds.push('video');
+  if (kinds.length === 0) return 'a supported file';
+  if (kinds.length === 1) return `a ${kinds[0]} file`;
+  return `a ${kinds.slice(0, -1).join(', ')} or ${kinds[kinds.length - 1]} file`;
+}
+
+/**
+ * A type for a file the browser would not name.
+ *
+ * `file.type` is empty surprisingly often -- a .heic straight off a phone, a
+ * .mov copied from a camera, anything the OS has no mapping for -- and an
+ * empty string matches no allow-list, so the upload was refused with "must be
+ * an image or video file" for a file that was exactly that. Blaming the
+ * person for their operating system's mime database is not a rule worth
+ * enforcing.
+ *
+ * THIS WEAKENS NOTHING. The mime type was already whatever the client said it
+ * was: the Worker never inspects the bytes, and the threat model says so in
+ * as many words. The allow-list is storage hygiene and a clear error message,
+ * not a security control -- so filling in a blank from the extension is no
+ * more trusting than the field beside it, and it is honest about which.
+ */
+const EXTENSION_TYPES: Record<string, string> = {
+  pdf: 'application/pdf',
+  csv: 'text/csv',
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  webp: 'image/webp',
+  heic: 'image/heic',
+  heif: 'image/heif',
+  mp4: 'video/mp4',
+  m4v: 'video/mp4',
+  mov: 'video/quicktime',
+  webm: 'video/webm',
+};
+
+export function mimeForUpload(filename: string, declared: string): string {
+  if (declared.trim() !== '') return declared;
+  const ext = filename.toLowerCase().split('.').pop() ?? '';
+  return EXTENSION_TYPES[ext] ?? '';
+}
+
 export function validateUploadIntent(
   field: FieldDef,
   intent: { filename: string; mimeType: string; sizeBytes: number },
@@ -494,11 +587,12 @@ export function validateUploadIntent(
   const v = field.validation ?? {};
   const allowed = v.allowed_mime ?? DEFAULT_UPLOAD_MIME;
   const maxBytes = v.max_size_bytes ?? DEFAULT_MAX_UPLOAD_BYTES;
+  const mimeType = mimeForUpload(intent.filename, intent.mimeType);
 
-  if (!allowed.includes(intent.mimeType)) {
+  if (!allowed.includes(mimeType)) {
     return {
       ok: false,
-      message: `${field.label} must be a PDF, Word, Excel, CSV, or image file.`,
+      message: `${field.label} must be ${describeAllowed(allowed)}.`,
     };
   }
   if (!Number.isInteger(intent.sizeBytes) || intent.sizeBytes <= 0) {
@@ -507,7 +601,9 @@ export function validateUploadIntent(
   if (intent.sizeBytes > maxBytes) {
     return {
       ok: false,
-      message: `${field.label} must be smaller than ${Math.floor(maxBytes / (1024 * 1024))} MB.`,
+      // Rounded UP, not down. Math.floor turned a 1.5 MB limit into "smaller
+      // than 1 MB", which is a rule the form does not actually enforce.
+      message: `${field.label} must be smaller than ${Math.ceil(maxBytes / (1024 * 1024))} MB.`,
     };
   }
   if (/[\\/\x00-\x1f]/.test(intent.filename) || intent.filename.length > 255) {
