@@ -14,10 +14,11 @@
  * on it automatically would make the guess the decision.
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ReactElement } from 'react';
 import { ApiError, api } from './api';
-import type { GranteeClaimRow } from './api';
+import type { GranteeClaimRow, AwardChoice } from './api';
+import { formatCents } from '../../src/lib/money';
 
 interface Props {
   isAdmin: boolean;
@@ -36,7 +37,47 @@ export function GranteeClaims({ isAdmin }: Props): ReactElement {
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   /** The award each pending claim is about to be approved against. */
-  const [awardIds, setAwardIds] = useState<Record<string, string>>({});
+  const [chosen, setChosen] = useState<Record<string, AwardChoice>>({});
+  /** Which claim's picker is open, the text in it, and what came back. */
+  const [picking, setPicking] = useState<string | null>(null);
+  const [query, setQuery] = useState('');
+  const [found, setFound] = useState<AwardChoice[] | null>(null);
+  const [searching, setSearching] = useState(false);
+
+  /*
+   * Searched on a keystroke, debounced, and the LAST response wins.
+   *
+   * Without the sequence guard a slow search for "bay" can land after a fast
+   * one for "bayou reach" and replace a precise list with a stale broad one --
+   * on the screen where the next click connects somebody to a grant.
+   */
+  const seq = useRef(0);
+  useEffect(() => {
+    if (picking === null) return undefined;
+    const q = query.trim();
+    if (q === '') {
+      setFound(null);
+      return undefined;
+    }
+    const mine = ++seq.current;
+    setSearching(true);
+    const t = setTimeout(() => {
+      void api
+        .searchAwards(q)
+        .then((r) => {
+          if (mine === seq.current) setFound(r.awards);
+        })
+        .catch(() => {
+          if (mine === seq.current) setFound([]);
+        })
+        .finally(() => {
+          if (mine === seq.current) setSearching(false);
+        });
+    }, 250);
+    return () => clearTimeout(t);
+  }, [query, picking]);
+
+
 
   const load = useCallback(async (signal?: AbortSignal) => {
     try {
@@ -56,11 +97,12 @@ export function GranteeClaims({ isAdmin }: Props): ReactElement {
   }, [load]);
 
   async function approve(claim: GranteeClaimRow): Promise<void> {
-    const awardId = (awardIds[claim.id] ?? '').trim();
-    if (awardId === '') {
-      setActionError('Put in the award this claim is for, then approve.');
+    const award = chosen[claim.id];
+    if (!award) {
+      setActionError('Choose the award this claim is for, then connect.');
       return;
     }
+    const awardId = award.id;
     setBusy(claim.id);
     setActionError(null);
     setNotice(null);
@@ -161,7 +203,7 @@ export function GranteeClaims({ isAdmin }: Props): ReactElement {
                   <th scope="col">Organization</th>
                   <th scope="col">Who</th>
                   <th scope="col">The grant, as they describe it</th>
-                  <th scope="col">Suggested</th>
+                  <th scope="col">The award</th>
                   {isAdmin && <th scope="col"><span className="sr-only">Actions</span></th>}
                 </tr>
               </thead>
@@ -184,45 +226,114 @@ export function GranteeClaims({ isAdmin }: Props): ReactElement {
                     </td>
                     <td>
                       {/*
-                        A SUGGESTION, shown with what it matched on, and never
-                        applied on its own. Filling the box is a click somebody
-                        makes.
+                        THE AWARD, CHOSEN. Never a typed id: nobody has one to
+                        hand, so an admin would go and find one in another tab
+                        and paste it -- which is exactly the moment a wrong id
+                        gets pasted, and a wrong id here connects a nonprofit
+                        to somebody else's grant.
                       */}
-                      {c.matchedAwardId ? (
+                      {chosen[c.id] ? (
                         <>
-                          <span className="meta">{c.matchedOrganizationName}</span>
-                          <br />
-                          <button
-                            type="button"
-                            className="btn secondary small"
-                            onClick={() =>
-                              setAwardIds((p) => ({ ...p, [c.id]: c.matchedAwardId! }))
-                            }
-                          >
-                            Use {c.matchedAwardLabel}
-                          </button>
+                          <strong>{chosen[c.id]!.organizationName}</strong>
+                          <p className="meta">
+                            {chosen[c.id]!.programName} {chosen[c.id]!.awardedYear} ·{' '}
+                            {formatCents(chosen[c.id]!.awardedAmountCents)}
+                          </p>
+                          {chosen[c.id]!.alreadyHeldBy && (
+                            <p className="meta">
+                              Somebody already has access to this award:{' '}
+                              {chosen[c.id]!.alreadyHeldBy}
+                            </p>
+                          )}
+                          {isAdmin && (
+                            <button
+                              type="button"
+                              className="btn secondary small"
+                              onClick={() => {
+                                setChosen((p) => {
+                                  const next = { ...p };
+                                  delete next[c.id];
+                                  return next;
+                                });
+                                setPicking(c.id);
+                                setQuery('');
+                              }}
+                            >
+                              Change
+                            </button>
+                          )}
+                        </>
+                      ) : picking === c.id ? (
+                        <>
+                          <label className="sr-only" htmlFor={`find-${c.id}`}>
+                            Find the award for {c.organizationName}
+                          </label>
+                          <input
+                            id={`find-${c.id}`}
+                            value={query}
+                            autoFocus
+                            placeholder="Organization name or EIN"
+                            onChange={(e) => setQuery(e.target.value)}
+                          />
+                          {searching && <p className="meta">Searching…</p>}
+                          {found !== null && found.length === 0 && !searching && (
+                            <p className="meta">
+                              Nothing matches. If this grant predates the system, it has to be
+                              imported before anyone can be connected to it.
+                            </p>
+                          )}
+                          {found?.map((a) => (
+                            <button
+                              key={a.id}
+                              type="button"
+                              className="btn secondary small"
+                              onClick={() => {
+                                setChosen((p) => ({ ...p, [c.id]: a }));
+                                setPicking(null);
+                                setQuery('');
+                                setFound(null);
+                              }}
+                            >
+                              {a.organizationName} · {a.programName} {a.awardedYear} ·{' '}
+                              {formatCents(a.awardedAmountCents)}
+                              {a.ein ? ` · EIN ${a.ein}` : ''}
+                            </button>
+                          ))}
                         </>
                       ) : (
-                        <span className="meta">No match on EIN</span>
+                        <>
+                          {/*
+                            The EIN match is a STARTING POINT for the search,
+                            not an answer. Choosing it is still a click on a
+                            named award below.
+                          */}
+                          <span className="meta">
+                            {c.matchedOrganizationName ?? 'No match on EIN'}
+                          </span>
+                          {isAdmin && (
+                            <>
+                              <br />
+                              <button
+                                type="button"
+                                className="btn secondary small"
+                                onClick={() => {
+                                  setPicking(c.id);
+                                  setQuery(c.ein ?? c.organizationName);
+                                }}
+                              >
+                                Find the award
+                              </button>
+                            </>
+                          )}
+                        </>
                       )}
                     </td>
                     {isAdmin && (
                       <td className="row-actions">
-                        <label className="sr-only" htmlFor={`award-${c.id}`}>
-                          Award id for {c.organizationName}
-                        </label>
-                        <input
-                          id={`award-${c.id}`}
-                          value={awardIds[c.id] ?? ''}
-                          placeholder="Award id"
-                          onChange={(e) =>
-                            setAwardIds((p) => ({ ...p, [c.id]: e.target.value }))
-                          }
-                        />
                         <button
                           type="button"
                           className="btn small"
-                          disabled={busy === c.id}
+                          disabled={busy === c.id || !chosen[c.id]}
                           onClick={() => void approve(c)}
                         >
                           Connect

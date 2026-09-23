@@ -928,6 +928,8 @@ export const api = {
     request<BulkGenerateResult>('/api/report-periods/generate', { method: 'POST', body: {} }),
   dataHealth: (signal?: AbortSignal) => get<HealthReport>('/api/data-health', signal),
   storage: (signal?: AbortSignal) => get<StorageUsage>('/api/storage', signal),
+  searchAwards: (q: string, signal?: AbortSignal) =>
+    get<{ awards: AwardChoice[] }>(`/api/awards/search?q=${encodeURIComponent(q)}`, signal),
   granteeClaims: (signal?: AbortSignal) =>
     get<{ claims: GranteeClaimRow[] }>('/api/grantee-claims', signal),
   approveGranteeClaim: (id: string, awardId: string, note: string | null) =>
@@ -1011,4 +1013,17 @@ export interface GranteeClaimRow {
   matchedAwardId: string | null;
   matchedAwardLabel: string | null;
   grantedAwardId: string | null;
+}
+
+/** An award a reviewer can connect a claim to. See src/lib/granteeClaims.ts. */
+export interface AwardChoice {
+  id: string;
+  organizationName: string;
+  ein: string | null;
+  programName: string;
+  awardedAmountCents: number;
+  awardedYear: string;
+  status: string;
+  /** Null when nobody holds it yet. A name here is a reason to look twice. */
+  alreadyHeldBy: string | null;
 }

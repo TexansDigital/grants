@@ -1,10 +1,12 @@
 import { env as testEnv } from 'cloudflare:test';
 import { describe, it, expect } from 'vitest';
 import worker from '../src/index';
-import { db, ctxFor, adminSession, appErrorFrom } from './helpers';
+import { db, ctxFor, adminSession, reviewerSession, appErrorFrom } from './helpers';
 import { seedProgram } from '../src/seed/seedProgram';
 import { INSPIRE_CHANGE } from '../src/seed/inspireChange';
-import { approveClaim, rejectClaim, listClaims, readClaim } from '../src/lib/granteeClaims';
+import {
+  approveClaim, rejectClaim, listClaims, readClaim, searchAwards,
+} from '../src/lib/granteeClaims';
 import { createSession, SESSION_COOKIE } from '../src/lib/sessions';
 import { newId } from '../src/lib/ids';
 import { nowIso } from '../src/lib/time';
@@ -419,5 +421,55 @@ describe('the queue', () => {
       {} as ExecutionContext,
     );
     expect([401, 404]).toContain(res.status);
+  });
+});
+
+describe('finding the award to connect a claim to', () => {
+  it('finds it by organization name and by EIN, with or without the dash', async () => {
+    const funded = await fundedOrg();
+    const name = await db.prepare(`SELECT legal_name FROM organizations WHERE id=?`)
+      .bind(funded.orgId).first<{ legal_name: string }>();
+
+    const byName = await searchAwards(db, admin, name!.legal_name.slice(0, 12));
+    expect(byName.map((a) => a.id)).toContain(funded.awardId);
+
+    const bare = await searchAwards(db, admin, funded.ein);
+    expect(bare.map((a) => a.id)).toContain(funded.awardId);
+
+    // An EIN typed the way it appears on a determination letter. Matching on
+    // the digits means a reviewer does not have to guess how it was stored.
+    const dashed = await searchAwards(db, admin, `${funded.ein.slice(0, 2)}-${funded.ein.slice(2)}`);
+    expect(dashed.map((a) => a.id)).toContain(funded.awardId);
+  });
+
+  it('says when somebody already has access, which is a reason to look twice', async () => {
+    const funded = await fundedOrg();
+    const before = await searchAwards(db, admin, funded.ein);
+    expect(before[0]!.alreadyHeldBy).toBeNull();
+
+    await db.prepare(
+      `INSERT INTO users (id, email, role, organization_id, is_active, created_at, updated_at)
+       VALUES (?,?, 'grantee', ?, 1, ?, ?)`,
+    ).bind(newId(), `holder-${n}@example-invented.org`, funded.orgId, nowIso(), nowIso()).run();
+
+    const after = await searchAwards(db, admin, funded.ein);
+    expect(after[0]!.alreadyHeldBy).toContain('holder-');
+  });
+
+  it('never offers a cancelled award, because approving one is refused anyway', async () => {
+    const funded = await fundedOrg();
+    await db.prepare(`UPDATE awards SET status='cancelled' WHERE id=?`).bind(funded.awardId).run();
+    const out = await searchAwards(db, admin, funded.ein);
+    expect(out.map((a) => a.id)).not.toContain(funded.awardId);
+  });
+
+  it('returns nothing for an empty search rather than every award there is', async () => {
+    await fundedOrg();
+    expect(await searchAwards(db, admin, '   ')).toEqual([]);
+  });
+
+  it('is admin only', async () => {
+    await fundedOrg();
+    await expect(searchAwards(db, reviewerSession(), 'invented')).rejects.toThrow();
   });
 });

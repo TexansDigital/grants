@@ -74,7 +74,9 @@ import {
 } from './lib/scope';
 import { searchApplications } from './lib/search';
 import { reindexAllApplications } from './lib/reindex';
-import { submitClaim, listClaims, approveClaim, rejectClaim } from './lib/granteeClaims';
+import {
+  submitClaim, listClaims, approveClaim, rejectClaim, searchAwards,
+} from './lib/granteeClaims';
 import {
   reportPortfolio, readReportForStaff, acceptReport, requestReportRevisions, waiveReport,
 } from './lib/reportAdmin';
@@ -732,6 +734,21 @@ const routes: readonly Route[] = [
     roles: ADMIN_ONLY,
     handler: async ({ env, ctx, url }) =>
       json({ claims: await listClaims(env.DB, url.searchParams.get('status') ?? undefined) }, ctx),
+  },
+  {
+    /*
+     * Awards a reviewer can pick from. Admin only, and unscoped by design:
+     * connecting a claim means choosing among every organization's awards,
+     * which is a Foundation admin's job and nobody else's.
+     */
+    method: 'GET',
+    path: '/api/awards/search',
+    roles: ADMIN_ONLY,
+    handler: async ({ env, ctx, url, session }) =>
+      json(
+        { awards: await searchAwards(env.DB, session, url.searchParams.get('q') ?? '') },
+        ctx,
+      ),
   },
   {
     method: 'POST',

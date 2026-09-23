@@ -82,6 +82,35 @@ const DECIDED = {
   decisionNote: 'No award in our records for this EIN.',
 };
 
+/*
+ * Two awards for one organization, on purpose. The picker has to make them
+ * distinguishable -- a reviewer choosing between "Inspire Change 2023" and
+ * "Inspire Change 2024" for the same nonprofit is the realistic case, and a
+ * list that shows only the organization name makes that choice a coin toss.
+ */
+const AWARDS = [
+  {
+    id: 'award-harbor-2024',
+    organizationName: 'Invented Harbor Trust',
+    ein: '001234567',
+    programName: 'Inspire Change',
+    awardedAmountCents: 2_500_000,
+    awardedYear: '2024',
+    status: 'active',
+    alreadyHeldBy: null,
+  },
+  {
+    id: 'award-harbor-2023',
+    organizationName: 'Invented Harbor Trust',
+    ein: '001234567',
+    programName: 'Inspire Change',
+    awardedAmountCents: 1_500_000,
+    awardedYear: '2023',
+    status: 'active',
+    alreadyHeldBy: 'someone@example-invented.org',
+  },
+];
+
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
                 '.css': 'text/css; charset=utf-8', '.map': 'application/json' };
 
@@ -116,6 +145,16 @@ async function stubApi(page, { role }) {
 
     if (p === '/api/session') return json(route, { user: { id: 'u1', email: 's@example.org', role } });
     if (p === '/api/grantee-claims') return json(route, { claims });
+    if (p === '/api/awards/search') {
+      const q = (url.searchParams.get('q') ?? '').toLowerCase();
+      return json(route, {
+        awards: AWARDS.filter(
+          (a) =>
+            a.organizationName.toLowerCase().includes(q) ||
+            (a.ein ?? '').replace(/\D/g, '') === q.replace(/\D/g, ''),
+        ),
+      });
+    }
     if (/\/approve$/.test(p)) {
       const body = JSON.parse(route.request().postData() ?? '{}');
       calls.approve.push({ id: p.split('/')[3], ...body });
@@ -165,27 +204,58 @@ check('the unmatched claim says so rather than showing nothing',
  * pre-filled, a reviewer in a hurry approves whatever an EIN printed on a
  * public tax filing pointed at.
  */
-const awardBox = page.locator('#award-claim-matched');
-check('the award box starts empty', await awardBox.inputValue(), '');
-check('approving with nothing in it refuses, and does not call the API', await (async () => {
-  await page.locator('tr', { hasText: 'Invented Harbor Trust' })
-    .getByRole('button', { name: 'Connect' }).click();
-  await page.waitForTimeout(300);
-  return calls.approve.length === 0 && /Put in the award/.test(await page.locator('main').innerText());
-})(), true);
+const row = page.locator('tr', { hasText: 'Invented Harbor Trust' });
+check('Connect is disabled until an award is chosen',
+  await row.getByRole('button', { name: 'Connect' }).isDisabled(), true);
 
-await page.getByRole('button', { name: /Use Inspire Change/ }).click();
-await page.waitForTimeout(200);
-check('the suggestion fills the box when somebody chooses it',
-  await awardBox.inputValue(), 'award-harbor-2024');
+await row.getByRole('button', { name: 'Find the award' }).click();
+await page.waitForTimeout(800);
+/*
+ * SEEDED WITH WHAT THE CLAIM SAYS, so the commonest case is one click from
+ * done -- but still a click on a NAMED award, never a pre-filled id.
+ */
+check('the search starts from the EIN on the claim',
+  await page.locator('#find-claim-matched').inputValue(), '001234567');
 
-await page.locator('tr', { hasText: 'Invented Harbor Trust' })
-  .getByRole('button', { name: 'Connect' }).click();
+const options = page.locator('#find-claim-matched ~ button');
+check('both of that organization awards are offered', await options.count(), 2);
+const optionText = await options.allInnerTexts();
+check('and they are told apart by year and amount',
+  optionText.some((t) => /2024/.test(t) && /25,000/.test(t)) &&
+    optionText.some((t) => /2023/.test(t) && /15,000/.test(t)), true);
+
+await options.first().click();
+await page.waitForTimeout(300);
+check('choosing one shows what was chosen, in words',
+  /Inspire Change 2024/.test(await row.innerText()), true);
+
+await row.getByRole('button', { name: 'Connect' }).click();
 await page.waitForTimeout(700);
 check('it approved against the award in the box',
   calls.approve.map((c) => c.awardId), ['award-harbor-2024']);
 check('and says what happened, including the report period',
   /can now sign in/.test(await page.locator('main').innerText()), true);
+
+/*
+ * THE WARNING THAT MATTERS. An award somebody already holds is not
+ * necessarily the wrong one -- two people from one nonprofit both reporting
+ * is ordinary -- but it is always worth seeing before approving, and it is
+ * invisible from the claim itself.
+ */
+await page.locator('tr', { hasText: 'Invented Bayou Alliance' })
+  .getByRole('button', { name: 'Find the award' }).click();
+await page.fill('#find-claim-unmatched', 'Invented Harbor Trust');
+await page.waitForTimeout(800);
+const held = await page.locator('#find-claim-unmatched ~ button').nth(1).innerText();
+check('an award somebody already holds is offered, and flagged once chosen', await (async () => {
+  await page.locator('#find-claim-unmatched ~ button').nth(1).click();
+  await page.waitForTimeout(300);
+  return /already has access/.test(
+    await page.locator('tr', { hasText: 'Invented Bayou Alliance' }).innerText(),
+  );
+})(), true);
+void held;
+
 
 // --- declining --------------------------------------------------------------
 page.on('dialog', (d) => void d.accept('No award in our records.'));

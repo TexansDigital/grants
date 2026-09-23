@@ -565,3 +565,80 @@ export async function rejectClaim(
   }
   return { claimId };
 }
+
+export interface AwardChoice {
+  id: string;
+  organizationName: string;
+  ein: string | null;
+  programName: string;
+  awardedAmountCents: number;
+  awardedYear: string;
+  status: string;
+  /** Null when nobody holds it yet. A name here is a reason to look twice. */
+  alreadyHeldBy: string | null;
+}
+
+/**
+ * Awards a reviewer can pick from, searched by organization name or EIN.
+ *
+ * WHY THIS EXISTS. The first version of the claim queue asked an admin to
+ * type a raw UUID into a box. Nobody has an award id to hand; they would have
+ * gone looking for one in another tab and pasted it, which is exactly the
+ * moment a wrong id gets pasted -- and a wrong id here connects a nonprofit to
+ * somebody else's grant.
+ *
+ * `alreadyHeldBy` is the part that earns its place. An award somebody already
+ * has access to is not necessarily wrong -- two people from one nonprofit both
+ * reporting is ordinary -- but it is always worth seeing before approving,
+ * and it is invisible from the claim itself.
+ *
+ * ADMIN ONLY, and scoped to nothing else: this returns every organization's
+ * awards, which is what a Foundation admin is entitled to and nobody else is.
+ */
+export async function searchAwards(
+  db: D1Database,
+  session: Session,
+  query: string,
+  limit = 20,
+): Promise<AwardChoice[]> {
+  if (session.role !== 'admin') throw notFound('awards');
+  const q = query.trim();
+  if (q === '') return [];
+  // An EIN typed with or without its dash is the same EIN. Matching on the
+  // digits alone means the reviewer does not have to guess which way it was
+  // stored -- which is the same reason organizations are deduplicated on it.
+  const digits = q.replace(/\D/g, '');
+  const like = `%${q.toLowerCase()}%`;
+
+  const { results } = await db
+    .prepare(
+      `SELECT w.id, w.awarded_amount_cents, w.awarded_at, w.status,
+              o.legal_name, o.ein, p.name AS program_name,
+              (SELECT u.email FROM users u
+                WHERE u.organization_id = o.id AND u.is_active = 1 AND u.deleted_at IS NULL
+                ORDER BY u.created_at LIMIT 1) AS held_by
+         FROM awards w
+         JOIN organizations o ON o.id = w.organization_id AND o.deleted_at IS NULL
+         JOIN programs p      ON p.id = w.program_id
+        WHERE w.deleted_at IS NULL
+          AND w.status <> 'cancelled'
+          AND (LOWER(o.legal_name) LIKE ?
+               OR (? <> '' AND o.ein = ?)
+               OR LOWER(COALESCE(w.source_reference, '')) LIKE ?)
+        ORDER BY w.awarded_at DESC
+        LIMIT ?`,
+    )
+    .bind(like, digits, digits, like, limit)
+    .all<Record<string, unknown>>();
+
+  return (results ?? []).map((r) => ({
+    id: String(r.id),
+    organizationName: String(r.legal_name),
+    ein: r.ein === null ? null : String(r.ein),
+    programName: String(r.program_name),
+    awardedAmountCents: Number(r.awarded_amount_cents),
+    awardedYear: String(r.awarded_at ?? '').slice(0, 4),
+    status: String(r.status),
+    alreadyHeldBy: r.held_by === null ? null : String(r.held_by),
+  }));
+}
