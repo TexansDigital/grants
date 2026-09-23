@@ -269,7 +269,13 @@ describe('what a report looks like to the grantee', () => {
     expect(body.report).toMatchObject({ state: 'open', canFile: true, savedAt: null });
     expect(body.answers).toEqual({});
     expect(body.form!.kind).toBe('report');
-    expect(body.uploadFields).toEqual(['supporting_files']);
+    /*
+     * BOTH, in the order the form asks for them. Photos and video come first
+     * because they are the part grantees most want to send and the part the
+     * Foundation most wants to receive; documents follow. Asserted as an
+     * ordered list rather than a set, because the order is a decision.
+     */
+    expect(body.uploadFields).toEqual(['project_media', 'supporting_files']);
   });
 
   it('sends back what was typed, and when it was saved', async () => {

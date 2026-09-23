@@ -927,6 +927,19 @@ export const api = {
   generateReportPeriods: () =>
     request<BulkGenerateResult>('/api/report-periods/generate', { method: 'POST', body: {} }),
   dataHealth: (signal?: AbortSignal) => get<HealthReport>('/api/data-health', signal),
+  storage: (signal?: AbortSignal) => get<StorageUsage>('/api/storage', signal),
+  granteeClaims: (signal?: AbortSignal) =>
+    get<{ claims: GranteeClaimRow[] }>('/api/grantee-claims', signal),
+  approveGranteeClaim: (id: string, awardId: string, note: string | null) =>
+    request<{ claimId: string; userId: string; awardId: string; periodsCreated: number }>(
+      `/api/grantee-claims/${encodeURIComponent(id)}/approve`,
+      { method: 'POST', body: { awardId, note } },
+    ),
+  rejectGranteeClaim: (id: string, note: string) =>
+    request<{ claimId: string }>(
+      `/api/grantee-claims/${encodeURIComponent(id)}/reject`,
+      { method: 'POST', body: { note } },
+    ),
   duplicates: (signal?: AbortSignal) =>
     get<{ groups: DuplicateGroup[] }>('/api/organizations/duplicates', signal),
   mergePreview: (duplicateId: string, into: string, signal?: AbortSignal) =>
@@ -968,3 +981,34 @@ export const api = {
       signal,
     ),
 };
+
+/** What R2 holds, and what it costs. See src/lib/dataHealth.ts. */
+export interface StorageUsage {
+  totalBytes: number;
+  byParent: { parentType: string; files: number; bytes: number }[];
+  unretainedBytes: number;
+  estimatedMonthlyUsd: number;
+  overWatchThreshold: boolean;
+}
+
+/** A nonprofit asking to be connected to a grant. Granting is a human act. */
+export interface GranteeClaimRow {
+  id: string;
+  organizationName: string;
+  ein: string | null;
+  contactName: string;
+  contactEmail: string;
+  contactPhone: string | null;
+  contactJobTitle: string | null;
+  grantYear: number | null;
+  grantDescription: string | null;
+  status: string;
+  createdAt: string;
+  decidedAt: string | null;
+  decisionNote: string | null;
+  /** What the system suggested. Advisory; the reviewer chooses. */
+  matchedOrganizationName: string | null;
+  matchedAwardId: string | null;
+  matchedAwardLabel: string | null;
+  grantedAwardId: string | null;
+}

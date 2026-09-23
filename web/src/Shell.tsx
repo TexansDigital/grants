@@ -29,6 +29,9 @@ const NAV: { path: string; label: string; route: string; adminOnly?: boolean }[]
   // Admin only, and hidden rather than shown-and-refused. The route is guarded
   // server-side regardless; this is so a reviewer is not offered a door that
   // answers FORBIDDEN, which reads as a fault rather than a boundary.
+  // Beside data health rather than under reporting: what is here is a queue of
+  // decisions, not a report on the past.
+  { path: '/past-grantees', label: 'Past grantees', route: 'granteeClaims', adminOnly: true },
   { path: '/data-health', label: 'Data health', route: 'dataHealth', adminOnly: true },
   { path: '/dashboard', label: 'Dashboard', route: 'dashboard', adminOnly: true },
   { path: '/retention', label: 'Retention', route: 'retention', adminOnly: true },

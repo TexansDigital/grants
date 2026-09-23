@@ -19,6 +19,8 @@ import { daysUntil } from './reportWording';
 interface Props {
   cycles: OpenCycle[];
   onStart: (cycle: OpenCycle) => void;
+  /** Optional: omitted where a past-grantee route does not apply. */
+  onPastGrantee?: () => void;
   now?: Date;
 }
 
@@ -62,7 +64,12 @@ export function effortLine(cycle: OpenCycle): string | null {
   );
 }
 
-export function OpenCycles({ cycles, onStart, now = new Date() }: Props): ReactElement {
+export function OpenCycles({
+  cycles,
+  onStart,
+  onPastGrantee,
+  now = new Date(),
+}: Props): ReactElement {
   return (
     <>
       <div className="section-head">
@@ -125,6 +132,32 @@ export function OpenCycles({ cycles, onStart, now = new Date() }: Props): ReactE
             </div>
           </section>
         ))
+      )}
+
+      {/*
+        THE OTHER DOOR, and it belongs here rather than tucked in a footer.
+        A past grantee arriving at this page has nothing to apply for and no
+        account to sign in to; before this, the page told them what was open
+        and left them with nowhere to go. It shows even when nothing is open,
+        because "nothing is open right now" is exactly when somebody who was
+        funded two years ago is most likely to be reading.
+      */}
+      {onPastGrantee && (
+        <section className="card portal-award" aria-labelledby="past-grantee">
+          <div className="portal-award-head">
+            <h3 id="past-grantee">Already funded by the Foundation?</h3>
+          </div>
+          <p>
+            If we have supported your organization before, tell us what the grant made
+            possible — including photos or a short video. We will check our records and send
+            you a way to sign in.
+          </p>
+          <div className="portal-apply">
+            <button type="button" className="btn secondary" onClick={onPastGrantee}>
+              Tell us about a grant we gave you
+            </button>
+          </div>
+        </section>
       )}
 
       <PrivacyNotice />

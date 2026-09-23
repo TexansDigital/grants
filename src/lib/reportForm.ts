@@ -30,6 +30,7 @@
  * ever gain an in-place edit path it stops being true.
  */
 
+import { MEDIA_UPLOAD_MIME, MAX_MEDIA_BYTES } from './fieldTypes';
 import type { RequestContext } from '../types';
 import type { FieldType, FieldValidation, FieldOption } from './fieldTypes';
 import { newId } from './ids';
@@ -144,13 +145,38 @@ export const DEFAULT_REPORT_NARRATIVE: ReportSectionSpec[] = [
   {
     key: 'attachments',
     title: 'Anything to show us',
-    description: 'Optional. Photos, a flyer, a financial summary — whatever you already have.',
+    description:
+      'Optional, and the part people most enjoy filling in. Photos and video of the work ' +
+      'itself tell us more than any number on this form, and they are what we can share ' +
+      'with the people who funded it.',
     fields: [
+      /*
+       * TWO FIELDS, NOT ONE, and the split is on purpose.
+       *
+       * A single "attachments" box asking for a budget and a photo of a
+       * classroom gets one of the two, because the label has to describe both
+       * and ends up describing neither. Separating them also lets the limits
+       * differ honestly: a document is evidence and fits in fifteen megabytes,
+       * a video is testimony and does not.
+       */
+      {
+        key: 'project_media',
+        label: 'Photos and video',
+        type: 'file_upload',
+        help:
+          'Up to six files, 200 MB each. Anything your phone takes is fine — including ' +
+          'HEIC photos and .mov clips.',
+        validation: {
+          allowed_mime: MEDIA_UPLOAD_MIME,
+          max_size_bytes: MAX_MEDIA_BYTES,
+          max_files: 6,
+        },
+      },
       {
         key: 'supporting_files',
-        label: 'Attach up to three files',
+        label: 'Documents',
         type: 'file_upload',
-        help: 'PDF, Word, Excel, or an image. Up to 15 MB each.',
+        help: 'A flyer, a financial summary, an evaluation. PDF, Word, Excel or CSV, up to 15 MB each.',
         validation: { max_files: 3 },
       },
     ],

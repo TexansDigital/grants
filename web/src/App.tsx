@@ -22,6 +22,8 @@ import { OpenCycles } from './OpenCycles';
 import { PublicGrants } from './PublicGrants';
 import { SignIn } from './SignIn';
 import { EligibilityForm } from './EligibilityForm';
+import { GranteeClaim } from './GranteeClaim';
+import { GranteeClaims } from './GranteeClaims';
 import {
   granteeApi,
   type GranteeHomeResponse,
@@ -73,6 +75,8 @@ type Route =
   | { name: 'coverage'; cycleId: string }
   | { name: 'dashboard' }
   | { name: 'openCycles' }
+  | { name: 'granteeClaim' }
+  | { name: 'granteeClaims' }
   | { name: 'publicGrants' }
   | { name: 'signIn' }
   | { name: 'eligibility'; cycleId: string }
@@ -98,6 +102,7 @@ function parseRoute(pathname: string): Route | null {
   // Linked from the nightly retention notice. If this path did not exist,
   // that email would send admins to a 404 on the night it matters most.
   if (parts.length === 1 && parts[0] === 'retention') return { name: 'retention' };
+  if (parts.length === 1 && parts[0] === 'past-grantees') return { name: 'granteeClaims' };
   if (parts.length === 1 && parts[0] === 'dashboard') return { name: 'dashboard' };
   // A reviewer's own queue. NOT /pipeline, which is the admin's view of
   // everything -- two different questions must not share a path.
@@ -127,6 +132,11 @@ function parseRoute(pathname: string): Route | null {
   // Public and read-only. Served on both hostnames, like the other public
   // pages: which address somebody arrives at is not their problem.
   if (parts.length === 1 && parts[0] === 'grants') return { name: 'publicGrants' };
+  /*
+   * A past grantee with no application, no award they can reach and no
+   * account. Public, because by definition they cannot sign in yet.
+   */
+  if (parts.length === 1 && parts[0] === 'tell-us') return { name: 'granteeClaim' };
   if (parts.length === 3 && parts[0] === 'apply' && parts[1] === 'start' && parts[2]) {
     return { name: 'eligibility', cycleId: parts[2] };
   }
@@ -259,6 +269,7 @@ export function App(): ReactElement {
       route?.name === 'openCycles' ||
       route?.name === 'signIn' ||
       route?.name === 'eligibility' ||
+      route?.name === 'granteeClaim' ||
       route?.name === 'portal' ||
       route?.name === 'publicGrants' ||
       route?.name === 'report';
@@ -278,6 +289,7 @@ export function App(): ReactElement {
    */
   useEffect(() => {
     const titles: Record<string, string> = {
+      granteeClaims: 'Past grantees · Steward',
       pipeline: 'Pipeline · Steward',
       application: 'Application · Steward',
       home: 'Configuration · Steward',
@@ -333,6 +345,10 @@ export function App(): ReactElement {
            * builder needs `home.programs` as well, to name the program.
            */
           route?.name === 'retention' ||
+          // Added after forgetting to, exactly as the note above predicts: the
+          // screen sat on "Loading…" with a green unit suite behind it, and the
+          // browser harness caught it on its first run.
+          route?.name === 'granteeClaims' ||
           route?.name === 'rubrics' ||
           route?.name === 'reviewQueue' ||
           route?.name === 'scoringSheet' ||
@@ -354,7 +370,14 @@ export function App(): ReactElement {
         } else if (route?.name === 'apply') {
           const d = await applicantApi.draft(route.id, signal);
           setDraft(d);
-        } else if (route?.name === 'openCycles' || route?.name === 'signIn') {
+        } else if (
+          route?.name === 'openCycles' ||
+          route?.name === 'signIn' ||
+          // The claim page needs the Turnstile site key and nothing else from
+          // this call. It reads the same source as every other public page, so
+          // the widget cannot appear on one and be missing on another.
+          route?.name === 'granteeClaim'
+        ) {
           /*
            * The sign-in page reads the same public list as the grants page.
            *
@@ -526,6 +549,21 @@ export function App(): ReactElement {
         <OpenCycles
           cycles={open.cycles}
           onStart={(c) => navigate(`/apply/start/${encodeURIComponent(c.id)}`)}
+          onPastGrantee={() => navigate('/tell-us')}
+        />
+      </PortalShell>
+    );
+  }
+
+  if (route.name === 'granteeClaim') {
+    return (
+      <PortalShell organization={null} heading="Grants">
+        <GranteeClaim
+          // The same site key the open-cycles page reads. Null until that
+          // load returns, and Turnstile renders nothing on null -- which
+          // mirrors the server, where an unset secret fails closed.
+          turnstileSiteKey={open?.turnstileSiteKey ?? null}
+          onBack={() => navigate('/apply')}
         />
       </PortalShell>
     );
@@ -767,6 +805,10 @@ export function App(): ReactElement {
 
   if (route.name === 'retention') {
     return shell(<Retention isAdmin={home.user.role === 'admin'} />);
+  }
+
+  if (route.name === 'granteeClaims') {
+    return shell(<GranteeClaims isAdmin={home.user.role === 'admin'} />);
   }
 
   if (route.name === 'reporting') {

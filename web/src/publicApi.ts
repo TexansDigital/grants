@@ -40,7 +40,26 @@ export interface EligibilityResponse {
 
 const enc = encodeURIComponent;
 
+export interface ClaimAck {
+  ok: boolean;
+  message: string;
+}
+
 export const publicApi = {
+  /**
+   * A past grantee asking to be connected to their grant.
+   *
+   * The response is the same whether or not the Foundation has a matching
+   * award. That is not this client being vague -- the endpoint is deliberately
+   * uninformative, because anything else would let anyone test which
+   * nonprofits have been funded, one EIN at a time.
+   */
+  submitGranteeClaim: (input: Record<string, unknown>, turnstileToken: string | null) =>
+    request<ClaimAck>('/api/public/grantee-claim', {
+      method: 'POST',
+      body: { ...input, ...(turnstileToken ? { turnstileToken } : {}) },
+    }),
+
   cycles: (signal?: AbortSignal) =>
     request<{ cycles: OpenCycle[]; turnstileSiteKey: string | null }>(
       '/api/public/cycles',

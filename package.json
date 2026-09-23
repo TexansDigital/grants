@@ -46,7 +46,9 @@
     "restore": "node scripts/restore.mjs",
     "backup:pull": "node scripts/pull-backup.mjs",
     "backfill:stage": "node scripts/backfill-stage.mjs",
-    "e2e:stages": "node scripts/e2e-stages.mjs"
+    "e2e:stages": "node scripts/e2e-stages.mjs",
+    "e2e:pastgrantee": "node scripts/e2e-pastgrantee.mjs",
+    "e2e:claims": "node scripts/e2e-claims-ui.mjs"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.12.21",
