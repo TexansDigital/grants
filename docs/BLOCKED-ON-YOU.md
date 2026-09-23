@@ -34,6 +34,34 @@ pending; nothing here touches production.
 
 ---
 
+## One command that answers "is it ready"
+
+```
+npm run golive
+```
+
+Read-only: GETs and SELECTs, nothing written, no flag that writes. It goes and
+checks the things that are either true right now or not, rather than asking you
+to take anybody's word for them — including mine. Among them: that the
+applicant hostname is **not** behind Cloudflare Access (the fault found on 20
+September, which would have put every nonprofit into a pool of fifty free
+seats), that the CSP admits uploads to R2 (the fault that made every upload
+fail silently with no request even made), that every cycle marked open is
+actually reachable by an applicant, that two admins exist, that every migration
+is applied, and that no test cycle is sitting open where a nonprofit would read
+it as a real programme.
+
+It exits non-zero when something blocks. It also prints four items it can never
+close — a security review by somebody who did not write this, email genuinely
+delivered, an upload proven against the real bucket, and a screen reader driven
+by somebody who uses one — because a green run must never be mistaken for
+permission to open the form.
+
+Add `--local` to check a dev worker instead of the deployed hostnames, and
+`--preview` to read the remote preview database rather than your local one.
+
+---
+
 **The short version, in the order it unblocks things:**
 
 | | What | Blocks |

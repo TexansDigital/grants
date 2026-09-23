@@ -28,6 +28,7 @@
     "e2e:grantee": "node scripts/e2e-grantee.mjs",
     "reportform:build": "esbuild scripts/buildReportFormSql.ts --bundle --platform=node --format=esm --outfile=.reportform.mjs --log-level=warning && node .reportform.mjs",
     "e2e:media": "node scripts/e2e-media.mjs",
+    "golive": "node scripts/golive.mjs",
     "metrics:build": "esbuild src/import/metrics.ts --bundle --platform=node --format=esm --outfile=.metricsbuild.mjs --log-level=warning",
     "metrics": "npm run metrics:build && node scripts/import-metrics.mjs",
     "e2e:apply": "node scripts/e2e-apply.mjs",
