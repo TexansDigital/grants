@@ -13,6 +13,36 @@ replaced them.
 
 
 
+## Open decision, found 23 September — is the itemized budget prose or a document?
+
+Three sources disagree, and one of them is the deployed form.
+
+- **CLAUDE.md's reference field list** puts "itemized spending budget" under
+  **Uploads**, alongside the financial statements and the operating budget.
+- **Preview's deployed application form** agrees: three upload fields, with
+  "Itemized spending budget for this request" among them.
+- **The seed** (`src/seed/inspireChange.ts`) makes it a `long_text` capped at
+  500 words, and has only two uploads.
+- **The Formstack importer** maps the old header "Please provide an itemized
+  spending budget of how the grant funds will b…" to `itemized_budget` as a
+  TEXT answer — because that is what Formstack asked.
+
+So preview and the constitution say document; the seed and the importer say
+prose. This is the 32-versus-34 field drift noticed on 22 September, and this
+is what it was.
+
+**Why this is not mine to fix.** Changing the seed's field type would break
+the Formstack import of the current fiscal year: historical answers are
+paragraphs of text, and they cannot be written into a file-upload field.
+Leaving it alone means a freshly seeded program asks a nonprofit to retype a
+spreadsheet into a 500-word box.
+
+**The decision:** which does the Foundation want to ask for going forward, and
+what happens to the historical text answers if it becomes a document? A
+plausible answer is both — keep the text field for imported history, add the
+upload for new applications — but that is a choice about the form, not a
+defect to repair.
+
 ## Fixed 23 September — a single-stage program submitted an empty application
 
 CLAUDE.md lists three program shapes and "Single application" is one of them.
