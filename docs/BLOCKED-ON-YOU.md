@@ -4,34 +4,33 @@ One list, kept current. Everything here blocks work that is otherwise ready to
 start, or blocks the platform going live. Nothing here is something I can do
 myself, decide on your behalf, or work around.
 
-Last updated: 22 September 2026.
+Last updated: 23 September 2026.
 
 ---
 
-## 0. Waiting on your terminal — migration 0026 and a redeploy
+## 0. Waiting on your terminal — a redeploy
 
-Migrations 0001–0025 are applied to preview and the deployed Worker was
-current as of 22 September. Since then:
+Migrations 0001–0027 are applied to preview. **0026** (reserved field keys) and
+**0027** (`grantee_claims`) both went in on 22 September, and the deploy at
+`3b316931` carried the claim queue.
 
-- **0026** adds two triggers refusing a form field named after an
-  internal-only column. It is what lets the new external-payload guard fail
-  closed without ever tripping on a legitimate answer.
-- The Worker now inspects every applicant and grantee response for
-  internal-only fields before it leaves, and carries a new admin endpoint,
-  `POST /api/search/reindex`.
+Since that deploy, three things have landed that are worth a redeploy:
 
-Neither is urgent — nothing is broken without them — but the guard is the
-belt-and-braces on non-negotiable 5, so it may as well go out with the next
-deploy:
+- The file picker fix. The photos-and-video field listed mime types only, so
+  Chrome on Windows and Android greyed out every HEIC photo — every photo an
+  iPhone takes — with no error at all. This is client-side, so a redeploy is
+  the whole fix and it applies to the application form's uploads immediately.
+- The upload refusal used to read "must be a image or video file". It now
+  reads like English.
+- Word and Excel files the browser declines to name are no longer refused.
 
 ```
 npm run whoami
-npm run migrate:preview
 npm run deploy:preview
 ```
 
-`whoami` prints the database name before anything writes. Nothing here touches
-production.
+`whoami` prints the database name before anything writes. No migration is
+pending; nothing here touches production.
 
 ---
 
@@ -39,7 +38,9 @@ production.
 
 | | What | Blocks |
 |---|---|---|
-| 0 | Migration **0026** and a redeploy | Nothing today. The external-payload guard and the reindex endpoint reach preview when you run it. |
+| 0 | A redeploy | The HEIC picker fix. Nothing else is waiting. |
+| 0b | **Rebuild the report form** (§2.1b) | The photos-and-video field. One click, and until you make it a grantee cannot send you a picture. |
+| 0c | **Your historical awards** (§2.1c) | The whole past-grantee feature. It connects people to awards that already exist; with none imported it does nothing. |
 | 0a | ~~Migrations 0022–0025, redeploy, Turnstile~~ | **DONE 21–22 Sep.** Turnstile confirmed rendering in a real browser. |
 | 1 | ~~`apply.` DNS record, and Resend's DNS records~~ | **DONE 20 Sep.** Both hostnames live, domain verified, SPF/DKIM/DMARC published. |
 | 2 | ~~Resend API key, as a Wrangler secret~~ | **DONE 20 Sep.** A sign-in link was sent, delivered, and used to reach the grantee portal. |
@@ -49,7 +50,7 @@ production.
 | 5 | The scoring rubric, as a CSV or XLSX | The entire review and scoring module |
 | 6 | Decline letter wording | Decision communication |
 | 7 | A security review by somebody who did not write this | Going live. A gate, not a task. |
-| 8 | Six policy decisions (§3) | Various. I have a recommendation for each. |
+| 8 | Nine policy decisions (§3) | Various. I have a recommendation for each. |
 
 Eloqua has its own document: `docs/ELOQUA-SETUP.md`.
 
@@ -195,9 +196,16 @@ and nothing else.
 signed URL, and navigations are not subject to CORS, so listing it there would
 widen the bucket for no behaviour at all.
 
-### 1.4b The first real upload, which has never happened
+### 1.4b The first real upload — DONE, 22 September 2026
 
-**This is the line that matters now.** Every presigned PUT this system has ever
+**Done.** A submitted application carried three attachments; one was read back
+out of `steward-preview-files` with `wrangler r2 object get` at 218,056 bytes
+and identified by `file(1)` as PDF 1.4. The round trip has been made exactly
+ONCE, by hand. Nothing in this repository re-checks it, and no test can.
+
+The rest of this section is kept because production needs the same walk.
+
+**This was the line that mattered.** Every presigned PUT this system has ever
 made has been against a stub. The rules it follows are the ones CLAUDE.md calls
 "learned the hard way" — `aws4fetch` rather than the AWS SDK, the signature in
 the query string, and no `Content-Type` from the browser, because signing with
@@ -354,6 +362,44 @@ column somebody forgot to paste is far more common than a decision to stop
 asking. A reworded question reaches new reports only; reports already filed
 keep the wording they were filed under.
 
+### 2.1b Rebuild the Inspire Change report form — one click
+
+**Blocks: a grantee sending you a photo or a video.** The report form now has a
+"Photos and video" field, taking up to six files of up to 200 MB each,
+including the HEIC photos and `.mov` clips a phone produces. Preview's
+published report form predates it and **a published form definition is immutable
+by design** — that freeze is what stops a form edited this March changing the
+question a grantee answered last October. So the new field cannot appear on the
+old form. A new one has to be built.
+
+Configuration → Inspire Change → **Build a report form from this program's
+metrics**, read the generated wording, change anything you want, **Publish**.
+
+Do this after §2.1a if the metrics CSV is close, so you build once rather than
+twice. If the metrics are weeks away, build now anyway: an update with pictures
+and no numbers is worth more than neither.
+
+### 2.1c Your historical awards, as a spreadsheet
+
+**Blocks: the entire past-grantee feature.** `/tell-us` is live: a past grantee
+enters their organization and the grant they remember, an admin sees the claim
+in a queue, picks the matching award by name or EIN, and connects them. From
+that moment they can sign in and file an update.
+
+It connects a person to an award **that already exists in the database**. None
+do. Until the Foundation's past grants are imported, every claim lands in the
+queue with nothing to connect it to.
+
+**What I need first: the column headers only.** Not the data — a header row and
+one invented sample row is enough to build the mapping against. Do not send
+real EINs or grant amounts into this conversation; I will write the importer
+and you run it against the real file on your own machine, the same way the
+metrics importer works.
+
+Whatever you have is fine. Organization name, EIN, amount, fiscal year and a
+grant date are the useful minimum; anything else is a bonus and anything
+missing is a blank, not an error.
+
 ### 2.2 Decline letter wording
 
 **Blocks: decision communication.** The highest-reputation-risk output in the
@@ -387,6 +433,9 @@ decided by whichever behaviour I happened to build first.
 | 3.4 | **Confidentiality agreements for outside review consultants** — tracked in-system or handled offline? | Consultants see full applications including financials. | Offline for now; revisit if the reviewer pool grows. |
 | 3.5 | **Who holds the second admin account**, and the runbook if the primary owner is unavailable mid-cycle. | Two admin accounts exist from day one by design. One admin is a continuity failure, not a security preference. | Name a person before the first cycle opens. |
 | 3.6 | **Does the NFL impose any reporting format** on Inspire Change funds? | Changes what the export module has to produce. If there is a required format, building exports before knowing it is waste. | Ask early. It is a question, not a decision. |
+| 3.7 | **The 200 MB ceiling on a grantee's video.** | A phone shoots roughly 60 MB a minute at 1080p, so 200 MB is about three minutes. Lower it and long clips fail at the end of an upload, which is the worst place to fail. Raise it and R2 fills with footage nobody watches. | Keep 200 MB and six files. Revisit once there is real usage to look at rather than a guess. |
+| 3.8 | **Is report media ever deleted?** | **Right now: never.** Retention covers application attachments only — financial statements get a purge date once an application is decided. Report photos and videos have no retention path at all, and they are the files that will actually fill the bucket. See §4 on cost. | A long window, five years or the award term plus some, then deletion — but this needs a decision, not a default. Deciding it late means deciding it about real footage of real children. |
+| 3.9 | **Approving a claim requires an admin to name the award.** | Deliberate: the system offers matches and refuses to guess, because attaching the wrong organization to an award exposes one nonprofit's grant to another. It means claims cannot be bulk-approved. | Keep it. The volume is tens a year, not thousands, and the failure it prevents is the unrecoverable kind. |
 
 ---
 
@@ -399,6 +448,13 @@ decided by whichever behaviour I happened to build first.
   way that does not reproduce from the command line.
 - Screen-reader testing by somebody who uses one. I can write correct markup
   and have. I cannot verify how it sounds.
+- **Watch R2 storage once grantees start sending video.** You asked to be
+  flagged above $5 a month. `GET /api/storage` reports total bytes, a split by
+  what the file is attached to, how much of it has no retention path, and an
+  estimated monthly cost at R2's $0.015 per GB. $5 a month is roughly 333 GB,
+  which at six 200 MB videos per report is around 280 reports — so this is a
+  problem that arrives gradually and only if nothing is ever deleted. Decision
+  3.8 is the thing that decides whether it arrives at all.
 - Three friendly organizations submitting real applications on their own
   devices, with no help. That is the Phase 2 verification, and it is not
   optional — every applicant problem this platform has will be found there or
