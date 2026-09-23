@@ -20,14 +20,15 @@ const mediaField = (): FieldDef => ({
   field_key: 'project_media',
   label: 'Photos and video',
   field_type: 'file_upload',
-  is_required: 0,
+  is_required: false,
   sort_order: 0,
-  options: null,
+  options: [],
   validation: { allowed_mime: MEDIA_UPLOAD_MIME, max_size_bytes: MAX_MEDIA_BYTES, max_files: 6 },
   help_text: null,
   conditional_on_field_id: null,
   conditional_value: null,
   maps_to: null,
+  section_id: newId(),
 });
 
 /** A field that takes evidence; what a grantee proves their work with. */
@@ -336,7 +337,7 @@ describe('media, and files the browser would not name', () => {
   it('accepts a phone video on a media field and refuses it on a documents field', () => {
     const media = mediaField();
     const docs = documentField();
-    const clip = { fieldKey: 'x', filename: 'IMG_0421.mov', mimeType: 'video/quicktime', sizeBytes: 40_000_000 };
+    const clip = { filename: 'IMG_0421.mov', mimeType: 'video/quicktime', sizeBytes: 40_000_000 };
     expect(validateUploadIntent(media, clip).ok).toBe(true);
     const refused = validateUploadIntent(docs, clip);
     expect(refused.ok).toBe(false);
@@ -353,13 +354,13 @@ describe('media, and files the browser would not name', () => {
     expect(mimeForUpload('clip.mov', 'video/mp4')).toBe('video/mp4');
     expect(mimeForUpload('mystery.xyz', '')).toBe('');
     expect(validateUploadIntent(mediaField(), {
-      fieldKey: 'x', filename: 'IMG_1234.HEIC', mimeType: '', sizeBytes: 3_000_000,
+      filename: 'IMG_1234.HEIC', mimeType: '', sizeBytes: 3_000_000,
     }).ok).toBe(true);
   });
 
   it('refuses a file over the media ceiling, and says the ceiling correctly', () => {
     const tooBig = validateUploadIntent(mediaField(), {
-      fieldKey: 'x', filename: 'long.mp4', mimeType: 'video/mp4', sizeBytes: MAX_MEDIA_BYTES + 1,
+      filename: 'long.mp4', mimeType: 'video/mp4', sizeBytes: MAX_MEDIA_BYTES + 1,
     });
     expect(tooBig.ok).toBe(false);
     if (!tooBig.ok) expect(tooBig.message).toContain('200 MB');
@@ -370,7 +371,7 @@ describe('media, and files the browser would not name', () => {
     // form does not enforce, told to somebody trying to obey it.
     const field = { ...mediaField(), validation: { max_size_bytes: 1_500_000 } };
     const r = validateUploadIntent(field, {
-      fieldKey: 'x', filename: 'a.png', mimeType: 'image/png', sizeBytes: 2_000_000,
+      filename: 'a.png', mimeType: 'image/png', sizeBytes: 2_000_000,
     });
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.message).toContain('2 MB');

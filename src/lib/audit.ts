@@ -141,8 +141,24 @@ export type AuditAction =
    * when, or the next person is debugging a ghost.
    */
   | 'search.reindexed'
+  /*
+   * A nonprofit asking to be connected to a grant it says it holds, and the
+   * human answer to that. Audited because approving one hands over access to
+   * another organization's grant history -- which is the single most
+   * consequential thing anybody can do from the staff side without touching
+   * money.
+   */
+  | 'grantee_claim.created'
+  | 'grantee_claim.approved'
+  | 'grantee_claim.rejected'
   | 'user.created'
   | 'user.deactivated'
+  /*
+   * Brought back. A deactivated account silently returning is exactly the
+   * change somebody needs to be able to find afterwards, and 'user.created'
+   * would be a lie about a row that already existed.
+   */
+  | 'user.reactivated'
   | 'auth.magic_link_requested'
   | 'auth.logged_in'
   | 'auth.logged_out'
@@ -172,7 +188,8 @@ export type EntityType =
   // The full-text index. Not a row anyone can open, which is the point: a
   // rebuild has to be attributable to somebody even though it touches no
   // record a person could name.
-  | 'search_index';
+  | 'search_index'
+  | 'grantee_claim';
 
 export interface AuditInput {
   action: AuditAction;

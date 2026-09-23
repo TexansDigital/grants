@@ -2,7 +2,9 @@ import { describe, it, expect } from 'vitest';
 import { db, ctxFor, adminSession, reviewerSession, applicantSession, appErrorFrom } from './helpers';
 import { seedProgram } from '../src/seed/seedProgram';
 import { INSPIRE_CHANGE } from '../src/seed/inspireChange';
-import { dataHealth, ROWS_PER_CHECK, UNCLAIMED_AFTER_DAYS } from '../src/lib/dataHealth';
+import {
+  dataHealth, ROWS_PER_CHECK, UNCLAIMED_AFTER_DAYS, storageUsage, STORAGE_WATCH_USD,
+} from '../src/lib/dataHealth';
 import { newId } from '../src/lib/ids';
 import { nowIso } from '../src/lib/time';
 
@@ -560,5 +562,75 @@ describe('duplicates come from the merge tool, not a second copy of its rules', 
     expect(c.severity).toBe('informational');
     expect(c.rows[0]!.detail).toContain('782222222');
     expect(c.rows[0]!.title).toContain('Gulf Coast Readers');
+  });
+});
+
+describe('what R2 is holding, and what it costs', () => {
+  async function withFiles(files: { parent: string; bytes: number; purged?: boolean }[]) {
+    const now = nowIso();
+    const orgId = newId();
+    await db.prepare(
+      `INSERT INTO organizations (id, legal_name, ein, status, created_at, updated_at)
+       VALUES (?,?,?, 'active', ?, ?)`,
+    ).bind(orgId, `Storage Org ${crypto.randomUUID().slice(0, 6)}`,
+           String(970000000 + Math.floor(Math.random() * 9999)), now, now).run();
+    for (const f of files) {
+      const id = newId();
+      await db.prepare(
+        `INSERT INTO attachments (id, parent_type, parent_id, organization_id, r2_key,
+           filename, mime_type, size_bytes, uploaded_at, purged_at)
+         VALUES (?,?,NULL,?,?,?, 'application/pdf', ?, ?, ?)`,
+      ).bind(id, f.parent, orgId, `k/${id}`, `${id}.pdf`, f.bytes, now,
+             f.purged ? now : null).run();
+    }
+    return orgId;
+  }
+
+  it('counts what is there and not what was destroyed', async () => {
+    await withFiles([
+      { parent: 'application', bytes: 10_000_000 },
+      { parent: 'application', bytes: 5_000_000, purged: true },
+    ]);
+    const usage = await storageUsage(db, adminSession());
+    // A purged row survives so the record of what was uploaded survives; the
+    // bytes do not, and counting them would overstate the bill forever.
+    expect(usage.byParent.find((p) => p.parentType === 'application')?.bytes)
+      .toBe(10_000_000);
+  });
+
+  it('separates the part nothing ever deletes', async () => {
+    /*
+     * Retention destroys APPLICATION documents 90 days after a decision.
+     * Report attachments -- now including video -- have no clock at all, so
+     * they are the line that grows without bound and the one worth watching.
+     */
+    await withFiles([
+      { parent: 'application', bytes: 1_000_000 },
+      { parent: 'report_submission', bytes: 200_000_000 },
+    ]);
+    const usage = await storageUsage(db, adminSession());
+    expect(usage.unretainedBytes).toBeGreaterThanOrEqual(200_000_000);
+    expect(usage.totalBytes).toBeGreaterThan(usage.unretainedBytes);
+  });
+
+  it('is a number to look at, not an alarm that fires at this scale', async () => {
+    await withFiles([{ parent: 'report_submission', bytes: 200_000_000 }]);
+    const usage = await storageUsage(db, adminSession());
+    // 200 MB is a third of a cent a month. $5 is 333 GB, roughly sixteen
+    // hundred full-size videos, which is not a figure reached by accident.
+    expect(usage.estimatedMonthlyUsd).toBeLessThan(STORAGE_WATCH_USD);
+    expect(usage.overWatchThreshold).toBe(false);
+  });
+
+  it('flags it once the estimate actually passes the figure', async () => {
+    const big = 400 * 1024 ** 3; // 400 GB, comfortably past 333
+    await withFiles([{ parent: 'report_submission', bytes: big }]);
+    const usage = await storageUsage(db, adminSession());
+    expect(usage.overWatchThreshold).toBe(true);
+    expect(usage.estimatedMonthlyUsd).toBeGreaterThan(STORAGE_WATCH_USD);
+  });
+
+  it('is admin only, like everything else on this screen', async () => {
+    await expect(storageUsage(db, reviewerSession())).rejects.toThrow();
   });
 });

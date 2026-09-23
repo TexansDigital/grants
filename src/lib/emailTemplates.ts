@@ -1001,6 +1001,129 @@ export const REPORT_REMINDER: EmailTemplate<ReportReminderVars> = {
   },
 };
 
+
+export interface GranteeClaimReceivedVars {
+  organizationName: string;
+}
+
+/**
+ * "We have your details." Sent the moment a claim is filed.
+ *
+ * SAYS NOTHING ABOUT WHETHER A MATCH WAS FOUND, for the same reason the
+ * endpoint does not: anyone can file a claim for any organization, and a
+ * message reading "we found your 2024 grant" would confirm that organization
+ * was funded to whoever typed its name. The acknowledgement is identical
+ * either way.
+ *
+ * It also sets the expectation that a person is involved. A nonprofit who
+ * fills in a form and hears nothing assumes it failed, and files it again.
+ */
+export const GRANTEE_CLAIM_RECEIVED: EmailTemplate<GranteeClaimReceivedVars> = {
+  key: 'grantee_claim_received',
+  render(v) {
+    const heading = 'We have your details';
+    const lines = [
+      `Thank you for getting in touch about a grant to ${v.organizationName}.`,
+      '',
+      'Somebody at the Foundation will look at this and check our records. If we',
+      'can match you to a grant, you will get a second email with a way to sign in',
+      'and tell us what the funding made possible.',
+      '',
+      'There is nothing else you need to do for now, and you do not need to fill',
+      'the form in again.',
+    ];
+    return {
+      subject: 'We have your details — Houston Texans Foundation',
+      text: textBlock(lines),
+      html: layout({
+        preview: 'A person at the Foundation will check our records and come back to you.',
+        heading,
+        blocks: [
+          `<p style="margin:0;">Thank you for getting in touch about a grant to
+           <strong>${escapeHtml(v.organizationName)}</strong>.</p>`,
+          `<p style="margin:0;">Somebody at the Foundation will look at this and check our
+           records. If we can match you to a grant, you will get a second email with a way to
+           sign in and tell us what the funding made possible.</p>`,
+          `<p style="margin:0;">There is nothing else you need to do for now, and you do not
+           need to fill the form in again.</p>`,
+        ],
+        footer: 'Houston Texans Foundation',
+      }),
+    };
+  },
+};
+
+export interface GranteeClaimApprovedVars {
+  organizationName: string;
+  /** The address they must sign in with. Theirs, echoed, because it decides. */
+  email: string;
+  signInUrl: string;
+  /** What is waiting, in plain words. Empty when nothing is due yet. */
+  whatIsDue: string | null;
+}
+
+/**
+ * "You are connected. Here is how to sign in."
+ *
+ * NO MAGIC LINK IN THIS EMAIL, deliberately. Minting a login token from an
+ * admin action means a credential for somebody else's account exists because a
+ * staff member clicked a button, and it expires in fifteen minutes -- so an
+ * approval done on a Friday afternoon is a dead link by the time anybody reads
+ * it. Pointing at the sign-in page instead reuses the door that is already
+ * behind Turnstile and rate limits, and works whenever they get round to it.
+ *
+ * The address is echoed because it is the thing that decides: somebody who
+ * claimed with a personal address and signs in with a work one gets nothing,
+ * and would have no way to know why.
+ */
+export const GRANTEE_CLAIM_APPROVED: EmailTemplate<GranteeClaimApprovedVars> = {
+  key: 'grantee_claim_approved',
+  render(v) {
+    const heading = 'You can now tell us what your grant made possible';
+    const due = v.whatIsDue ? [v.whatIsDue, ''] : [];
+    return {
+      subject: `${v.organizationName} — your grant reporting is open`,
+      text: textBlock([
+        `We have matched ${v.organizationName} to a grant in our records.`,
+        '',
+        ...due,
+        'Sign in here:',
+        v.signInUrl,
+        '',
+        `Use ${v.email} — that is the address your access is attached to. We will email`,
+        'you a link; there is no password to remember.',
+      ]),
+      html: layout({
+        preview: `Sign in with ${v.email} to file your update.`,
+        heading,
+        blocks: [
+          `<p style="margin:0;">We have matched <strong>${escapeHtml(v.organizationName)}</strong>
+           to a grant in our records.</p>`,
+          ...(v.whatIsDue ? [`<p style="margin:0;">${escapeHtml(v.whatIsDue)}</p>`] : []),
+          `<p style="margin:0;">Use <strong>${escapeHtml(v.email)}</strong> — that is the address
+           your access is attached to. We will email you a link; there is no password to
+           remember.</p>`,
+        ],
+        action: { label: 'Sign in', url: v.signInUrl },
+        footer: 'Houston Texans Foundation',
+      }),
+    };
+  },
+};
+
+/**
+ * Every template this system can send.
+ *
+ * LAST IN THE FILE ON PURPOSE. The keys are computed from the template
+ * constants, so the registry has to be evaluated after all of them -- a
+ * `const` is not hoisted into an initializer, and a registry sitting halfway
+ * up the file throws at module load the first time somebody appends a
+ * template below it.
+ *
+ * A template missing from here is a template the sender cannot find, and
+ * test/email.test.ts walks this object and demands a fixture for each, so
+ * adding one without rendering it at least once is not possible.
+ */
 export const TEMPLATES = {
   [SIGN_IN_PROBLEM.key]: SIGN_IN_PROBLEM,
   [SIGN_IN_LINK.key]: SIGN_IN_LINK,
@@ -1010,4 +1133,6 @@ export const TEMPLATES = {
   [REPORT_REMINDER.key]: REPORT_REMINDER,
   [AWARD_NOTIFICATION.key]: AWARD_NOTIFICATION,
   [DECLINE_NOTIFICATION.key]: DECLINE_NOTIFICATION,
+  [GRANTEE_CLAIM_RECEIVED.key]: GRANTEE_CLAIM_RECEIVED,
+  [GRANTEE_CLAIM_APPROVED.key]: GRANTEE_CLAIM_APPROVED,
 } as const;

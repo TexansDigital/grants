@@ -770,6 +770,13 @@ describe('templates', () => {
 
   const FIXTURES: Record<string, unknown> = {
     sign_in_link: SIGN_IN_VARS,
+    grantee_claim_received: { organizationName: 'Invented Bayou Alliance' },
+    grantee_claim_approved: {
+      organizationName: 'Invented Bayou Alliance',
+      email: 'director@example-invented.org',
+      signInUrl: 'https://apply.example.org/sign-in',
+      whatIsDue: 'There is a report waiting for you, and the portal will show you what it asks for.',
+    },
     application_received: RECEIVED_VARS,
     report_received: REPORT_VARS,
     sign_in_problem: {

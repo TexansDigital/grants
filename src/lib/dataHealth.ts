@@ -426,6 +426,82 @@ function specs(now: string): CheckSpec[] {
  * hides its passing checks cannot be read as "and these were looked at" -- the
  * absence of a row becomes ambiguous between clean and not-run.
  */
+/**
+ * What R2 is holding, and what that costs.
+ *
+ * WHY IT IS ON THIS SCREEN. Storage is the one line of this system's running
+ * cost that grows on its own, and the two things that make it grow are both
+ * invisible from anywhere else: nothing rate-limits how many presigned upload
+ * URLs an authenticated organization can mint, and report attachments -- now
+ * including video -- have no retention clock at all. Application documents do;
+ * report media does not.
+ *
+ * A NUMBER, NOT AN ALARM. Ten dollars a month is the whole platform's target
+ * and R2 is pennies of it, so this exists to be looked at rather than to fire.
+ * At $0.015 per GB-month, five dollars is 333 GB -- around sixteen hundred
+ * full-size videos, which is not a number this Foundation reaches by accident.
+ * If it ever does, something is wrong upstream and the fix is there, not here.
+ *
+ * COUNTED FROM THE DATABASE, not from R2. `size_bytes` is what the uploader
+ * declared and what the Worker signed for, so this is what SHOULD be in the
+ * bucket. A real reconciliation needs a bucket listing, which is a different
+ * job; the two disagreeing would itself be a finding.
+ */
+export interface StorageUsage {
+  /** Bytes on rows that have not been purged. */
+  totalBytes: number;
+  /** The same, split by what the file is attached to. */
+  byParent: { parentType: string; files: number; bytes: number }[];
+  /** Report attachments specifically: the part nothing ever deletes. */
+  unretainedBytes: number;
+  /** US dollars per month, at R2's published storage rate. */
+  estimatedMonthlyUsd: number;
+  /** True once the estimate passes the figure worth a conversation. */
+  overWatchThreshold: boolean;
+}
+
+/** $0.015 per GB-month. Egress is free on R2, which is why it is not here. */
+const R2_USD_PER_GB_MONTH = 0.015;
+/** The figure worth surfacing, not a limit anything enforces. */
+export const STORAGE_WATCH_USD = 5;
+
+export async function storageUsage(
+  db: D1Database,
+  session: Session,
+): Promise<StorageUsage> {
+  assertAdmin(session);
+  const { results } = await db
+    .prepare(
+      `SELECT parent_type, COUNT(*) AS files, COALESCE(SUM(size_bytes), 0) AS bytes
+         FROM attachments
+        WHERE deleted_at IS NULL AND purged_at IS NULL
+        GROUP BY parent_type
+        ORDER BY bytes DESC`,
+    )
+    .all<{ parent_type: string | null; files: number; bytes: number }>();
+
+  const byParent = (results ?? []).map((r) => ({
+    parentType: r.parent_type ?? 'unclaimed',
+    files: Number(r.files),
+    bytes: Number(r.bytes),
+  }));
+  const totalBytes = byParent.reduce((n, r) => n + r.bytes, 0);
+  const unretainedBytes = byParent
+    .filter((r) => r.parentType === 'report_submission')
+    .reduce((n, r) => n + r.bytes, 0);
+  const estimatedMonthlyUsd = (totalBytes / (1024 ** 3)) * R2_USD_PER_GB_MONTH;
+
+  return {
+    totalBytes,
+    byParent,
+    unretainedBytes,
+    // Rounded to cents for display; compared before rounding, so a figure
+    // that displays as $5.00 having been $4.996 does not read as over.
+    estimatedMonthlyUsd: Math.round(estimatedMonthlyUsd * 100) / 100,
+    overWatchThreshold: estimatedMonthlyUsd >= STORAGE_WATCH_USD,
+  };
+}
+
 export async function dataHealth(
   db: D1Database,
   session: Session,

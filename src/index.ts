@@ -74,6 +74,7 @@ import {
 } from './lib/scope';
 import { searchApplications } from './lib/search';
 import { reindexAllApplications } from './lib/reindex';
+import { submitClaim, listClaims, approveClaim, rejectClaim } from './lib/granteeClaims';
 import {
   reportPortfolio, readReportForStaff, acceptReport, requestReportRevisions, waiveReport,
 } from './lib/reportAdmin';
@@ -87,7 +88,7 @@ import {
   outstandingConflicts,
   reviewCoverage, distributeReviewers, DEFAULT_REVIEWERS_PER_APPLICATION,
 } from './lib/reviewAssign';
-import { dataHealth } from './lib/dataHealth';
+import { dataHealth, storageUsage } from './lib/dataHealth';
 import { generateReportPeriods, generateMissingReportPeriods } from './lib/reportPeriods';
 import { previewAwardImport, runAwardImport } from './lib/awardsImportRoutes';
 import {
@@ -300,6 +301,24 @@ const routes: readonly Route[] = [
       json({ grants: await publicGrants(env.DB, nowIso()) }, ctx),
   },
   { method: 'GET', path: '/grants', roles: [], public: true, handler: serveAppShell },
+
+  {
+    /*
+     * A past grantee asking to be connected to their grant.
+     *
+     * PUBLIC AND WRITES, like the eligibility screen, and protected the same
+     * way: Turnstile first, then an IP limit, then an email limit. It grants
+     * nothing -- it records a request that a person answers. See
+     * granteeClaims.ts for why that distinction is the whole design.
+     */
+    method: 'POST',
+    path: '/api/public/grantee-claim',
+    roles: [],
+    public: true,
+    handler: ({ request, env, ctx }) => submitClaim(request, env, ctx),
+  },
+  // The page itself, on the applicant surface.
+  { method: 'GET', path: '/tell-us', roles: [], public: true, handler: serveAppShell },
 
   // The public pages themselves. Listed explicitly, as every other SPA path
   // is, so a mistyped URL still 404s.
@@ -701,6 +720,61 @@ const routes: readonly Route[] = [
     path: '/api/search/reindex',
     roles: ADMIN_ONLY,
     handler: async ({ env, ctx }) => json(await reindexAllApplications(env.DB, ctx), ctx),
+  },
+  {
+    /*
+     * The claim queue. ADMIN ONLY: approving one hands over access to another
+     * organization's grant history, which is not a reviewer's call, and the
+     * list itself carries contact details for people who have written in.
+     */
+    method: 'GET',
+    path: '/api/grantee-claims',
+    roles: ADMIN_ONLY,
+    handler: async ({ env, ctx, url }) =>
+      json({ claims: await listClaims(env.DB, url.searchParams.get('status') ?? undefined) }, ctx),
+  },
+  {
+    method: 'POST',
+    path: '/api/grantee-claims/:id/approve',
+    roles: ADMIN_ONLY,
+    handler: async ({ request, env, ctx, params, session }) => {
+      const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+      return json(
+        await approveClaim(env, ctx, session, params.id!, {
+          // The award comes from the REVIEWER. matched_award_id on the claim
+          // is what the system guessed from a public EIN; acting on it would
+          // make the guess the decision.
+          awardId: String(body.awardId ?? ''),
+          note: body.note == null ? null : String(body.note),
+        }),
+        ctx,
+      );
+    },
+  },
+  {
+    method: 'POST',
+    path: '/api/grantee-claims/:id/reject',
+    roles: ADMIN_ONLY,
+    handler: async ({ request, env, ctx, params, session }) => {
+      const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+      return json(
+        await rejectClaim(env.DB, ctx, session, params.id!, String(body.note ?? '')),
+        ctx,
+      );
+    },
+  },
+  {
+    /*
+     * What R2 holds and what it costs. On the data-health surface because it
+     * is the one running cost that grows on its own, and the two things that
+     * make it grow -- unlimited presign minting, and report media with no
+     * retention clock -- are invisible everywhere else.
+     */
+    method: 'GET',
+    path: '/api/storage',
+    roles: ADMIN_ONLY,
+    handler: async ({ env, ctx, session }) =>
+      json(await storageUsage(env.DB, session), ctx),
   },
   {
     method: 'GET',
