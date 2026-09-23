@@ -533,3 +533,109 @@ describe('an outstanding grant report, at the public front door', () => {
     expect(apps!.n).toBe(1);
   });
 });
+
+describe('a program with only one stage', () => {
+  /**
+   * CLAUDE.md lists "Single application" as a supported program shape. It was
+   * the one the entry screen got wrong.
+   *
+   * For a two-stage program the entry form is a short gate and marking it
+   * submitted is right — passing it IS the decision. For a one-stage program
+   * the same code marked the FULL application submitted, from a screen whose
+   * uploads are disabled because no application row exists yet to attach them
+   * to. A nonprofit would answer every question, press submit, and have an
+   * application on file with none of its required documents and no way back.
+   */
+  async function singleStage() {
+    const { cycleId, program } = await openCycle();
+    // Retire the application stage's form, leaving eligibility as the only
+    // published stage. A stage with no published form is not a step anybody
+    // can take, which is the rule the fix keys on.
+    await db.prepare(
+      `UPDATE form_definitions SET status='retired'
+        WHERE id = ? `,
+    ).bind(program.formDefinitionIds.application!).run();
+    return { cycleId, program };
+  }
+
+  it('leaves the application a DRAFT, with no submission stamped on it', async () => {
+    const s = await singleStage();
+    const res = await post('/api/public/eligibility', {
+      cycleId: s.cycleId,
+      answers: goodAnswers({ contact_email: `only-${++n}@example-invented.org` }),
+    });
+    expect(res.status).toBe(201);
+
+    const app = await db.prepare(
+      `SELECT status, submitted_at, submission_ip, submission_user_agent
+         FROM applications ORDER BY created_at DESC LIMIT 1`,
+    ).first<Record<string, unknown>>();
+    expect(app?.status).toBe('draft');
+    // Stamping these on a draft would put a submission on file that never
+    // happened.
+    expect(app?.submitted_at).toBeNull();
+    expect(app?.submission_ip).toBeNull();
+    expect(app?.submission_user_agent).toBeNull();
+  });
+
+  it('keeps every answer, so the form opens prefilled rather than blank', async () => {
+    const s = await singleStage();
+    await post('/api/public/eligibility', {
+      cycleId: s.cycleId,
+      answers: goodAnswers({ contact_email: `keep-${++n}@example-invented.org` }),
+    });
+    const app = await db.prepare(
+      `SELECT id FROM applications ORDER BY created_at DESC LIMIT 1`,
+    ).first<{ id: string }>();
+    const answers = await db.prepare(
+      `SELECT COUNT(*) AS n FROM application_answers WHERE application_id = ?`,
+    ).bind(app!.id).first<{ n: number }>();
+    expect(answers!.n).toBeGreaterThan(0);
+  });
+
+  it('says the answers are saved, not that they are done', async () => {
+    const s = await singleStage();
+    const res = await post('/api/public/eligibility', {
+      cycleId: s.cycleId,
+      answers: goodAnswers({ contact_email: `words-${++n}@example-invented.org` }),
+    });
+    const body = (await res.json()) as { message: string };
+    // "You are eligible to apply" to somebody holding an unfinished draft is
+    // the sentence that makes them stop, and the documents are what is left.
+    expect(body.message).not.toMatch(/eligible to apply/i);
+    expect(body.message).toMatch(/attach your documents/i);
+  });
+
+  it('records it as created, not as submitted', async () => {
+    const s = await singleStage();
+    await post('/api/public/eligibility', {
+      cycleId: s.cycleId,
+      answers: goodAnswers({ contact_email: `audit-${++n}@example-invented.org` }),
+    });
+    const app = await db.prepare(
+      `SELECT id FROM applications ORDER BY created_at DESC LIMIT 1`,
+    ).first<{ id: string }>();
+    const actions = await db.prepare(
+      `SELECT action FROM audit_log WHERE entity_id = ? ORDER BY created_at`,
+    ).bind(app!.id).all<{ action: string }>();
+    const names = (actions.results ?? []).map((r) => r.action);
+    expect(names).toContain('application.created');
+    expect(names, 'a draft is not a submission').not.toContain('application.submitted');
+  });
+
+  it('still submits the gate when a later stage genuinely exists', async () => {
+    // The two-stage path is unchanged, and this is what proves the fix keyed
+    // on the right thing rather than simply stopping every submission.
+    const { cycleId } = await openCycle();
+    const res = await post('/api/public/eligibility', {
+      cycleId,
+      answers: goodAnswers({ contact_email: `two-${++n}@example-invented.org` }),
+    });
+    expect(res.status).toBe(201);
+    const app = await db.prepare(
+      `SELECT status, submitted_at FROM applications ORDER BY created_at DESC LIMIT 1`,
+    ).first<Record<string, unknown>>();
+    expect(app?.status).toBe('submitted');
+    expect(app?.submitted_at).not.toBeNull();
+  });
+});

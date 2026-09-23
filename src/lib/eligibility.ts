@@ -110,7 +110,7 @@ export async function submitEligibility(
   // Serving a draft definition to the public would let an unfinished form
   // collect real answers.
   const form = await env.DB.prepare(
-    `SELECT fd.id
+    `SELECT fd.id, fd.stage_id
        FROM form_definitions fd
        JOIN program_stages ps ON ps.id = fd.stage_id
       WHERE fd.program_id = ? AND fd.status = 'published' AND fd.deleted_at IS NULL
@@ -119,7 +119,7 @@ export async function submitEligibility(
       LIMIT 1`,
   )
     .bind(cycle.program_id)
-    .first<{ id: string }>();
+    .first<{ id: string; stage_id: string }>();
 
   if (!form) {
     throw new AppError('NOT_FOUND', 'That application is not open.', {
@@ -127,6 +127,37 @@ export async function submitEligibility(
       severity: 'error',
     });
   }
+
+  /*
+   * IS THIS THE ONLY STAGE?
+   *
+   * CLAUDE.md lists three program shapes, and "Single application" is one of
+   * them. For the two-stage shape the form above is a short eligibility gate,
+   * and marking it submitted is right: passing it IS the decision.
+   *
+   * For a single-stage program the same code was marking the FULL application
+   * submitted -- from a screen with its uploads disabled, because no
+   * application row exists yet to attach them to, and with required-ness
+   * relaxed for the same reason. A nonprofit would answer thirty-four
+   * questions, press submit, and have an application on file with none of its
+   * three required documents and no way back to add them.
+   *
+   * A later stage counts only if it has a PUBLISHED form. A stage configured
+   * but not built is not a step anybody can take.
+   */
+  const laterStage = await env.DB.prepare(
+    `SELECT 1 AS present
+       FROM program_stages later
+       JOIN form_definitions fd
+         ON fd.stage_id = later.id AND fd.status = 'published' AND fd.deleted_at IS NULL
+      WHERE later.program_id = ?
+        AND later.deleted_at IS NULL
+        AND later.sort_order > (SELECT sort_order FROM program_stages WHERE id = ?)
+      LIMIT 1`,
+  )
+    .bind(cycle.program_id, form.stage_id)
+    .first<{ present: number }>();
+  const isOnlyStage = !laterStage;
 
   const definition = await loadFormDefinition(env.DB, form.id);
   const outcome = validateSubmission(definition, answers);
@@ -329,10 +360,24 @@ export async function submitEligibility(
     // only in application_answers, and every cross-program report has to parse
     // that table forever. The first version of this route flipped the status
     // and wrote no promoted column at all.
+    /*
+     * THE STATUS FLIP IS CONDITIONAL. On a single-stage program this leaves
+     * the row a DRAFT carrying every answer they gave, and the link below
+     * takes them into the real form to attach their documents and submit it
+     * properly. Nothing they typed is lost -- answerStatements has already
+     * written it -- so the form opens prefilled.
+     *
+     * submitted_at, the IP and the user agent are the record of somebody
+     * pressing submit. Stamping them on a draft would put a submission on
+     * file that never happened.
+     */
     env.DB.prepare(
       `UPDATE applications
-          SET status = 'submitted', submitted_at = ?, updated_at = ?,
-              submission_ip = ?, submission_user_agent = ?,
+          SET status = ${isOnlyStage ? "'draft'" : "'submitted'"},
+              submitted_at = ${isOnlyStage ? 'NULL' : '?'},
+              updated_at = ?,
+              submission_ip = ${isOnlyStage ? 'NULL' : '?'},
+              submission_user_agent = ${isOnlyStage ? 'NULL' : '?'},
               requested_amount_cents = ?,
               organization_name_at_submit = ?,
               ein_at_submit = ?,
@@ -341,10 +386,7 @@ export async function submitEligibility(
               guidelines_version = ?
         WHERE id = ? AND status = 'draft'`,
     ).bind(
-      stamp,
-      stamp,
-      ctx.ip,
-      ctx.userAgent,
+      ...(isOnlyStage ? [stamp] : [stamp, stamp, ctx.ip, ctx.userAgent]),
       promoted.application.requested_amount_cents ?? null,
       promoted.application.organization_name_at_submit ?? legalName,
       promoted.application.ein_at_submit ?? ein,
@@ -355,14 +397,18 @@ export async function submitEligibility(
     ),
 
     auditStatement(env.DB, ctx, {
-      action: 'application.submitted',
+      // A draft that was started is not an application that was submitted, and
+      // an audit trail that says otherwise is the one place this must not be
+      // approximated.
+      action: isOnlyStage ? 'application.created' : 'application.submitted',
       entityType: 'application',
       entityId: applicationId,
       after: {
         cycle_id: cycle.id,
         organization_id: identity.organizationId,
-        stage: 'eligibility',
-        status: 'submitted',
+        stage: isOnlyStage ? 'application' : 'eligibility',
+        status: isOnlyStage ? 'draft' : 'submitted',
+        source: 'public_entry',
       },
     }),
   ];
@@ -370,7 +416,7 @@ export async function submitEligibility(
 
   // --- and the link --------------------------------------------------------
   await sendSignInLink(env, ctx, { userId: identity.userId, email, applicationId, stamp });
-  return accepted(email, 'new');
+  return accepted(email, isOnlyStage ? 'continue' : 'new');
 }
 
 async function sendSignInLink(
@@ -400,16 +446,25 @@ async function sendSignInLink(
   );
 }
 
-function accepted(email: string, kind: 'new' | 'again'): Response {
+function accepted(email: string, kind: 'new' | 'again' | 'continue'): Response {
   return new Response(
     JSON.stringify({
       // The applicant just typed this address, so saying we sent it there
       // reveals nothing they do not already know -- unlike the
       // request-a-link endpoint, where the address is a guess.
+      /*
+       * 'continue' is the single-stage wording. Saying "you are eligible to
+       * apply" to somebody whose application is a DRAFT they still have to
+       * finish is the sentence that makes them stop -- and the documents are
+       * exactly what is left.
+       */
       message:
         kind === 'again'
           ? 'You have already completed this step. We have sent a fresh sign-in link to your email address; it expires in 15 minutes.'
-          : 'You are eligible to apply. We have sent a sign-in link to your email address; it expires in 15 minutes.',
+          : kind === 'continue'
+            ? 'Your answers are saved. We have sent a sign-in link to your email address so you ' +
+              'can attach your documents and submit; it expires in 15 minutes.'
+            : 'You are eligible to apply. We have sent a sign-in link to your email address; it expires in 15 minutes.',
       email,
     }),
     { status: 201, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } },
