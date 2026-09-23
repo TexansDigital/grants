@@ -324,6 +324,13 @@ for (const [label, path] of [
   ['the sign-in page after an expired link', '/sign-in?expired=1'],
   ['the public grants list', '/grants'],
   ['the eligibility screen', `/apply/start/${ids.cycle}`],
+  /*
+   * The past-grantee page. Public, unauthenticated, and the first Steward
+   * screen a nonprofit that was funded years ago will ever see -- which makes
+   * it exactly the page that should not have been missing from this list. It
+   * was, until today.
+   */
+  ['the past-grantee page', '/tell-us'],
 ]) {
   const page = await open(anon, path);
   found.push(...(await audit(page, label)));
@@ -393,6 +400,47 @@ if (await submit.count()) {
   const anchors = await form.locator('.summary a, .summary button').count();
   check('every outstanding item offers a way to get to the field',
     anchors > 0 && anchors === (await form.locator('.summary li').count()), true);
+}
+
+/*
+ * THE PAST-GRANTEE PAGE, REFUSING AN EMPTY SUBMIT.
+ *
+ * Audited in its error state for the same reason the application is: the
+ * person who most needs this to work is the one who has already got it wrong
+ * once. This page also has no autosave and no draft, so somebody who cannot
+ * find the field being complained about has no way back at all -- they close
+ * the tab, and the Foundation never hears from them.
+ */
+console.log('\n  The past-grantee page, refusing an empty submit:\n');
+{
+  const claim = await open(anon, '/tell-us');
+  const send = claim.getByRole('button', { name: /Send|Submit|Tell us/i });
+  if (await send.count()) {
+    await send.first().click();
+    await claim.waitForTimeout(900);
+    found.push(...(await audit(claim, 'the past-grantee page — refusal')));
+
+    // Same contract as the application's summary. Stated once, checked in both
+    // places, because two pages disagreeing about how a refusal is announced
+    // is worse for a screen reader than either choice made consistently.
+    const announced = await claim.evaluate(() => {
+      const el = document.activeElement?.closest('.summary');
+      if (!el) return { focused: false };
+      const labelId = el.getAttribute('aria-labelledby');
+      const label = labelId ? document.getElementById(labelId)?.textContent?.trim() : null;
+      return {
+        focused: true,
+        focusable: el.getAttribute('tabindex') === '-1',
+        named: !!label && label.length > 0,
+        notAlsoALiveRegion: el.getAttribute('role') !== 'alert' && !el.hasAttribute('aria-live'),
+      };
+    });
+    check('the refusal takes focus to a named summary, as the application does',
+      announced, { focused: true, focusable: true, named: true, notAlsoALiveRegion: true });
+  } else {
+    check('there is a way to send the page', 'no submit control found', 'a submit control');
+  }
+  await claim.close();
 }
 
 /*
