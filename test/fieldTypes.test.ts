@@ -1,5 +1,14 @@
 import { describe, it, expect } from 'vitest';
-import { coerceAnswer, validateUploadIntent, type FieldDef, type FieldType } from '../src/lib/fieldTypes';
+import {
+  coerceAnswer,
+  validateUploadIntent,
+  acceptAttribute,
+  mimeForUpload,
+  MEDIA_UPLOAD_MIME,
+  DEFAULT_UPLOAD_MIME,
+  type FieldDef,
+  type FieldType,
+} from '../src/lib/fieldTypes';
 
 function field(over: Partial<FieldDef> & { field_type: FieldType }): FieldDef {
   return {
@@ -275,5 +284,94 @@ describe('upload intent validation', () => {
   it('rejects a path-traversal filename', () => {
     expect(validateUploadIntent(f, { filename: '../../etc/passwd', mimeType: 'application/pdf', sizeBytes: 10 }).ok)
       .toBe(false);
+  });
+});
+
+/*
+ * The accept attribute is the picker's filter, not ours, and a file it hides
+ * is a file the grantee cannot choose and is given no reason for. These tests
+ * exist because the media field listed mime types only, and the two types a
+ * phone actually produces are the two Chrome cannot map on its own.
+ */
+describe('acceptAttribute', () => {
+  it('offers the extensions a phone produces, not only the mime types', () => {
+    const accept = acceptAttribute(MEDIA_UPLOAD_MIME);
+    // Chrome on Windows and Android maps neither of these types to a file, so
+    // without the extension every iPhone photo is greyed out in the picker.
+    expect(accept).toContain('.heic');
+    expect(accept).toContain('.heif');
+    expect(accept).toContain('.mov');
+    expect(accept).toContain('.mp4');
+  });
+
+  it('keeps the mime types as well, for the browsers that do map them', () => {
+    const accept = acceptAttribute(MEDIA_UPLOAD_MIME);
+    for (const mime of MEDIA_UPLOAD_MIME) expect(accept).toContain(mime);
+  });
+
+  it('filters a document field too, instead of showing every file on the machine', () => {
+    const accept = acceptAttribute(undefined);
+    expect(accept).toContain('application/pdf');
+    expect(accept).toContain('.pdf');
+    expect(accept).toContain('.docx');
+    expect(accept).toContain('.xlsx');
+  });
+
+  it('offers no video extension on a document field', () => {
+    expect(acceptAttribute(undefined)).not.toContain('.mov');
+  });
+
+  it('every extension it offers resolves to a type the field allows', () => {
+    // The picker and the rule must not disagree: a file admitted here by its
+    // extension has to survive validateUploadIntent, or the grantee picks a
+    // file the form then refuses.
+    for (const allowed of [MEDIA_UPLOAD_MIME, DEFAULT_UPLOAD_MIME]) {
+      const extensions = acceptAttribute(allowed)
+        .split(',')
+        .filter((part) => part.startsWith('.'));
+      expect(extensions.length).toBeGreaterThan(0);
+      for (const ext of extensions) {
+        // An empty declared type is the case the extension is there to cover.
+        expect(allowed).toContain(mimeForUpload(`photo${ext}`, ''));
+      }
+    }
+  });
+});
+
+describe('a file the browser would not name', () => {
+  const media = field({
+    field_type: 'file_upload',
+    label: 'Photos and video',
+    validation: { allowed_mime: MEDIA_UPLOAD_MIME, max_size_bytes: 200 * 1024 * 1024 },
+  });
+
+  it('accepts a HEIC photo the operating system had no type for', () => {
+    expect(
+      validateUploadIntent(media, { filename: 'IMG_4821.HEIC', mimeType: '', sizeBytes: 3_200_000 })
+        .ok,
+    ).toBe(true);
+  });
+
+  it('accepts a .mov clip the operating system had no type for', () => {
+    expect(
+      validateUploadIntent(media, { filename: 'clip.mov', mimeType: '', sizeBytes: 40_000_000 }).ok,
+    ).toBe(true);
+  });
+
+  it('accepts a Word document the operating system had no type for', () => {
+    const doc = field({ field_type: 'file_upload', label: 'Documents' });
+    expect(
+      validateUploadIntent(doc, { filename: 'report.docx', mimeType: '', sizeBytes: 90_000 }).ok,
+    ).toBe(true);
+  });
+
+  it('still refuses a file whose extension is not allowed here', () => {
+    const refused = validateUploadIntent(media, {
+      filename: 'budget.pdf',
+      mimeType: '',
+      sizeBytes: 1000,
+    });
+    expect(refused.ok).toBe(false);
+    if (!refused.ok) expect(refused.message).toContain('image or video');
   });
 });

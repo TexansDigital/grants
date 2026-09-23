@@ -538,9 +538,14 @@ export function describeAllowed(allowed: readonly string[]): string {
   if (allowed.includes('text/csv')) kinds.push('CSV');
   if (allowed.some((m) => m.startsWith('image/'))) kinds.push('image');
   if (allowed.some((m) => m.startsWith('video/'))) kinds.push('video');
+  // "a image or video file" is what this produced for the media field, which is
+  // the message a nonprofit reads when their photo is refused. The article has
+  // to agree with whatever kind happens to come first, and "image" is the one
+  // that starts with a vowel.
+  const article = (word: string): string => (/^[aeiou]/i.test(word) ? 'an' : 'a');
   if (kinds.length === 0) return 'a supported file';
-  if (kinds.length === 1) return `a ${kinds[0]} file`;
-  return `a ${kinds.slice(0, -1).join(', ')} or ${kinds[kinds.length - 1]} file`;
+  if (kinds.length === 1) return `${article(kinds[0]!)} ${kinds[0]} file`;
+  return `${article(kinds[0]!)} ${kinds.slice(0, -1).join(', ')} or ${kinds[kinds.length - 1]} file`;
 }
 
 /**
@@ -572,12 +577,48 @@ const EXTENSION_TYPES: Record<string, string> = {
   m4v: 'video/mp4',
   mov: 'video/quicktime',
   webm: 'video/webm',
+  doc: 'application/msword',
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  xls: 'application/vnd.ms-excel',
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
 };
 
 export function mimeForUpload(filename: string, declared: string): string {
   if (declared.trim() !== '') return declared;
   const ext = filename.toLowerCase().split('.').pop() ?? '';
   return EXTENSION_TYPES[ext] ?? '';
+}
+
+/**
+ * What belongs in an `<input type="file">` accept attribute for a field.
+ *
+ * WHY THIS IS NOT allowed.join(','). The accept attribute filters the
+ * operating system's file picker, and a browser honours a mime type there only
+ * when it can map that type to an extension ITSELF. Chrome on Windows and on
+ * Android carries no mapping for image/heic or image/heif, so
+ * accept="image/heic" greys out every HEIC photo on the device -- which is
+ * every photo an iPhone has ever taken. The grantee sees no error. The file
+ * simply cannot be chosen, and the most likely thing they conclude is that
+ * their photo is not allowed.
+ *
+ * Listing the extensions beside the types fixes it and weakens nothing. accept
+ * is a convenience for finding a file; validateUploadIntent below is the rule,
+ * and the Worker runs it again on a request it does not trust. A file the
+ * picker admits by extension is resolved by mimeForUpload to the same type
+ * every other path uses, and refused there if it does not belong.
+ *
+ * Defaulting to DEFAULT_UPLOAD_MIME rather than to "no filter" is deliberate:
+ * a document field that named no allow-list was showing the applicant every
+ * file on their machine and then refusing most of them, while the media field
+ * beside it filtered. That asymmetry was an accident of one field carrying a
+ * validation block and the other not.
+ */
+export function acceptAttribute(allowed?: readonly string[]): string {
+  const types = allowed ?? DEFAULT_UPLOAD_MIME;
+  const extensions = Object.entries(EXTENSION_TYPES)
+    .filter(([, mime]) => types.includes(mime))
+    .map(([ext]) => `.${ext}`);
+  return [...types, ...extensions].join(',');
 }
 
 export function validateUploadIntent(

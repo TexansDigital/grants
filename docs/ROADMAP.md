@@ -13,6 +13,41 @@ replaced them.
 
 
 
+## Fixed 23 September — the photo a nonprofit could not attach
+
+The report form's photos-and-video field built its `accept` attribute from mime
+types alone. Chrome on Windows and on Android carries no mapping from
+`image/heic` or `image/heif` to a file extension, so `accept="image/heic"` greys
+out every HEIC photo on the device — which is every photo an iPhone has taken.
+There is no error message. The file simply cannot be picked, and what a grantee
+concludes is that their photos are not allowed.
+
+The suite was green throughout. `validateUploadIntent` accepted HEIC perfectly
+well, and `mimeForUpload` had been written specifically because browsers send
+an empty type for these files. Nothing had ever looked at the attribute that
+decides whether a file reaches either of them.
+
+`acceptAttribute()` now lists the extensions beside the types, from the same
+`EXTENSION_TYPES` map `mimeForUpload` reads, so the picker and the rule cannot
+disagree. It weakens nothing: accept is a convenience, the Worker re-validates,
+and a file admitted by extension resolves to the same type every other path
+uses. Document fields are filtered now too — one having a validation block and
+the other not was an accident, not a decision.
+
+Two more things the drive turned up:
+
+- The refusal read **"must be a image or video file"**, on the form that pays
+  nonprofits. A unit test had pinned that exact string, which is how it
+  survived. The article now agrees with the word after it.
+- Chromium on Linux reports an empty type for a `.HEIC` file. Removing the
+  extension fallback makes the upload fail in a real browser, so that path is
+  load-bearing rather than defensive.
+
+Driven by `npm run e2e:media`, which builds its form from `planReportForm`
+rather than hand-written SQL — `e2e-grantee.mjs` has drifted from the real
+scaffolder twice, and `scripts/buildReportFormSql.ts` exists so a third copy
+never has to.
+
 ## Open decision, found 23 September — is the itemized budget prose or a document?
 
 Three sources disagree, and one of them is the deployed form.

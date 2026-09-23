@@ -329,8 +329,16 @@ describe('media, and files the browser would not name', () => {
     // every upload field in the system. True of the default list, and a lie
     // the moment a field accepts video -- a grantee told their MP4 must be a
     // PDF, on a field labelled "Photos and video".
-    expect(describeAllowed(MEDIA_UPLOAD_MIME)).toBe('a image or video file');
+    //
+    // "a image or video file" is what this asserted when it was written, and
+    // the assertion is what kept it. A browser drive put the sentence on
+    // screen, where it read as somebody's first draft -- which is the last
+    // impression a nonprofit should get from the form that pays them.
+    expect(describeAllowed(MEDIA_UPLOAD_MIME)).toBe('an image or video file');
     expect(describeAllowed(['application/pdf'])).toBe('a PDF file');
+    expect(describeAllowed(['image/png'])).toBe('an image file');
+    expect(describeAllowed(['application/vnd.ms-excel', 'image/png']))
+      .toBe('an Excel or image file');
     expect(describeAllowed([])).toBe('a supported file');
   });
 

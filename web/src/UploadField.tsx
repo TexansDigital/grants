@@ -17,6 +17,7 @@
 import { useCallback, useRef, useState } from 'react';
 import type { ReactElement } from 'react';
 import type { FieldDef } from '../../src/lib/fieldTypes';
+import { acceptAttribute } from '../../src/lib/fieldTypes';
 import { formatBytes, uploadFile, UploadError, type AttachmentRef } from './uploadFile';
 import { applicantApi } from './applicantApi';
 
@@ -212,7 +213,7 @@ export function UploadField({
         type="file"
         multiple={maxFiles > 1}
         disabled={remaining === 0}
-        accept={(field.validation?.allowed_mime ?? []).join(',') || undefined}
+        accept={acceptAttribute(field.validation?.allowed_mime)}
         onChange={(e) => void start(Array.from(e.target.files ?? []))}
       />
 
