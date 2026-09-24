@@ -30,7 +30,22 @@ import { readFileSync, readdirSync } from 'node:fs';
 
 const args = process.argv.slice(2);
 const local = args.includes('--local');
-const remoteDb = args.includes('--preview');
+/*
+ * THE DATABASE FOLLOWS THE SURFACE.
+ *
+ * This defaulted to the local D1 even when checking the deployed hostnames,
+ * which is the wrong database by definition: the Worker answering those
+ * hostnames reads REMOTE preview, and a developer's .wrangler/state is a
+ * scratch database that may be several migrations behind. On the first real
+ * run it was, and the script died on a column that has existed in preview for
+ * days -- reporting a fault in the checkout rather than in the thing being
+ * checked.
+ *
+ * So: deployed surface means remote preview; --local means the local one.
+ * --local-db and --remote-db override either way, for the case where somebody
+ * really does want to cross the two.
+ */
+const remoteDb = args.includes('--remote-db') || (!local && !args.includes('--local-db'));
 const APPLY = arg('--apply') ?? (local ? 'http://127.0.0.1:8787' : 'https://apply.houstontexansfoundation.org');
 const STAFF = arg('--staff') ?? (local ? null : 'https://grants.houstontexansfoundation.org');
 
@@ -40,19 +55,53 @@ function arg(name) {
 }
 
 const RESULTS = [];
-/** state: 'ok' | 'blocked' | 'warn' | 'open' | 'unknown' */
-const record = (state, name, detail) => RESULTS.push({ state, name, detail });
-
 const COLOUR = { ok: '\x1b[32m', blocked: '\x1b[31m', warn: '\x1b[33m', open: '\x1b[36m', unknown: '\x1b[90m' };
 const LABEL = { ok: 'READY ', blocked: 'BLOCK ', warn: 'WATCH ', open: 'OPEN  ', unknown: '?     ' };
 
-/** One SELECT. Local unless --preview is passed, and never production. */
+/**
+ * Record a verdict AND print it now.
+ *
+ * state: 'ok' | 'blocked' | 'warn' | 'open' | 'unknown'
+ *
+ * Printing at the end looked tidier and cost the first real run everything it
+ * had already learned: one unguarded query threw, and the hostname and CSP
+ * findings -- the two checks that can only be made from outside, and the whole
+ * reason to run this against a deployed system -- went to the bin with it. A
+ * diagnostic that reports nothing when something goes wrong is the wrong shape
+ * for a diagnostic.
+ */
+function record(state, name, detail) {
+  RESULTS.push({ state, name, detail });
+  console.log(`  ${COLOUR[state]}${LABEL[state]}\x1b[0m ${name}`);
+  console.log(`         ${detail}`);
+}
+
+/**
+ * One SELECT, against steward-preview, and never production.
+ *
+ * Returns { ok, rows, error } and THROWS NOTHING. Every caller is a check, and
+ * a check that cannot run is a check whose answer is "unknown" -- it is not a
+ * reason to abandon the other fifteen.
+ */
 function sql(statement) {
   const flags = ['d1', 'execute', 'steward-preview', remoteDb ? '--remote' : '--local',
                  '--json', '--command', statement];
-  const out = execFileSync('npx', ['wrangler', ...flags],
-    { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
-  return JSON.parse(out.slice(out.indexOf('[')))[0]?.results ?? [];
+  try {
+    const out = execFileSync('npx', ['wrangler', ...flags],
+      { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    return { ok: true, rows: JSON.parse(out.slice(out.indexOf('[')))[0]?.results ?? [] };
+  } catch (e) {
+    // wrangler puts the real reason on stdout as JSON, not on stderr.
+    const raw = String(e.stdout ?? e.message ?? e);
+    const m = /"text":\s*"([^"]+)"/.exec(raw);
+    return { ok: false, rows: [], error: m ? m[1] : raw.slice(0, 160).replace(/\s+/g, ' ') };
+  }
+}
+
+/** A single scalar, or null when the query could not run. */
+function scalar(statement, column) {
+  const r = sql(statement);
+  return r.ok ? (r.rows[0]?.[column] ?? null) : null;
 }
 
 async function head(url) {
@@ -142,18 +191,19 @@ try {
   record('unknown', 'the public cycles endpoint answers', String(e.message ?? e));
 }
 
-let dbReachable = true;
-let openInDb = [];
-try {
-  openInDb = sql(`SELECT c.id, c.name, c.closes_at, p.name AS program
-                    FROM cycles c JOIN programs p ON p.id = c.program_id
-                   WHERE c.status = 'open' AND c.deleted_at IS NULL`);
-} catch (e) {
-  dbReachable = false;
-  record('unknown', 'the database could be read', String(e.message ?? e).slice(0, 160));
-}
+/*
+ * Every check below degrades to "unknown" on its own. None of them can stop
+ * the others, and none of them can stop the report.
+ */
+const openQuery = sql(`SELECT c.id, c.name, c.closes_at, p.name AS program
+                         FROM cycles c JOIN programs p ON p.id = c.program_id
+                        WHERE c.status = 'open' AND c.deleted_at IS NULL`);
 
-if (dbReachable) {
+if (!openQuery.ok) {
+  record('unknown', 'the database could be read', `${openQuery.error} — every database check below is unknown`);
+} else {
+  const openInDb = openQuery.rows;
+
   if (openInDb.length === 0) {
     record('warn', 'a cycle is open for applications',
       'no cycle has status open — nobody can apply, which is correct between rounds');
@@ -196,49 +246,66 @@ if (dbReachable) {
 
   // CLAUDE.md: "Two admin accounts exist from day one. Single-admin is a
   // continuity failure, not a security preference."
-  const admins = sql(`SELECT COUNT(*) AS n FROM users
-                       WHERE role='admin' AND is_active=1 AND deleted_at IS NULL`)[0]?.n ?? 0;
-  record(Number(admins) >= 2 ? 'ok' : 'blocked', 'there are at least two active admins',
-    Number(admins) >= 2 ? `${admins} active`
+  const admins = scalar(`SELECT COUNT(*) AS n FROM users
+                          WHERE role='admin' AND is_active=1 AND deleted_at IS NULL`, 'n');
+  record(admins === null ? 'unknown' : Number(admins) >= 2 ? 'ok' : 'blocked',
+    'there are at least two active admins',
+    admins === null ? 'could not read users'
+      : Number(admins) >= 2 ? `${admins} active`
       : `${admins} active — one admin is a continuity failure if they are unavailable mid-cycle`);
 
-  // Every migration on disk has been applied. A missing one is a table that is
-  // not there, and the failure shows up as something unrelated.
+  /*
+   * Every migration on disk has been applied to THIS database. A missing one
+   * is a table or a column that is not there, and it surfaces later as
+   * something unrelated -- which is exactly how the first run of this script
+   * died, on a stale local database rather than the one the Worker reads.
+   */
   const onDisk = readdirSync('migrations').filter((f) => f.endsWith('.sql')).length;
-  let applied = 0;
-  try {
-    applied = Number(sql(`SELECT COUNT(*) AS n FROM d1_migrations`)[0]?.n ?? 0);
-  } catch { applied = -1; }
-  record(applied === onDisk ? 'ok' : applied < 0 ? 'unknown' : 'blocked',
-    'every migration is applied',
-    applied < 0 ? 'could not read d1_migrations' : `${applied} applied, ${onDisk} on disk`);
+  const applied = scalar(`SELECT COUNT(*) AS n FROM d1_migrations`, 'n');
+  record(applied === null ? 'unknown' : Number(applied) === onDisk ? 'ok' : 'blocked',
+    'every migration is applied to this database',
+    applied === null ? 'could not read d1_migrations'
+      : Number(applied) === onDisk ? `${applied} applied, ${onDisk} on disk`
+      : `${applied} applied, ${onDisk} on disk — run the migrate step for this environment`);
 
   // A report form that cannot take a photograph is the state preview is in
   // until somebody rebuilds it. Worth naming rather than discovering.
-  const mediaForms = sql(
+  const mediaQuery = sql(
     `SELECT p.name AS program FROM form_definitions fd
        JOIN programs p ON p.id = fd.program_id
       WHERE fd.kind='report' AND fd.status='published' AND fd.deleted_at IS NULL
         AND EXISTS (SELECT 1 FROM form_fields ff
                      WHERE ff.form_definition_id = fd.id AND ff.field_key='project_media')`);
-  const reportForms = sql(
+  const reportForms = scalar(
     `SELECT COUNT(*) AS n FROM form_definitions
-      WHERE kind='report' AND status='published' AND deleted_at IS NULL`)[0]?.n ?? 0;
-  record(Number(reportForms) === 0 ? 'warn'
-        : mediaForms.length === Number(reportForms) ? 'ok' : 'warn',
-    'published report forms can take photos and video',
-    Number(reportForms) === 0
-      ? 'no published report form yet'
-      : `${mediaForms.length} of ${reportForms} published report form(s) have a media field`);
+      WHERE kind='report' AND status='published' AND deleted_at IS NULL`, 'n');
+  if (!mediaQuery.ok || reportForms === null) {
+    record('unknown', 'published report forms can take photos and video',
+      mediaQuery.error ?? 'could not count report forms');
+  } else if (Number(reportForms) === 0) {
+    record('warn', 'published report forms can take photos and video',
+      'no published report form yet — a grantee has nothing to file');
+  } else {
+    const withMedia = mediaQuery.rows.length;
+    record(withMedia === Number(reportForms) ? 'ok' : 'warn',
+      'published report forms can take photos and video',
+      withMedia === Number(reportForms)
+        ? `all ${reportForms} published report form(s) have a media field`
+        : `${withMedia} of ${reportForms} — rebuild it in Configuration, the published one is frozen by design`);
+  }
 
   // Files nothing will ever delete. Not a blocker; a number to have seen.
-  const bytes = Number(sql(
+  const bytes = scalar(
     `SELECT COALESCE(SUM(size_bytes),0) AS b FROM attachments
       WHERE parent_type='report_submission' AND purge_due_at IS NULL
-        AND purged_at IS NULL AND deleted_at IS NULL`)[0]?.b ?? 0);
-  const gb = bytes / (1024 ** 3);
-  record(gb * 0.015 >= 5 ? 'warn' : 'ok', 'storage is below the figure worth a conversation',
-    `${gb.toFixed(2)} GB on reports has no deletion date, about $${(gb * 0.015).toFixed(2)} a month`);
+        AND purged_at IS NULL AND deleted_at IS NULL`, 'b');
+  if (bytes === null) {
+    record('unknown', 'storage is below the figure worth a conversation', 'could not read attachments');
+  } else {
+    const gb = Number(bytes) / (1024 ** 3);
+    record(gb * 0.015 >= 5 ? 'warn' : 'ok', 'storage is below the figure worth a conversation',
+      `${gb.toFixed(2)} GB on reports has no deletion date, about $${(gb * 0.015).toFixed(2)} a month`);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -254,11 +321,6 @@ record('open', 'a screen reader, driven by somebody who uses one',
   'axe catches perhaps a third to a half of real barriers');
 
 // ---------------------------------------------------------------------------
-for (const r of RESULTS) {
-  console.log(`  ${COLOUR[r.state]}${LABEL[r.state]}\x1b[0m ${r.name}`);
-  console.log(`         ${r.detail}`);
-}
-
 const blocked = RESULTS.filter((r) => r.state === 'blocked');
 const unknown = RESULTS.filter((r) => r.state === 'unknown');
 console.log('');

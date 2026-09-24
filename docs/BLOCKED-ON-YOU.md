@@ -57,8 +57,14 @@ delivered, an upload proven against the real bucket, and a screen reader driven
 by somebody who uses one — because a green run must never be mistaken for
 permission to open the form.
 
-Add `--local` to check a dev worker instead of the deployed hostnames, and
-`--preview` to read the remote preview database rather than your local one.
+The database follows the surface: checking the deployed hostnames reads the
+**remote preview** database, because that is the one those hostnames answer
+from. `--local` checks a dev worker against your local database instead.
+`--local-db` and `--remote-db` override that pairing if you ever want to cross
+the two.
+
+Reading remote preview is a SELECT. This script writes nothing, and there is no
+flag that makes it write.
 
 ---
 
