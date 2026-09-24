@@ -399,13 +399,22 @@ describe('the applicant door is separate from the staff door', () => {
     expect(onApplicant.status).toBe(404);
   });
 
-  it("sends '/' to the sign-in page on the applicant hostname", async () => {
-    // The loop this replaces: '/' served the staff shell, which called
-    // /api/session, correctly got 401, and offered a "reload and sign in"
-    // button that returned to the staff shell. Forever.
+  it("sends '/' to the open-cycles page on the applicant hostname", async () => {
+    /*
+     * The loop this replaces: '/' served the staff shell, which called
+     * /api/session, correctly got 401, and offered a "reload and sign in"
+     * button that returned to the staff shell. Forever.
+     *
+     * The first fix sent it to /sign-in, and this test pinned that. It was the
+     * wrong door and the test kept it there: somebody typing the address on a
+     * grant application has no account, has not been emailed a link, and was
+     * being asked to log in as the Foundation's opening sentence. /apply says
+     * which programmes are open and when they close. A returning applicant
+     * reaches sign-in from there.
+     */
     const res = await call('/');
     expect(res.status).toBe(302);
-    expect(res.headers.get('location')).toBe('/sign-in');
+    expect(res.headers.get('location')).toBe('/apply');
   });
 
   it("does not redirect '/' on the staff hostname", async () => {

@@ -193,12 +193,25 @@ function isApplicantHost(request: Request, env: Env): boolean {
  *
  * A redirect rather than serving the sign-in shell directly, so the address
  * bar says what page this is and a reload cannot land back here.
+ *
+ * IT WENT TO /sign-in, AND THAT WAS THE WRONG DOOR. Fixing the loop above
+ * moved the destination to the one page every applicant eventually needs, and
+ * a sign-in page is not what a nonprofit typing this address is looking for:
+ * they have no account, nobody has emailed them a link, and the first thing
+ * the Foundation says to them is a request for credentials they cannot have.
+ * They leave.
+ *
+ * /apply is the front door. It says which programmes are open, when they
+ * close, roughly how long the form takes, and it carries the privacy notice
+ * and the route for a past grantee. Somebody returning to a saved draft
+ * reaches sign-in from there, which is one extra click for the smaller group
+ * and the right first page for everyone.
  */
 async function serveRoot(rc: RouteContext): Promise<Response> {
   if (isApplicantHost(rc.request, rc.env)) {
     return new Response(null, {
       status: 302,
-      headers: { location: '/sign-in', 'cache-control': 'no-store' },
+      headers: { location: '/apply', 'cache-control': 'no-store' },
     });
   }
   return serveAppShell(rc);

@@ -147,3 +147,46 @@ describe('login CSRF on the route that mints a session', () => {
     expect(res.headers.get('location')).toBe('/reports');
   });
 });
+
+// ---------------------------------------------------------------------------
+/*
+ * The front door of the applicant hostname.
+ *
+ * This is the address that gets printed on a grant application, said out loud
+ * at a nonprofit briefing, and typed by somebody who has never heard of
+ * Steward. What it serves is the Foundation's first sentence to them.
+ */
+describe('the root of the applicant hostname', () => {
+  const rootRequest = () =>
+    new Request(`${ORIGIN}/`, { headers: { host: new URL(ORIGIN).host } });
+
+  it('sends an applicant to the page that says what is open', async () => {
+    /*
+     * It sent them to /sign-in, which is a request for credentials they do not
+     * have, cannot get without being emailed first, and were given no reason
+     * to want. The first thing the Foundation said to a nonprofit was "log
+     * in". /apply says which programmes are open and when they close.
+     */
+    const res = await worker.fetch(rootRequest(), envFor(), ctxFor(adminSession()) as never);
+    expect(res.status).toBe(302);
+    expect(res.headers.get('location')).toBe('/apply');
+    expect(res.headers.get('location')).not.toBe('/sign-in');
+  });
+
+  it('does not let a browser cache that redirect', async () => {
+    // The destination is a routing decision that has already changed once.
+    // A cached 302 outlives the deploy that changes it next.
+    const res = await worker.fetch(rootRequest(), envFor(), ctxFor(adminSession()) as never);
+    expect(res.headers.get('cache-control')).toBe('no-store');
+  });
+
+  it('still serves the staff shell on the staff hostname', async () => {
+    // The whole reason this function branches. A redirect to /apply on the
+    // staff host would send an admin to the applicant portal.
+    const staff = new Request('https://staff.example.org/', {
+      headers: { host: 'staff.example.org' },
+    });
+    const res = await worker.fetch(staff, envFor(), ctxFor(adminSession()) as never);
+    expect(res.status).not.toBe(302);
+  });
+});

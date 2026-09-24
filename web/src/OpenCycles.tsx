@@ -21,6 +21,8 @@ interface Props {
   onStart: (cycle: OpenCycle) => void;
   /** Optional: omitted where a past-grantee route does not apply. */
   onPastGrantee?: () => void;
+  /** Where somebody who already started an application goes to get back in. */
+  onSignIn?: () => void;
   now?: Date;
 }
 
@@ -68,6 +70,7 @@ export function OpenCycles({
   cycles,
   onStart,
   onPastGrantee,
+  onSignIn,
   now = new Date(),
 }: Props): ReactElement {
   return (
@@ -158,6 +161,29 @@ export function OpenCycles({
             </button>
           </div>
         </section>
+      )}
+
+      {/*
+        THE WAY BACK IN, for somebody who is not arriving for the first time.
+
+        This page is the front door -- the root of the applicant hostname
+        redirects here -- and until now it was a door that only opened outward.
+        An applicant who saved a draft on Tuesday and came back on Thursday
+        found the list of open programmes and no way to say "I have already
+        started one of these". Their draft was safe the whole time and there
+        was nothing on screen that said so.
+
+        Quiet, and last, because it is the minority case. The majority are
+        reading this page to find out whether they can apply at all.
+      */}
+      {onSignIn && (
+        <p className="meta signin-return">
+          Already started an application, or been sent a link?{' '}
+          <button type="button" className="linklike" onClick={onSignIn}>
+            Sign in
+          </button>
+          . We email you a link rather than asking for a password.
+        </p>
       )}
 
       <PrivacyNotice />

@@ -550,6 +550,7 @@ export function App(): ReactElement {
           cycles={open.cycles}
           onStart={(c) => navigate(`/apply/start/${encodeURIComponent(c.id)}`)}
           onPastGrantee={() => navigate('/tell-us')}
+          onSignIn={() => navigate('/sign-in')}
         />
       </PortalShell>
     );

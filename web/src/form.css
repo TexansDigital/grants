@@ -1159,3 +1159,15 @@ td.row-actions .btn {
   flex: 1 1 14rem;
   margin: 0;
 }
+
+/*
+ * The way back in, on the open-cycles page. Set apart from the privacy notice
+ * below it without competing with the programme cards above: somebody
+ * returning to a draft is looking for this, and somebody arriving for the
+ * first time should not be distracted by it.
+ */
+.signin-return {
+  margin-top: var(--space-5);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--line);
+}
