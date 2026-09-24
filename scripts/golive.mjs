@@ -128,11 +128,22 @@ console.log(`  database          : steward-preview ${remoteDb ? '(remote preview
 try {
   const r = await head(`${APPLY}/`);
   const behindAccess = /cloudflareaccess\.com/.test(r.location);
+  /*
+   * SAY WHERE IT GOES, not merely where it does not go.
+   *
+   * The first real run reported "HTTP 302, no Access redirect" and passed,
+   * which is true and nearly useless: a 302 to anywhere at all satisfies it,
+   * including somewhere nobody intended. The destination is the fact; "not
+   * Access" is a judgement about the fact, and printing only the judgement
+   * means the next person to read this line has to go and fetch the URL
+   * themselves.
+   */
+  const where = r.location ? ` -> ${r.location}` : '';
   record(behindAccess ? 'blocked' : 'ok',
     'the applicant form is NOT behind Cloudflare Access',
     behindAccess
       ? `redirects to ${r.location} — every applicant would burn one of 50 free seats`
-      : `HTTP ${r.status}, no Access redirect`);
+      : `HTTP ${r.status}${where}, no Access redirect`);
 } catch (e) {
   record('unknown', 'the applicant form is NOT behind Cloudflare Access', String(e.message ?? e));
 }
@@ -236,13 +247,28 @@ if (!openQuery.ok) {
    * will not look like this, and a false positive costs somebody ten seconds
    * of reading while a false negative costs the Foundation its credibility.
    */
-  const fixtures = openInDb.filter((c) => /^(e2e|a11y|stages|test|demo|fixture)\b/i.test(String(c.name)));
+  /*
+   * ANCHORED AT THE START, AND THAT IS WHAT IT MISSED.
+   *
+   * The first run against the deployed system passed this check while
+   * "Inspire Change: FY26 fall test" was open and publicly listed on
+   * apply.houstontexansfoundation.org. The pattern began with ^, so it caught
+   * a cycle CALLED "test" and waved through every cycle that merely ENDS in
+   * one -- which is how a person actually names a trial run. The word can be
+   * anywhere in the name.
+   *
+   * \b keeps the obvious false positives out: "contest" and "testimonial"
+   * both contain the letters and neither matches.
+   */
+  const LOOKS_LIKE_A_TRIAL = /\b(e2e|a11y|test|tests|testing|demo|fixture|sample|dummy|staging|scratch|temp|tmp|placeholder|do not use)\b/i;
+  const fixtures = openInDb.filter((c) => LOOKS_LIKE_A_TRIAL.test(String(c.name)));
   record(fixtures.length === 0 ? 'ok' : 'blocked',
-    'no test cycle is open to the public',
+    'no trial cycle is open to the public',
     fixtures.length === 0
-      ? 'every open cycle looks like one a person named'
-      : `${fixtures.length} open cycle(s) look generated: ${fixtures.slice(0, 3).map((c) => c.name).join(', ')}` +
-        ' — a nonprofit would see these as real programmes');
+      ? 'every open cycle reads like a programme somebody meant to run'
+      : `open and publicly listed: ${fixtures.slice(0, 3).map((c) => c.name).join(', ')}` +
+        ` — a nonprofit reading ${APPLY} sees ${fixtures.length === 1 ? 'this' : 'these'} as a real` +
+        ' programme and can apply. Set it to draft, or rename it, before going live.');
 
   // CLAUDE.md: "Two admin accounts exist from day one. Single-admin is a
   // continuity failure, not a security preference."
