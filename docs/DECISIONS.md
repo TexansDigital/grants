@@ -1549,3 +1549,51 @@ at this volume and would not be at ten times it. Nothing reconciles against a
 finance export. Grantees cannot see their own payment schedule, which is
 defensible while "paid" means "finance says so" and arguable once it means
 "the bank honoured it".
+
+---
+
+## §45 — Intake stays whole: Eloqua for the form, Steward for the uploads, rejected
+
+**25 September 2026.** Proposed: run the application form in Eloqua and keep
+only the file uploads in Steward. Rejected, and recorded here so it does not
+come back around without new information.
+
+The existing decision was that Eloqua cannot host intake — no native file
+upload, a contact-level data model, no save-and-resume. The split version is
+not a way around those. It is worse than either whole option, for reasons that
+are specific to a grant application rather than to forms in general.
+
+**The handoff is the flaw.** An applicant completes the Eloqua form and then has
+to arrive in Steward to upload. Nothing connects the two unless a key is passed
+between systems, and the applicant has to finish both legs in one sitting. Every
+seam is a drop-off point, and it falls after they have done the hard part.
+
+**Four things lost, each one load-bearing here:**
+
+- **Save and resume.** Eloqua has no drafts. Forty fields filled over an hour,
+  one browser crash, everything gone. This is the most common real failure mode
+  on a form like this and the reason autosave exists.
+- **Completeness validation.** The itemized budget and financial statements are
+  not attachments to the application, they are what a reviewer scores against.
+  Split across two systems, nothing can check "every required field AND every
+  required file" before submit. Incomplete applications would surface during
+  review week.
+- **Organizations.** Eloqua models contacts. Two people at one nonprofit are two
+  contacts with nothing between them, so the applicant-history panel — applied
+  three times, funded once, both reports on time — becomes impossible. Getting
+  that out of one person's head was a stated goal.
+- **One form, not two.** Forty fields in Eloqua plus a Steward form definition
+  to receive them is two places to change every year. That is exactly the trade
+  Formstack was retired to escape, with fewer features.
+
+Also: a confirmation sent from a marketing platform carries an unsubscribe
+footer, and an applicant who unsubscribes stops receiving grant correspondence.
+
+**What Eloqua's two jobs remain**, unchanged: the marketing opt-in checkbox, and
+scheduled bulk reminders. See `docs/ELOQUA-SETUP.md`. **The opt-in sync is
+specified and NOT built** — there is a setup document and no code — which is
+worth stating plainly, because "applicants reach Eloqua on submit" is currently
+a design rather than a behaviour.
+
+If the real goal was ever applicant data in Eloqua for marketing, the answer is
+that sync, not moving the form.
