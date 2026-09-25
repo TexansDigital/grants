@@ -8,29 +8,20 @@ Last updated: 23 September 2026.
 
 ---
 
-## 0. Waiting on your terminal — a redeploy
+## 0. Deploy state — CURRENT as of 25 September 2026
 
-Migrations 0001–0027 are applied to preview. **0026** (reserved field keys) and
-**0027** (`grantee_claims`) both went in on 22 September, and the deploy at
-`3b316931` carried the claim queue.
+Migrations 0001-0027 applied to preview. Deployed and **verified on the live
+hostnames** by `npm run golive`:
 
-Since that deploy, three things have landed that are worth a redeploy:
-
-- The file picker fix. The photos-and-video field listed mime types only, so
-  Chrome on Windows and Android greyed out every HEIC photo — every photo an
-  iPhone takes — with no error at all. This is client-side, so a redeploy is
-  the whole fix and it applies to the application form's uploads immediately.
-- The upload refusal used to read "must be a image or video file". It now
-  reads like English.
+- The file picker fix, so a HEIC photo off an iPhone can actually be chosen.
+- The upload refusal reads like English.
 - Word and Excel files the browser declines to name are no longer refused.
+- The root of `apply.houstontexansfoundation.org` now redirects to `/apply`
+  rather than to `/sign-in`. It was serving a login page to nonprofits who
+  have no account and were never emailed a link.
+- A storage panel on Data Health, so the R2 cost promise is one you can see.
 
-```
-npm run whoami
-npm run deploy:preview
-```
-
-`whoami` prints the database name before anything writes. No migration is
-pending; nothing here touches production.
+Nothing is pending a deploy. Two items below need a human, not a terminal.
 
 ---
 
