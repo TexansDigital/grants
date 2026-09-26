@@ -1597,3 +1597,35 @@ a design rather than a behaviour.
 
 If the real goal was ever applicant data in Eloqua for marketing, the answer is
 that sync, not moving the form.
+
+---
+
+## §46 — The pilot runs on a publicly listed cycle, on purpose
+
+**26 September 2026.** A cycle must be `status = 'open'` to be applied to
+(`eligibility.ts`), and every open cycle is returned by `listOpenCycles`
+(`publicRoutes.ts`). There is no unlisted cycle: appliable and publicly listed
+are the same state.
+
+So a pilot with three known organizations is, mechanically, a public opening.
+Two ways to change that were on the table: build an unlisted cycle — a column, a
+condition in `listOpenCycles`, a staff toggle, with `/apply/start/<id>` already
+working by id — or accept the visibility and manage it by naming and by the
+length of the window.
+
+**Accepted the visibility.** Building the feature first would delay the single
+most valuable thing outstanding (three real organizations on their own devices)
+in order to remove a risk that a short window mostly removes anyway. The
+mitigations are process, not code: name the cycle as the real programme it is
+rather than as a test, keep the window to days, and be willing to treat a
+stranger's application as a real one if it arrives — because it will be.
+
+**What this means for the go-live check.** `golive` refuses to pass while an open
+cycle's name reads like a trial, which is why "FY26 fall test" blocks it today.
+Renaming the cycle to the programme's real name clears it. That check is doing
+its job in both directions: it is not asking for the cycle to be hidden, it is
+asking for it not to advertise a programme that does not exist.
+
+**An unlisted cycle stays on the list** as a thing worth having before the first
+full cycle, when a rehearsal against a real form with real reviewers is worth
+more than it is now.
