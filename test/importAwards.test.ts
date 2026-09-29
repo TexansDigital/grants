@@ -397,3 +397,106 @@ describe('applying it', () => {
     ).first<{ n: number }>())!.n).toBe(25);
   });
 });
+
+// ---------------------------------------------------------------------------
+/*
+ * Importing grant history the Foundation holds no EIN for.
+ *
+ * The Foundation's 2025 list is organization, contact email, category, amount.
+ * No EINs -- those are on W-9s in a filing cabinet -- and no contact names, just
+ * addresses, several of them shared mailboxes. Refusing the file would mean
+ * refusing to record three years of grant history over a number nobody needs in
+ * order to send somebody a link.
+ */
+describe('a grant with no EIN', () => {
+  it('imports, and the organization simply has no EIN', async () => {
+    const p = await program();
+    const awards = parse(p.slug, row({ ein: '', organization_name: 'Invented Harbor Trust' }));
+    const plan = await planAwardImport(db, awards);
+    expect(plan.ok).toBe(true);
+    await applyAwardImport(db, ctxFor(adminSession()), plan);
+
+    const org = await db.prepare(
+      `SELECT ein FROM organizations WHERE legal_name = 'Invented Harbor Trust'`,
+    ).first<{ ein: string | null }>();
+    expect(org!.ein).toBeNull();
+  });
+
+  it('NEVER folds two EIN-less nonprofits into one organization', async () => {
+    /*
+     * THE ASSERTION THIS CHANGE LIVES OR DIES BY.
+     *
+     * Matching is keyed on EIN. Treat a blank one as a key and every nonprofit
+     * without an EIN collapses into whichever came first -- thirteen grants to
+     * thirteen organizations import as thirteen grants to ONE, and nothing
+     * looks broken until somebody reads a total. An in-memory cache and a
+     * `WHERE ein = ''` would each do it independently.
+     */
+    const p = await program();
+    const awards = parse(
+      p.slug,
+      row({ ein: '', organization_name: 'Invented Bayou Youth Collective' }),
+      row({ ein: '', organization_name: 'Invented Third Ward Arts Trust' }),
+      row({ ein: '', organization_name: 'Invented Harvest Kitchen' }),
+    );
+    await applyAwardImport(db, ctxFor(adminSession()), await planAwardImport(db, awards));
+
+    const { results } = await db.prepare(
+      `SELECT o.id, o.legal_name, COUNT(a.id) AS awards
+         FROM organizations o JOIN awards a ON a.organization_id = o.id
+        WHERE o.legal_name LIKE 'Invented %'
+          AND o.legal_name IN ('Invented Bayou Youth Collective',
+                               'Invented Third Ward Arts Trust',
+                               'Invented Harvest Kitchen')
+        GROUP BY o.id`,
+    ).all<{ id: string; legal_name: string; awards: number }>();
+
+    expect(results).toHaveLength(3);
+    for (const r of results!) expect(r.awards).toBe(1);
+  });
+
+  it('still refuses an EIN that was typed wrong', async () => {
+    // Blank means "we do not hold it". "7412345" means somebody meant to give
+    // a number and missed, and dropping it silently is worse than the blank.
+    const r = parseAwardsCsv([HEADER, row({ ein: '7412345' })].join('\n'));
+    expect(r.ok).toBe(false);
+    expect(r.issues.some((i) => i.column === 'ein')).toBe(true);
+  });
+
+  it('still matches on an EIN when there is one', async () => {
+    // The optional case must not cost the normal one: the same nonprofit in
+    // two years is still one organization.
+    const p = await program();
+    const awards = parse(
+      p.slug,
+      row({ ein: '00-7654321', organization_name: 'Invented Steady Hands', awarded_date: '2024-03-01' }),
+      row({ ein: '007654321', organization_name: 'Invented Steady Hands', awarded_date: '2025-03-01' }),
+    );
+    await applyAwardImport(db, ctxFor(adminSession()), await planAwardImport(db, awards));
+    const rows = await db.prepare(
+      `SELECT COUNT(*) AS n FROM organizations WHERE ein = '007654321' AND deleted_at IS NULL`,
+    ).first<{ n: number }>();
+    expect(rows!.n).toBe(1);
+  });
+});
+
+describe('a grant with no contact name', () => {
+  it('imports, because a shared mailbox is a real way to receive grant mail', async () => {
+    const p = await program();
+    const email = `fshgrants-${newId().slice(0, 6)}@example-invented.org`;
+    const awards = parse(p.slug, row({ grantee_contact_name: '', grantee_contact_email: email }));
+    expect(awards[0]!.contactName).toBe('');
+    await applyAwardImport(db, ctxFor(adminSession()), await planAwardImport(db, awards));
+
+    const c = await db.prepare(
+      `SELECT first_name, last_name, email FROM contacts WHERE email = ?`,
+    ).bind(email).first<{ first_name: string | null; last_name: string | null; email: string }>();
+    expect(c!.email).toBe(email);
+  });
+
+  it('still refuses a missing email, because that one cannot be worked around', async () => {
+    const r = parseAwardsCsv([HEADER, row({ grantee_contact_email: '' })].join('\n'));
+    expect(r.ok).toBe(false);
+    expect(r.issues.some((i) => /cannot sign in to report/i.test(i.message))).toBe(true);
+  });
+});

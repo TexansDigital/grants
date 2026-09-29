@@ -49,6 +49,40 @@ harness reports one console error, `ERR_TUNNEL_CONNECTION_FAILED` on
 container this ran in — confirmed by curl, unrelated to the change, and not
 something this environment can prove either way.
 
+## Changed 29 September — EIN and contact name are optional on an import
+
+The Foundation's 2025 list is organization, contact email, category, amount and
+impact. No EINs — those are on W-9s in a filing cabinet — and no contact names,
+several of the addresses being shared mailboxes. The importer refused both, so
+three years of grant history could not be recorded over a number nobody needs in
+order to send somebody a link.
+
+Both are optional now. A malformed EIN is still refused, because blank means "we
+do not hold it" and `7412345` means somebody meant to type one and missed. A
+blank contact EMAIL is still refused, because a grantee who cannot be reached
+cannot report.
+
+**The part that needed care.** Organizations are matched on EIN. Treat a blank
+one as a key and every nonprofit without an EIN collapses into whichever came
+first — thirteen grants to thirteen organizations import as thirteen grants to
+ONE, and nothing looks broken until somebody reads a total. Both the in-memory
+cache and `WHERE ein = ''` would have done it independently. An award with no
+EIN now matches nothing and gets its own organization; the cost is a duplicate
+to merge if that nonprofit later applies with one, which is a known outcome with
+a tool for it.
+
+The schema caught the other half on its own: `ein IS NULL OR nine digits` refuses
+an empty string, correctly, because an empty EIN is not a value but the absence
+of one. The parser was writing `ein ?? ''` to satisfy a non-null type from back
+when a missing EIN was a parse error.
+
+Mutated: treating a blank EIN as a matching key. The test reports three
+organizations collapsed into one.
+
+The 2025 sheet now has **one** column left to fill — `awarded_date` — and that
+was verified by exporting it with only a date added and running it through
+`parseAwardsCsv`: thirteen awards, 46,900,000 cents, EINs null, terms none.
+
 ## Built 29 September — asking a past grantee for an update
 
 The Foundation wants their 2025 recipients to say what the money did. Every

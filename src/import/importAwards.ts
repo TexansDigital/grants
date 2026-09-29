@@ -138,8 +138,22 @@ export async function planAwardImport(
     const cycle = (cycleMatches ?? []).length === 1 ? cycleMatches![0]! : null;
 
     // ---- organization ------------------------------------------------------
-    let org = orgByEin.get(award.ein);
-    if (!org) {
+    /*
+     * NO EIN MEANS NO MATCHING, and that is the whole of the care needed here.
+     *
+     * Matching is keyed on the EIN. Treat a blank one as a key and every
+     * nonprofit without an EIN collapses into whichever came first: thirteen
+     * grants to thirteen organizations would import as thirteen grants to one,
+     * and the damage is not visible until somebody reads a total. `WHERE ein =
+     * ''` would find them all too.
+     *
+     * So an award with no EIN matches nothing and gets its own organization.
+     * The cost is a duplicate to merge if that nonprofit later applies and
+     * gives one; the alternative is silently wrong data, which the merge tool
+     * cannot fix because nothing looks broken.
+     */
+    let org = award.ein ? orgByEin.get(award.ein) : undefined;
+    if (!org && award.ein) {
       const { results } = await db
         .prepare(
           `SELECT id, legal_name FROM organizations
@@ -163,6 +177,8 @@ export async function planAwardImport(
           ? { id: live[0]!.id, created: false }
           : { id: newId(), created: true };
     }
+    // An award with no EIN: nothing to match against, so a fresh organization.
+    if (!org) org = { id: newId(), created: true };
 
     // ---- the person who will file reports ----------------------------------
     let user = userByEmail.get(award.contactEmail);
@@ -268,7 +284,9 @@ export async function planAwardImport(
      * re-derives its own answer instead of inheriting one from a row that is
      * not being imported.
      */
-    orgByEin.set(award.ein, { id: org.id, created: false });
+    // Only when there IS an EIN. Caching under a blank key is the same
+    // collapse the matching above refuses, one line later.
+    if (award.ein) orgByEin.set(award.ein, { id: org.id, created: false });
     userByEmail.set(award.contactEmail, { id: user.id, created: false });
     contactByOrgEmail.set(contactKey, { id: contact.id, created: false });
   }

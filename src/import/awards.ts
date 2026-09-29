@@ -54,8 +54,8 @@ export const OPTIONAL_COLUMNS = [
 export interface ParsedAward {
   externalReference: string;
   organizationName: string;
-  /** Nine digits, separators stripped. */
-  ein: string;
+  /** Nine digits, separators stripped. Null when the Foundation does not hold it. */
+  ein: string | null;
   programSlug: string;
   fiscalYear: number | null;
   awardedAmountCents: number;
@@ -214,9 +214,25 @@ export function parseAwardsCsv(input: string): AwardParseResult {
     const organizationName = get('organization_name');
     if (!organizationName) add('organization_name', 'An organization name is required.');
 
-    const ein = normalizeEin(get('ein'));
-    if (!ein) {
-      add('ein', `"${get('ein')}" is not a nine-digit EIN.`);
+    /*
+     * EIN IS OPTIONAL, AND A BLANK ONE COSTS SOMETHING REAL.
+     *
+     * Blank is allowed; a malformed one is still refused, because "7412345"
+     * is somebody mistyping a number they meant to give, and silently
+     * dropping it would be worse than the blank.
+     *
+     * What a blank costs: organizations are matched on EIN, so a nonprofit
+     * imported without one and later applying with one becomes two
+     * organizations for an admin to merge. That is a known, tooled-for
+     * outcome -- data health already lists organizations with no EIN, and
+     * the schema has always allowed a null one -- and it is a far better
+     * trade than refusing to record three years of grant history because
+     * the W-9s are in a filing cabinet.
+     */
+    const einRaw = get('ein');
+    const ein = einRaw ? normalizeEin(einRaw) : null;
+    if (einRaw && !ein) {
+      add('ein', `"${einRaw}" is not a nine-digit EIN.`);
     }
 
     const programSlug = get('program_slug');
@@ -263,8 +279,15 @@ export function parseAwardsCsv(input: string): AwardParseResult {
       add('grantee_contact_email', `"${contactEmail}" does not look like an email address.`);
     }
 
+    /*
+     * The name is optional; the ADDRESS is not, and the message above says
+     * why. first_name and last_name have always been nullable on contacts --
+     * the Foundation frequently has a shared mailbox and no person behind it,
+     * and "info@" is a real way for a nonprofit to receive grant mail. A
+     * greeting with no name reads a little plainer. A grantee who cannot be
+     * reached at all cannot report.
+     */
     const contactName = get('grantee_contact_name');
-    if (!contactName) add('grantee_contact_name', 'A contact name is required.');
 
     const statusRaw = get('status').toLowerCase();
     if (statusRaw && !STATUSES.has(statusRaw)) {
@@ -284,7 +307,12 @@ export function parseAwardsCsv(input: string): AwardParseResult {
     awards.push({
       externalReference,
       organizationName,
-      ein: ein ?? '',
+      // NULL, not empty string. The organizations CHECK is `ein IS NULL OR
+      // nine digits`, so '' is refused by the database -- correctly, since an
+      // empty EIN is not a value, it is the absence of one. The `?? ''` here
+      // existed only to satisfy a non-null type back when a missing EIN was a
+      // parse error and this object was never used.
+      ein,
       programSlug,
       fiscalYear,
       awardedAmountCents,
