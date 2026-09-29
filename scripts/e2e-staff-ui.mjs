@@ -319,6 +319,7 @@ function resetConfigState() {
 }
 
 const updateRequestCalls = [];
+const reportFormBuilds = [];
 
 async function stubApi(page, { role }) {
   await page.route('**/api/**', async (route) => {
@@ -434,6 +435,13 @@ async function stubApi(page, { role }) {
      * because "the panel asked for a dry run first" is the property that stops
      * a press creating obligations nobody has seen.
      */
+    if (/\/api\/programs\/[^/]+\/report-form$/.test(p)) {
+      reportFormBuilds.push(1);
+      return json(route, {
+        formDefinitionId: 'fd-new', version: reportFormBuilds.length, fieldCount: 9,
+      });
+    }
+
     if (/\/api\/programs\/[^/]+\/request-updates$/.test(p)) {
       const body = JSON.parse(route.request().postData() ?? '{}');
       updateRequestCalls.push(body);
@@ -967,6 +975,27 @@ async function main() {
     ]);
     truthy('and the screen re-reads, so the new program is on it',
       (await pageTz.locator('.panel h2').first().innerText()).includes('Neighborhood Resilience Fund'));
+
+    /*
+     * BUILDING A REPORT FORM SAYS SO.
+     *
+     * This returned silently on success. The new draft lands in a table below
+     * the fold, so an admin saw a button stop being busy and nothing else, and
+     * pressed it again -- three identical drafts in the real preview database
+     * is how it was found. A silent success is indistinguishable from a silent
+     * failure, and no test here could tell them apart either.
+     */
+    const buildBtn = pageTz.getByRole('button', { name: /Build a report form/ });
+    await buildBtn.click();
+    const built = pageTz.locator('[role="status"]', { hasText: /Draft version/ });
+    await built.waitFor();
+    const builtText = (await built.innerText()).replace(/\s+/g, ' ');
+    check('building a report form happened once', reportFormBuilds.length, 1);
+    truthy('and the button says what it made', /Draft version 1 built, with 9 questions/i.test(builtText));
+    truthy('and points at the next step rather than leaving them guessing',
+      /then Publish it/i.test(builtText));
+    truthy('and warns that pressing again makes another',
+      /again makes another draft/i.test(builtText));
 
     /*
      * Asking past grantees for an update. The reason this is driven rather than

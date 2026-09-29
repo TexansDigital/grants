@@ -320,11 +320,36 @@ export function App(): ReactElement {
     });
   }, [resolvedTheme]);
 
+  /*
+   * WHICH SCREEN IS ALREADY ON SHOW.
+   *
+   * Every mutation calls onChanged, which bumps reloadKey, which reruns the
+   * effect below. That effect used to set loading on every run, and `loading`
+   * replaces the WHOLE app with "Loading…" -- so any action anywhere unmounted
+   * the entire tree and rebuilt it from nothing.
+   *
+   * Nothing errored. What it cost was every piece of transient state on the
+   * page: a message a control had just written to say what it did, a row
+   * somebody had expanded, a field typed into and not yet saved. An admin
+   * pressed "Build a report form", the page blinked, and nothing on it said
+   * anything had happened -- so they pressed it twice more. Three identical
+   * drafts in the real database is how this was found, by a person, after the
+   * suite and two browser harnesses had all been green.
+   *
+   * A refresh of the screen already on show is not a load. It keeps what is
+   * rendered until the new data arrives. Moving to a DIFFERENT screen still
+   * blanks, because showing the last screen's contents under the new one's
+   * heading is its own kind of lie -- and the key is the whole route, ids
+   * included, so opening a second application does not flash the first.
+   */
+  const routeKey = JSON.stringify(route);
+  const onShow = useRef<string | null>(null);
+
   useEffect(() => {
     const controller = new AbortController();
     const { signal } = controller;
     setError(null);
-    setLoading(true);
+    if (onShow.current !== routeKey) setLoading(true);
 
     (async () => {
       try {
@@ -454,11 +479,16 @@ export function App(): ReactElement {
         }
         setError(e instanceof ApiError ? e : new ApiError(0, 'INTERNAL', String(e), null));
       } finally {
-        if (!signal.aborted) setLoading(false);
+        if (!signal.aborted) {
+          onShow.current = routeKey;
+          setLoading(false);
+        }
       }
     })();
 
     return () => controller.abort();
+    // routeKey is derived from route; listing both would run this twice.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [route, reloadKey, navigate]);
 
   if (route === null) {

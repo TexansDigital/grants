@@ -429,15 +429,27 @@ function ReportFormControls({
   programId: string;
   onChanged: () => void;
 }): ReactElement {
+  /*
+   * SAY WHAT IT DID. This returned to idle on success and showed nothing: the
+   * new draft appears in a table lower down the page, below the fold on a
+   * laptop, so an admin who pressed it saw a button stop being busy and
+   * nothing else. They pressed it again. Three identical drafts in preview is
+   * how that was found, and it was found by a person rather than by any test
+   * here -- a silent success is indistinguishable from a silent failure, and
+   * the only honest fix is for the control to report.
+   */
   const [state, setState] = useState<
-    { kind: 'idle' } | { kind: 'working' } | { kind: 'error'; message: string }
+    | { kind: 'idle' }
+    | { kind: 'working' }
+    | { kind: 'built'; version: number; fieldCount: number }
+    | { kind: 'error'; message: string }
   >({ kind: 'idle' });
 
   const build = useCallback(async () => {
     setState({ kind: 'working' });
     try {
-      await api.buildReportForm(programId);
-      setState({ kind: 'idle' });
+      const out = await api.buildReportForm(programId);
+      setState({ kind: 'built', version: out.version, fieldCount: out.fieldCount });
       onChanged();
     } catch (e) {
       setState({
@@ -457,6 +469,13 @@ function ReportFormControls({
       >
         {state.kind === 'working' ? 'Building…' : 'Build a report form from this program\u2019s metrics'}
       </button>
+      {state.kind === 'built' && (
+        <span className="meta strong" role="status">
+          {' '}Draft version {state.version} built, with {state.fieldCount} question
+          {state.fieldCount === 1 ? '' : 's'}. Read it in the table below, then Publish it.
+          Pressing this again makes another draft.
+        </span>
+      )}
       {state.kind === 'error' && (
         <span className="meta strong" role="alert" data-overdue="true">
           {state.message}

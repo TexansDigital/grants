@@ -13,6 +13,42 @@ replaced them.
 
 
 
+## Fixed 29 September — every action on a staff screen wiped the page's state
+
+Found by a person using it, after the suite and two browser harnesses were all
+green.
+
+An admin pressed "Build a report form from this program's metrics". The page
+blinked and said nothing. They pressed it twice more. Three identical drafts sat
+in the preview database, and the button had worked every time.
+
+The control returned to idle on success and rendered nothing, which was its own
+small fault. Underneath it was a much larger one. Every mutation calls
+`onChanged`, which bumps `reloadKey`, which reruns the load effect, which called
+`setLoading(true)` unconditionally — and `loading` replaces the **whole app**
+with "Loading…". So any action anywhere unmounted the entire tree and rebuilt it
+from nothing.
+
+Nothing errored. What it cost was every piece of transient state on the page: a
+message a control had just written, a row somebody had expanded, a field typed
+into and not yet saved. Any component that tried to say what it had just done
+was guaranteed to have that message destroyed by the re-read it triggered.
+
+A refresh of the screen already on show is not a load. It now keeps what is
+rendered until the new data arrives; moving to a different screen still blanks,
+and the key is the whole route including ids, so opening a second application
+does not flash the first.
+
+The build control also says what it made — version, question count, and that
+pressing again makes another draft.
+
+Verified across every browser harness, because this is the router: staff,
+accessibility, grantee and applicant paths all drive clean. The applicant
+harness reports one console error, `ERR_TUNNEL_CONNECTION_FAILED` on
+`challenges.cloudflare.com`, which is Turnstile being unreachable from the
+container this ran in — confirmed by curl, unrelated to the change, and not
+something this environment can prove either way.
+
 ## Built 29 September — asking a past grantee for an update
 
 The Foundation wants their 2025 recipients to say what the money did. Every
