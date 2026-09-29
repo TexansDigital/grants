@@ -13,6 +13,46 @@ replaced them.
 
 
 
+## Built 29 September — asking a past grantee for an update
+
+The Foundation wants their 2025 recipients to say what the money did. Every
+route to a report period derived its due date from the award's TERM, which for
+a grant made in 2025 produces an obligation born overdue: the compliance screen
+shows every past grantee delinquent on day one, each is warned about outstanding
+reports when they apply again, and an award whose term ended inside the 91-day
+chase window gets its grantee emailed weekly about a report that was late before
+anyone asked for it. Aimed at exactly the people being re-engaged.
+
+`requestUpdates()` creates an `ad_hoc` period per award in a window of AWARD
+DATES, `open` immediately, due on a date the Foundation sets. Guards: admin
+only, a label, a real date, a **future** date, and a window that does not end
+before it starts. Cancelled awards are skipped; an award already asked is
+skipped, so the button is safe to press twice.
+
+**Selected by award date, not fiscal year.** The importer parses `fiscal_year`
+and drops it — it lives on programs and cannot tell two cycles of one program
+apart — so `awards` has no such column. `awarded_at` is a fact on the row, and
+it means nobody has to agree with this code about when their year starts. The
+window comparison uses `substr(awarded_at, 1, 10)` so a grant awarded at 4pm on
+the closing day is inside it.
+
+Audited as `report_period.update_requested`, deliberately not `.generated`:
+generated means derived from a term, requested means a person chose to ask and
+chose the date. "Who decided these were due in November" has an answer only if
+the two are different words.
+
+The panel dry-runs first and cannot be made not to: the first press counts,
+names the organizations and shows what it would skip; only the second writes,
+behind a confirm. A program with no published report form is a warning on the
+plan, not a refusal — the obligation is real and dated either way, and making
+the Foundation decide what to ask before they can decide who to ask is the
+wrong order.
+
+Three mutations run, each caught: allowing a past due date, creating the period
+as `scheduled` rather than `open`, and dropping the already-asked skip. The
+browser drive found a fourth thing no unit test could: the panel only exists
+once a program is on screen, and the harness had none at that point.
+
 ## Fixed 23 September — files a grantee sends back were retained by nobody
 
 Retention covered `parent_type = 'application'` and nothing else. Every file

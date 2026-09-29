@@ -116,6 +116,11 @@ export type AuditAction =
   | 'report_period.created'
   // generated in bulk from an award term, rather than created one at a time
   | 'report_period.generated'
+  // Distinct from .generated on purpose. Generated means derived from an
+  // award's term; this one means a human chose to ask, and chose the date.
+  // Reading the log later, "who decided these were due in November" has an
+  // answer only if the two are not the same word.
+  | 'report_period.update_requested'
   // a grantee's in-progress report, autosaved. Recorded against the period.
   | 'report.draft_saved'
   | 'report.submitted'

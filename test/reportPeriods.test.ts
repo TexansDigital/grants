@@ -6,7 +6,10 @@ import {
   planReportPeriods, generateReportPeriods, addMonths, addDays, monthsBetween,
   FINAL_REPORT_DAYS_AFTER_TERM, INTERIM_REPORT_DAYS_AFTER_PERIOD,
   generateMissingReportPeriods,
+  requestUpdates, isPlainDate, UPDATE_REQUEST_TYPE,
 } from '../src/lib/reportPeriods';
+import { isOverdue, GRANTEE_OWES } from '../src/lib/reportDue';
+import { isPeriodFileable } from '../src/lib/reportSubmit';
 import { dataHealth } from '../src/lib/dataHealth';
 import { newId } from '../src/lib/ids';
 import { nowIso } from '../src/lib/time';
@@ -482,5 +485,210 @@ describe('generating for every award that has none', () => {
 
     const after = await dataHealth(db, admin);
     expect(after.checks.find((c) => c.key === 'award_no_report_periods')?.count).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+/*
+ * Asking a past grantee for an update.
+ *
+ * The thing under test is not "does a row get written". It is that a grant made
+ * in 2025 can be asked for an update in 2026 WITHOUT the obligation being born
+ * overdue -- which is what every other path in this file would produce, because
+ * every other path derives the due date from a term that has already ended.
+ */
+describe('requesting an update on a past grant', () => {
+  let k = 0;
+  async function pastGrant(over: Record<string, unknown> = {}) {
+    const ctx = ctxFor(adminSession());
+    const p = await seedProgram(db, ctx, { ...INSPIRE_CHANGE, slug: `ru-${++k}` });
+    const now = nowIso();
+    const orgId = newId();
+    await db.prepare(
+      `INSERT INTO organizations (id, legal_name, ein, status, created_at, updated_at)
+       VALUES (?,?,NULL,'active',?,?)`,
+    ).bind(orgId, `Past Grantee ${k}`, now, now).run();
+    const id = newId();
+    const row: Record<string, unknown> = {
+      id, organization_id: orgId, program_id: p.programId,
+      awarded_amount_cents: 2_500_000, awarded_at: day('2025-03-06'),
+      status: 'completed',
+      source_system: 'spreadsheet', source_reference: `IC-${id.slice(0, 8)}`,
+      // No term. That is the point: an imported past grant has none.
+      term_start: null, term_end: null,
+      created_at: now, updated_at: now, ...over,
+    };
+    const cols = Object.keys(row);
+    await db.prepare(
+      `INSERT INTO awards (${cols.join(',')}) VALUES (${cols.map(() => '?').join(',')})`,
+    ).bind(...cols.map((c) => row[c] as never)).run();
+    return { awardId: id, programId: p.programId, orgId, ctx };
+  }
+
+  const FUTURE = '2027-11-14';
+  const ask = (programId: string, ctx: ReturnType<typeof ctxFor>, over = {}) =>
+    requestUpdates(db, ctx, adminSession(), {
+      programId, awardedFrom: '2025-01-01', awardedTo: '2025-12-31',
+      label: '2025 grant update', dueDate: FUTURE, ...over,
+    });
+
+  it('asks an award that planReportPeriods cannot touch at all', async () => {
+    // The whole reason this exists: no term means no plan.
+    const a = await pastGrant();
+    expect(planReportPeriods({
+      awardId: a.awardId, termStart: null, termEnd: null, isMultiYear: false,
+    }).ok).toBe(false);
+
+    const out = await ask(a.programId, a.ctx);
+    expect(out).toMatchObject({ created: 1, dryRun: false });
+    expect(out.willAsk[0]!.organizationName).toBe(`Past Grantee ${k}`);
+  });
+
+  it('is NOT overdue the moment it is created', async () => {
+    /*
+     * The assertion this module was written for. Derive the date from the term
+     * and this is false on day one for every grant in the import.
+     */
+    const a = await pastGrant();
+    await ask(a.programId, a.ctx);
+    const row = (await db.prepare(
+      `SELECT status, due_date, opens_at, period_type FROM report_periods WHERE award_id=?`,
+    ).bind(a.awardId).first<{ status: string; due_date: string; opens_at: string; period_type: string }>())!;
+
+    expect(isOverdue(row.status, row.due_date, nowIso())).toBe(false);
+    expect(row.period_type).toBe(UPDATE_REQUEST_TYPE);
+  });
+
+  it('is fileable immediately, not scheduled for later', async () => {
+    // Telling somebody today that we would like an update, and showing them a
+    // page that says the window has not opened, is the same as not asking.
+    const a = await pastGrant();
+    await ask(a.programId, a.ctx);
+    const row = (await db.prepare(
+      `SELECT status, opens_at FROM report_periods WHERE award_id=?`,
+    ).bind(a.awardId).first<{ status: string; opens_at: string }>())!;
+    expect(row.status).toBe('open');
+    expect(isPeriodFileable(row, nowIso())).toBe(true);
+    expect(GRANTEE_OWES).toContain(row.status);
+  });
+
+  it('uses the due date given, never one derived from the award', async () => {
+    const a = await pastGrant();
+    await ask(a.programId, a.ctx);
+    const row = (await db.prepare(
+      `SELECT due_date, label FROM report_periods WHERE award_id=?`,
+    ).bind(a.awardId).first<{ due_date: string; label: string }>())!;
+    expect(row.due_date).toBe(FUTURE);
+    expect(row.label).toBe('2025 grant update');
+  });
+
+  it('refuses a due date in the past', async () => {
+    // By hand is worse than by derivation: somebody typed it.
+    const a = await pastGrant();
+    const e = await appErrorFrom(ask(a.programId, a.ctx, { dueDate: '2020-01-01' }));
+    expect(e.publicMessage).toMatch(/has to be in the future/i);
+    expect(await db.prepare(
+      `SELECT COUNT(*) AS n FROM report_periods WHERE award_id=?`,
+    ).bind(a.awardId).first<{ n: number }>()).toMatchObject({ n: 0 });
+  });
+
+  it('refuses a date that is not a date, and 31 February', async () => {
+    expect(isPlainDate('2027-11-14')).toBe(true);
+    expect(isPlainDate('2026-02-31')).toBe(false);
+    expect(isPlainDate('14/11/2027')).toBe(false);
+    expect(isPlainDate('soon')).toBe(false);
+  });
+
+  it('refuses an empty label and a window that is not dates', async () => {
+    const a = await pastGrant();
+    expect((await appErrorFrom(ask(a.programId, a.ctx, { label: '  ' }))).publicMessage)
+      .toMatch(/name the grantee will see/i);
+    expect((await appErrorFrom(ask(a.programId, a.ctx, { awardedFrom: 'soon' }))).publicMessage)
+      .toMatch(/award dates to cover/i);
+  });
+
+  it('never asks twice, so the button is safe to press again', async () => {
+    const a = await pastGrant();
+    expect((await ask(a.programId, a.ctx)).created).toBe(1);
+    const second = await ask(a.programId, a.ctx);
+    expect(second.created).toBe(0);
+    expect(second.skipped[0]!.skipped).toMatch(/already been asked/i);
+    expect(await db.prepare(
+      `SELECT COUNT(*) AS n FROM report_periods WHERE award_id=?`,
+    ).bind(a.awardId).first<{ n: number }>()).toMatchObject({ n: 1 });
+  });
+
+  it('skips a cancelled grant, because nobody took it', async () => {
+    const a = await pastGrant({ status: 'cancelled' });
+    const out = await ask(a.programId, a.ctx);
+    expect(out.created).toBe(0);
+    expect(out.skipped[0]!.skipped).toMatch(/cancelled/i);
+  });
+
+  it('asks only the award dates chosen', async () => {
+    const a = await pastGrant();
+    const out = await ask(a.programId, a.ctx,
+      { awardedFrom: '2023-01-01', awardedTo: '2023-12-31' });
+    expect(out.created).toBe(0);
+    expect(out.willAsk).toHaveLength(0);
+  });
+
+  it('includes an award made on the last day of the window', async () => {
+    // awarded_at is a timestamp and the window is days. A bare <= against the
+    // date drops anything awarded after midnight on the closing day.
+    const a = await pastGrant({ awarded_at: '2025-12-31T16:00:00.000Z' });
+    const out = await ask(a.programId, a.ctx);
+    expect(out.created).toBe(1);
+  });
+
+  it('refuses a window that ends before it starts', async () => {
+    const a = await pastGrant();
+    const e = await appErrorFrom(ask(a.programId, a.ctx,
+      { awardedFrom: '2025-12-31', awardedTo: '2025-01-01' }));
+    expect(e.publicMessage).toMatch(/ends before it starts/i);
+  });
+
+  it('writes nothing on a dry run, and says what it would do', async () => {
+    const a = await pastGrant();
+    const out = await ask(a.programId, a.ctx, { dryRun: true });
+    expect(out).toMatchObject({ created: 0, dryRun: true });
+    expect(out.willAsk).toHaveLength(1);
+    expect(await db.prepare(
+      `SELECT COUNT(*) AS n FROM report_periods WHERE award_id=?`,
+    ).bind(a.awardId).first<{ n: number }>()).toMatchObject({ n: 0 });
+  });
+
+  it('audits each one as REQUESTED, not as generated', async () => {
+    // Two different facts. Generated means derived from a term; requested means
+    // a person chose to ask, and chose the date they will be held to.
+    const a = await pastGrant();
+    await ask(a.programId, a.ctx);
+    const row = await db.prepare(
+      `SELECT action, after_json FROM audit_log
+        WHERE entity_type='report_period' ORDER BY created_at DESC LIMIT 1`,
+    ).first<{ action: string; after_json: string }>();
+    expect(row!.action).toBe('report_period.update_requested');
+    expect(JSON.parse(row!.after_json)).toMatchObject({ due_date: FUTURE });
+  });
+
+  it('refuses a reviewer', async () => {
+    const a = await pastGrant();
+    const e = await appErrorFrom(requestUpdates(db, a.ctx, reviewerSession(), {
+      programId: a.programId, awardedFrom: '2025-01-01', awardedTo: '2025-12-31',
+      label: 'x', dueDate: FUTURE,
+    }));
+    expect(e.publicMessage).toMatch(/administrator/i);
+  });
+
+  it('still asks when no report form is published, and says the form is missing', async () => {
+    /*
+     * Deliberate. Refusing to create the obligation until a form exists would
+     * mean the Foundation cannot decide WHO to ask before deciding WHAT to ask,
+     * and the date is the part with a deadline attached.
+     */
+    const a = await pastGrant();
+    const out = await ask(a.programId, a.ctx);
+    expect(out.created).toBe(1);
+    expect(out.formDefinitionId).toBeNull();
   });
 });

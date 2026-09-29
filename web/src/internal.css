@@ -949,3 +949,43 @@ th.num {
     color: #5b6871;
   }
 }
+
+/*
+ * Asking past grantees for an update.
+ *
+ * Set apart from the form-definition table below it: this one writes
+ * obligations against other organizations' grants, and a control that does
+ * that should not look like the rest of the page's furniture.
+ */
+.request-updates {
+  border-left: 3px solid var(--accent);
+  padding-left: var(--space-4);
+  margin-top: var(--space-5);
+}
+.request-updates-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  margin: var(--space-3) 0;
+}
+.request-updates-fields label {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  font-size: var(--step--1);
+  color: var(--ink-2);
+}
+.request-updates-fields input {
+  font: inherit;
+  padding: var(--space-2);
+  border: 1px solid var(--line-control);
+  border-radius: 3px;
+  background: var(--surface);
+  color: var(--ink);
+}
+.request-updates-plan {
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--line);
+}
+.request-updates-plan ul { margin: var(--space-2) 0; padding-left: var(--space-5); }

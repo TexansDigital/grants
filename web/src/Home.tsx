@@ -10,7 +10,8 @@
 import { useCallback, useState } from 'react';
 import type { ReactElement } from 'react';
 import { ApiError, api } from './api';
-import type { CycleRow, FormSummary, ProgramRow } from './api';
+import type { CycleRow, FormSummary, ProgramRow, RequestUpdatesResult } from './api';
+import { formatCents } from '../../src/lib/money';
 import { AwardsImport } from './AwardsImport';
 import { NewProgram, NewCycle, CycleStatusButton } from './Configure';
 
@@ -188,6 +189,8 @@ export function Home({
                 </div>
               )}
 
+              {isAdmin && <RequestUpdatesPanel programId={p.id} />}
+
               <h3>Form definitions</h3>
               {isAdmin && <ReportFormControls programId={p.id} onChanged={onChanged} />}
               {programForms.length === 0 ? (
@@ -243,6 +246,172 @@ export function Home({
         <AwardsImport isAdmin={isAdmin} />
 
     </>
+  );
+}
+
+/**
+ * Ask past grantees for an update, with a due date the Foundation chooses.
+ *
+ * WHY A DRY RUN IS THE DEFAULT AND THE ONLY FIRST STEP. Pressing this creates
+ * an obligation against somebody else's grant, with a date they will be held
+ * to, for every grant in a window at once. Thirteen of them is one press. So
+ * the first press only ever counts, names the organizations, and shows what
+ * would be skipped; the second one writes.
+ *
+ * The window is AWARD DATES rather than a fiscal year, because an award does
+ * not carry a fiscal year -- and because it means nobody has to agree with this
+ * software about when their year starts.
+ */
+function RequestUpdatesPanel({ programId }: { programId: string }): ReactElement {
+  const [from, setFrom] = useState('2025-01-01');
+  const [to, setTo] = useState('2025-12-31');
+  const [label, setLabel] = useState('2025 grant update');
+  const [due, setDue] = useState('');
+  const [state, setState] = useState<
+    | { kind: 'idle' }
+    | { kind: 'working' }
+    | { kind: 'planned'; plan: RequestUpdatesResult }
+    | { kind: 'done'; plan: RequestUpdatesResult }
+    | { kind: 'error'; message: string }
+  >({ kind: 'idle' });
+
+  const run = useCallback(
+    async (dryRun: boolean) => {
+      setState({ kind: 'working' });
+      try {
+        const plan = await api.requestUpdates(programId, {
+          awardedFrom: from, awardedTo: to, label, dueDate: due, dryRun,
+        });
+        setState({ kind: dryRun ? 'planned' : 'done', plan });
+      } catch (e) {
+        setState({
+          kind: 'error',
+          message: e instanceof ApiError ? e.message : 'That did not work. Try again.',
+        });
+      }
+    },
+    [programId, from, to, label, due],
+  );
+
+  const plan = state.kind === 'planned' ? state.plan : null;
+  const done = state.kind === 'done' ? state.plan : null;
+
+  return (
+    <section className="request-updates">
+      <h3>Ask past grantees for an update</h3>
+      <p className="meta">
+        Creates one update request per grant awarded in this window, due on the date you set.
+        Nothing is written until you have seen the list.
+      </p>
+
+      <div className="request-updates-fields">
+        <label>
+          Grants awarded from
+          <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
+        </label>
+        <label>
+          to
+          <input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
+        </label>
+        <label>
+          What the grantee sees it called
+          <input
+            type="text"
+            value={label}
+            onChange={(e) => setLabel(e.target.value)}
+            placeholder="2025 grant update"
+          />
+        </label>
+        <label>
+          Due
+          <input type="date" value={due} onChange={(e) => setDue(e.target.value)} />
+        </label>
+      </div>
+
+      <p className="meta">
+        <button
+          type="button"
+          className="btn small secondary"
+          disabled={state.kind === 'working'}
+          onClick={() => void run(true)}
+        >
+          {state.kind === 'working' ? 'Checking…' : 'Show me what this would do'}
+        </button>
+      </p>
+
+      {state.kind === 'error' && (
+        <p className="meta strong" role="alert" data-overdue="true">
+          {state.message}
+        </p>
+      )}
+
+      {plan && (
+        <div className="request-updates-plan">
+          {plan.formDefinitionId === null && (
+            /*
+             * Stated rather than blocking. The obligation is real and dated
+             * either way; it simply cannot be filled in until a form exists,
+             * and refusing to let the Foundation decide WHO to ask before they
+             * have decided WHAT to ask would be the wrong order.
+             */
+            <p className="meta strong" data-overdue="true">
+              No report form is published for this program yet, so these grantees will have
+              nothing to fill in until one is. The request is still created with its date.
+            </p>
+          )}
+          <p className="meta">
+            <strong>
+              {plan.willAsk.length === 0
+                ? 'No grants would be asked.'
+                : `${plan.willAsk.length} grant${plan.willAsk.length === 1 ? '' : 's'} would be asked, due ${plan.dueDate}.`}
+            </strong>
+          </p>
+          {plan.willAsk.length > 0 && (
+            <ul className="meta">
+              {plan.willAsk.map((r) => (
+                <li key={r.awardId}>
+                  {r.organizationName} — {formatCents(r.awardedAmountCents)}
+                </li>
+              ))}
+            </ul>
+          )}
+          {plan.skipped.length > 0 && (
+            <>
+              <p className="meta">Skipped:</p>
+              <ul className="meta">
+                {plan.skipped.map((r) => (
+                  <li key={r.awardId}>
+                    {r.organizationName} — {r.skipped}
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+          {plan.willAsk.length > 0 && (
+            <button
+              type="button"
+              className="btn small"
+              onClick={() => {
+                const ok = window.confirm(
+                  `Ask ${plan.willAsk.length} organization(s) for an update, due ${plan.dueDate}? ` +
+                    'They will be able to file as soon as this is done.',
+                );
+                if (ok) void run(false);
+              }}
+            >
+              Ask {plan.willAsk.length} organization{plan.willAsk.length === 1 ? '' : 's'}
+            </button>
+          )}
+        </div>
+      )}
+
+      {done && (
+        <p className="meta strong" role="status">
+          {done.created} update request{done.created === 1 ? '' : 's'} created, due {done.dueDate}.
+          Tell those organizations to go to the past-grantee page and we will connect them.
+        </p>
+      )}
+    </section>
   );
 }
 

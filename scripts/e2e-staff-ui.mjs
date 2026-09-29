@@ -318,6 +318,8 @@ function resetConfigState() {
   configCalls.status.length = 0;
 }
 
+const updateRequestCalls = [];
+
 async function stubApi(page, { role }) {
   await page.route('**/api/**', async (route) => {
     const url = new URL(route.request().url());
@@ -423,6 +425,32 @@ async function stubApi(page, { role }) {
         mediaFiles: 7,
         estimatedMonthlyUsd: 0.02,
         overWatchThreshold: false,
+      });
+    }
+
+    /*
+     * The update request. Two calls with the same shape: a dry run that writes
+     * nothing, then the real one. The stub records which it was asked for,
+     * because "the panel asked for a dry run first" is the property that stops
+     * a press creating obligations nobody has seen.
+     */
+    if (/\/api\/programs\/[^/]+\/request-updates$/.test(p)) {
+      const body = JSON.parse(route.request().postData() ?? '{}');
+      updateRequestCalls.push(body);
+      const willAsk = [
+        { awardId: 'aw1', organizationName: 'Invented Bayou Youth Collective',
+          awardedAmountCents: 2500000, awardedAt: '2025-04-12T00:00:00.000Z', skipped: null },
+        { awardId: 'aw2', organizationName: 'Invented Third Ward Arts Trust',
+          awardedAmountCents: 4000000, awardedAt: '2025-03-05T00:00:00.000Z', skipped: null },
+      ];
+      return json(route, {
+        label: body.label, dueDate: body.dueDate, formDefinitionId: null,
+        willAsk,
+        skipped: [{ awardId: 'aw3', organizationName: 'Invented Harbor Trust',
+          awardedAmountCents: 1500000, awardedAt: '2025-06-01T00:00:00.000Z',
+          skipped: 'this award was cancelled' }],
+        created: body.dryRun ? 0 : willAsk.length,
+        dryRun: Boolean(body.dryRun),
       });
     }
 
@@ -939,6 +967,55 @@ async function main() {
     ]);
     truthy('and the screen re-reads, so the new program is on it',
       (await pageTz.locator('.panel h2').first().innerText()).includes('Neighborhood Resilience Fund'));
+
+    /*
+     * Asking past grantees for an update. The reason this is driven rather than
+     * unit-tested alone: the panel's whole job is to make somebody look at the
+     * list BEFORE thirteen obligations exist, and "did the confirm step happen"
+     * is not visible from the server.
+     */
+    const ask = pageTz.locator('section.request-updates');
+    await ask.waitFor();
+    truthy('the update-request panel renders', await ask.isVisible());
+
+    await ask.locator('input[type="text"]').fill('2025 grant update');
+    const dates = ask.locator('input[type="date"]');
+    await dates.nth(0).fill('2025-01-01');
+    await dates.nth(1).fill('2025-12-31');
+    await dates.nth(2).fill('2027-11-14');
+
+    check('nothing has been asked of the server yet', updateRequestCalls.length, 0);
+    await ask.getByRole('button', { name: /what this would do/i }).click();
+    await ask.locator('.request-updates-plan').waitFor();
+
+    check('the first call is a DRY RUN', updateRequestCalls.map((c) => c.dryRun), [true]);
+    const planText = (await ask.locator('.request-updates-plan').innerText()).replace(/\s+/g, ' ');
+    truthy('it says how many would be asked', /2 grants would be asked/i.test(planText));
+    truthy('it names them', planText.includes('Invented Bayou Youth Collective'));
+    truthy('it shows what it would skip, and why',
+      /Invented Harbor Trust .* cancelled/i.test(planText));
+    truthy('it warns that no report form is published',
+      /nothing to fill in until one is/i.test(planText));
+    truthy('the due date is the one typed', planText.includes('2027-11-14'));
+
+    // The confirm is the whole point. Refuse it and nothing must be written.
+    pageTz.once('dialog', (d) => void d.dismiss());
+    await ask.getByRole('button', { name: /^Ask 2 organizations$/ }).click();
+    await pageTz.waitForTimeout(400);
+    check('dismissing the confirm asks for nothing', updateRequestCalls.length, 1);
+
+    pageTz.once('dialog', (d) => void d.accept());
+    await ask.getByRole('button', { name: /^Ask 2 organizations$/ }).click();
+    await ask.locator('[role="status"]').waitFor();
+    check('accepting it sends the real one', updateRequestCalls.map((c) => c.dryRun), [true, false]);
+    check('and it carries the window and the date the admin typed',
+      { from: updateRequestCalls[1].awardedFrom, to: updateRequestCalls[1].awardedTo,
+        due: updateRequestCalls[1].dueDate, label: updateRequestCalls[1].label },
+      { from: '2025-01-01', to: '2025-12-31', due: '2027-11-14', label: '2025 grant update' });
+    truthy('and it says what happened',
+      /2 update requests created, due 2027-11-14/i.test(
+        await ask.locator('[role="status"]').innerText()));
+
 
     // ---- a cycle, with the deadline that matters ---------------------------
     await pageTz.getByRole('button', { name: /^New cycle/ }).click();

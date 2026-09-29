@@ -852,6 +852,14 @@ export const api = {
       `/api/attachments/${encodeURIComponent(attachmentId)}/download-url`,
       { method: 'POST', body: {} },
     ),
+  requestUpdates: (
+    programId: string,
+    body: { awardedFrom: string; awardedTo: string; label: string; dueDate: string; dryRun: boolean },
+  ) =>
+    request<RequestUpdatesResult>(
+      `/api/programs/${encodeURIComponent(programId)}/request-updates`,
+      { method: 'POST', body },
+    ),
   buildReportForm: (programId: string) =>
     request<{ formDefinitionId: string; version: number; fieldCount: number }>(
       `/api/programs/${encodeURIComponent(programId)}/report-form`,
@@ -985,6 +993,26 @@ export const api = {
 };
 
 /** What R2 holds, and what it costs. See src/lib/dataHealth.ts. */
+/** One past grant, and what an update request would do about it. */
+export interface UpdateRequestRow {
+  awardId: string;
+  organizationName: string;
+  awardedAmountCents: number;
+  awardedAt: string;
+  skipped: string | null;
+}
+
+export interface RequestUpdatesResult {
+  label: string;
+  dueDate: string;
+  /** Null when the program has no published report form yet. */
+  formDefinitionId: string | null;
+  willAsk: UpdateRequestRow[];
+  skipped: UpdateRequestRow[];
+  created: number;
+  dryRun: boolean;
+}
+
 export interface StorageUsage {
   totalBytes: number;
   byParent: { parentType: string; files: number; bytes: number }[];

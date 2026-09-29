@@ -23,7 +23,7 @@ import type { RequestContext, Session } from '../types';
 import { newId } from './ids';
 import { nowIso } from './time';
 import { auditStatement } from './audit';
-import { AppError } from './errors';
+import { AppError, notFound } from './errors';
 
 /**
  * Days after a term ends before the final report is due.
@@ -271,6 +271,263 @@ export async function generateReportPeriods(
 
   await db.batch(statements);
   return { awardId, created: plan.periods.length, skipped: null };
+}
+
+/**
+ * ASKING A PAST GRANTEE FOR AN UPDATE, with a date the Foundation chooses.
+ *
+ * WHY THIS EXISTS ALONGSIDE planReportPeriods RATHER THAN INSIDE IT. Every
+ * other route to a report period derives its due date from the award's TERM.
+ * That is right for a grant being made now and wrong for one made in 2023: the
+ * term ended years ago, so the generated report is born overdue. Three things
+ * follow from that, and the third is the one that would actually hurt.
+ *
+ *   The compliance screen shows every past grantee as delinquent on day one.
+ *   Each of them is warned about outstanding reports when they apply again,
+ *   for reports nobody had asked them for.
+ *   And an award whose term ended inside the reminder chase window gets its
+ *   grantee emailed, weekly, about a report that was late before they were
+ *   ever asked -- aimed at precisely the people being re-engaged.
+ *
+ * So an update request is not a late report. It is a NEW obligation created
+ * today, due when the Foundation says, and the award's term has nothing to do
+ * with it. That is why these periods are `ad_hoc` and why the due date is a
+ * required argument rather than a computation.
+ *
+ * IMPORTED AWARDS CARRY NO TERM AT ALL, deliberately (see the import template),
+ * which makes them invisible to planReportPeriods. This is the only way they
+ * are ever asked for anything, and that is the intended shape: the deliberate
+ * path is the only path.
+ */
+
+/** The period type the schema already had for exactly this. */
+export const UPDATE_REQUEST_TYPE = 'ad_hoc';
+
+/** One award, and what a run would do about it. */
+export interface UpdateRequestRow {
+  awardId: string;
+  organizationName: string;
+  awardedAmountCents: number;
+  /** The award date, which is what a run is selected by. */
+  awardedAt: string;
+  /** Null when it would be asked; a reason when it would not. */
+  skipped: string | null;
+}
+
+export interface RequestUpdatesResult {
+  label: string;
+  dueDate: string;
+  /** Null when the program has no published report form. See below. */
+  formDefinitionId: string | null;
+  willAsk: UpdateRequestRow[];
+  skipped: UpdateRequestRow[];
+  /** Zero on a dry run, however many rows willAsk holds. */
+  created: number;
+  dryRun: boolean;
+}
+
+/** YYYY-MM-DD, and a real day. Rejects 2026-02-31 as well as "soon". */
+export function isPlainDate(raw: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) return false;
+  const d = new Date(`${raw}T00:00:00.000Z`);
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === raw;
+}
+
+export async function requestUpdates(
+  db: D1Database,
+  ctx: RequestContext,
+  session: Session,
+  opts: {
+    programId: string;
+    /*
+     * The window of AWARD DATES to ask, inclusive, as YYYY-MM-DD.
+     *
+     * Not a fiscal year, because an award does not carry one: the importer
+     * parses fiscal_year and drops it, since fiscal_year lives on programs and
+     * cannot tell two cycles of one program apart. awarded_at is a fact on the
+     * row. It also means the Foundation is never asked to agree with this code
+     * about when their year starts.
+     */
+    awardedFrom: string;
+    awardedTo: string;
+    /** What the grantee sees this called. "2025 grant update". */
+    label: string;
+    /** YYYY-MM-DD. Must be in the future -- see the guard. */
+    dueDate: string;
+    dryRun?: boolean;
+    now?: string;
+  },
+): Promise<RequestUpdatesResult> {
+  if (session.role !== 'admin') {
+    throw new AppError('FORBIDDEN', 'Only an administrator can do that.', {
+      internalMessage: `update request attempted by role ${session.role}`,
+      severity: 'warn',
+    });
+  }
+
+  const now = opts.now ?? nowIso();
+  const label = opts.label.trim();
+  if (!label) {
+    throw new AppError('VALIDATION_FAILED', 'Give this update request a name the grantee will see.', {
+      internalMessage: 'requestUpdates called with an empty label',
+      severity: 'warn',
+    });
+  }
+  if (!isPlainDate(opts.dueDate)) {
+    throw new AppError('VALIDATION_FAILED', 'Enter a due date as YYYY-MM-DD.', {
+      internalMessage: `requestUpdates called with due date "${opts.dueDate}"`,
+      severity: 'warn',
+    });
+  }
+  /*
+   * THE GUARD THIS WHOLE FUNCTION EXISTS FOR. A due date in the past creates
+   * exactly the born-overdue obligation described above -- by hand this time,
+   * which is worse, because somebody typed it.
+   */
+  if (opts.dueDate <= now.slice(0, 10)) {
+    throw new AppError('VALIDATION_FAILED', 'A due date has to be in the future.', {
+      internalMessage: `requestUpdates due date ${opts.dueDate} is not after ${now.slice(0, 10)}`,
+      severity: 'warn',
+    });
+  }
+  if (!isPlainDate(opts.awardedFrom) || !isPlainDate(opts.awardedTo)) {
+    throw new AppError('VALIDATION_FAILED', 'Enter the award dates to cover as YYYY-MM-DD.', {
+      internalMessage: `requestUpdates window "${opts.awardedFrom}".."${opts.awardedTo}"`,
+      severity: 'warn',
+    });
+  }
+  if (opts.awardedTo < opts.awardedFrom) {
+    throw new AppError('VALIDATION_FAILED', 'That window ends before it starts.', {
+      internalMessage: `requestUpdates window ${opts.awardedFrom} > ${opts.awardedTo}`,
+      severity: 'warn',
+    });
+  }
+
+  const program = await db
+    .prepare(`SELECT id FROM programs WHERE id = ? AND deleted_at IS NULL`)
+    .bind(opts.programId)
+    .first<{ id: string }>();
+  if (!program) throw notFound('program');
+
+  /*
+   * The form, pinned now rather than looked up when the grantee opens it.
+   * Null is allowed and is not a failure: the obligation is real and dated
+   * either way, and refusing to create it until the form exists would mean the
+   * Foundation could not decide who to ask before deciding what to ask. The
+   * caller is told, and the panel says so.
+   */
+  const form = await db
+    .prepare(
+      `SELECT id FROM form_definitions
+        WHERE program_id = ? AND kind = 'report' AND status = 'published'
+          AND deleted_at IS NULL
+        ORDER BY version DESC LIMIT 1`,
+    )
+    .bind(opts.programId)
+    .first<{ id: string }>();
+
+  const { results } = await db
+    .prepare(
+      /*
+       * awarded_at is stored as a full timestamp; the window is given as days.
+       * Comparing the first ten characters keeps an award made at 4pm on the
+       * last day of the window inside it, which a naive <= against the bare
+       * date would drop.
+       */
+      `SELECT a.id AS awardId, a.awarded_amount_cents AS awardedAmountCents,
+              a.awarded_at AS awardedAt, a.status AS status,
+              o.legal_name AS organizationName,
+              (SELECT COUNT(*) FROM report_periods rp
+                WHERE rp.award_id = a.id AND rp.deleted_at IS NULL) AS periods
+         FROM awards a
+         JOIN organizations o ON o.id = a.organization_id AND o.deleted_at IS NULL
+        WHERE a.program_id = ? AND a.deleted_at IS NULL
+          AND substr(a.awarded_at, 1, 10) >= ?
+          AND substr(a.awarded_at, 1, 10) <= ?
+        ORDER BY o.legal_name`,
+    )
+    .bind(opts.programId, opts.awardedFrom, opts.awardedTo)
+    .all<{
+      awardId: string;
+      awardedAmountCents: number;
+      awardedAt: string;
+      status: string;
+      organizationName: string;
+      periods: number;
+    }>();
+
+  const willAsk: UpdateRequestRow[] = [];
+  const skipped: UpdateRequestRow[] = [];
+  for (const r of results ?? []) {
+    const row: UpdateRequestRow = {
+      awardId: r.awardId,
+      organizationName: r.organizationName,
+      awardedAmountCents: r.awardedAmountCents,
+      awardedAt: r.awardedAt,
+      skipped: null,
+    };
+    // A cancelled grant is one nobody took. Asking for a report on it is the
+    // defect the reminder path already had to be taught not to repeat.
+    if (r.status === 'cancelled') {
+      skipped.push({ ...row, skipped: 'this award was cancelled' });
+    } else if (r.periods > 0) {
+      // Running twice must not ask twice. This is what makes the button safe
+      // to press again after a partial run or a change of mind about dates.
+      skipped.push({ ...row, skipped: 'this award has already been asked' });
+    } else {
+      willAsk.push(row);
+    }
+  }
+
+  if (opts.dryRun) {
+    return {
+      label, dueDate: opts.dueDate, formDefinitionId: form?.id ?? null,
+      willAsk, skipped, created: 0, dryRun: true,
+    };
+  }
+
+  /*
+   * One batch per award, not one for the run. The period and its audit row
+   * belong together; a hundred awards in one batch would make the whole ask
+   * fail because of one bad row, and D1 has no interactive transaction to roll
+   * back to a sensible midpoint.
+   */
+  for (const row of willAsk) {
+    const id = newId();
+    await db.batch([
+      db
+        .prepare(
+          `INSERT INTO report_periods (id, award_id, form_definition_id, label, period_type,
+             period_start, period_end, opens_at, due_date, status, created_at, updated_at)
+           VALUES (?,?,?,?,?,NULL,NULL,?,?,'open',?,?)`,
+        )
+        .bind(
+          id, row.awardId, form?.id ?? null, label, UPDATE_REQUEST_TYPE,
+          // Open NOW. A grantee told today that we would like an update should
+          // find something they can actually fill in, not a page that says the
+          // window has not started.
+          now, opts.dueDate, now, now,
+        ),
+      auditStatement(db, ctx, {
+        action: 'report_period.update_requested',
+        entityType: 'report_period',
+        entityId: id,
+        after: {
+          award_id: row.awardId,
+          label,
+          period_type: UPDATE_REQUEST_TYPE,
+          due_date: opts.dueDate,
+          form_definition_id: form?.id ?? null,
+          awarded_at: row.awardedAt,
+        },
+      }),
+    ]);
+  }
+
+  return {
+    label, dueDate: opts.dueDate, formDefinitionId: form?.id ?? null,
+    willAsk, skipped, created: willAsk.length, dryRun: false,
+  };
 }
 
 /**

@@ -91,7 +91,7 @@ import {
   reviewCoverage, distributeReviewers, DEFAULT_REVIEWERS_PER_APPLICATION,
 } from './lib/reviewAssign';
 import { dataHealth, storageUsage } from './lib/dataHealth';
-import { generateReportPeriods, generateMissingReportPeriods } from './lib/reportPeriods';
+import { generateReportPeriods, generateMissingReportPeriods, requestUpdates } from './lib/reportPeriods';
 import { previewAwardImport, runAwardImport } from './lib/awardsImportRoutes';
 import {
   ADMIN_ONLY,
@@ -703,6 +703,30 @@ const routes: readonly Route[] = [
     roles: ADMIN_ONLY,
     handler: async ({ env, ctx, params }) =>
       json(await generateReportPeriods(env.DB, ctx, params.id!), ctx),
+  },
+  /*
+   * ADMIN_ONLY, and a dry run by default from the panel: this creates an
+   * obligation against somebody else's grant with a date they will be held to,
+   * for as many grants as a fiscal year holds.
+   */
+  {
+    method: 'POST',
+    path: '/api/programs/:id/request-updates',
+    roles: ADMIN_ONLY,
+    handler: async ({ request, env, ctx, session, params }) => {
+      const body = await readJsonBody(request).catch(() => ({}) as Record<string, unknown>);
+      return json(
+        await requestUpdates(env.DB, ctx, session, {
+          programId: params.id!,
+          awardedFrom: typeof body.awardedFrom === 'string' ? body.awardedFrom : '',
+          awardedTo: typeof body.awardedTo === 'string' ? body.awardedTo : '',
+          label: typeof body.label === 'string' ? body.label : '',
+          dueDate: typeof body.dueDate === 'string' ? body.dueDate : '',
+          dryRun: body.dryRun !== false,
+        }),
+        ctx,
+      );
+    },
   },
   {
     method: 'POST',
