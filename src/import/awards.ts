@@ -365,8 +365,21 @@ export function formatAwardReport(result: AwardParseResult): string {
   if (result.awards.length > 0) {
     const total = result.awards.reduce((n, a) => n + a.awardedAmountCents, 0);
     lines.push(`Total awarded: $${(total / 100).toLocaleString('en-US')}`);
-    const orgs = new Set(result.awards.map((a) => a.ein));
-    lines.push(`Distinct organizations (by EIN): ${orgs.size}`);
+    // Organizations are matched on EIN, so rows sharing one EIN are one
+    // organization. A row with no EIN has nothing to match against and always
+    // becomes its own organization, even if another row names the same
+    // nonprofit — counting those as one would understate the import badly.
+    const eins = new Set(result.awards.filter((a) => a.ein).map((a) => a.ein));
+    const withoutEin = result.awards.filter((a) => !a.ein).length;
+    lines.push(`Organizations: ${eins.size + withoutEin}`);
+    if (withoutEin > 0) {
+      lines.push(
+        `  ${eins.size} matched on EIN, ${withoutEin} with no EIN. ` +
+          `A row with no EIN cannot be matched, so each one becomes a separate ` +
+          `organization. Two rows naming the same nonprofit without an EIN ` +
+          `arrive as two organizations for an admin to merge.`,
+      );
+    }
     const missingTerms = result.awards.filter((a) => !a.termStart || !a.termEnd).length;
     if (missingTerms > 0) {
       lines.push(

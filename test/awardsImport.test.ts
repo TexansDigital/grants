@@ -204,8 +204,42 @@ describe('the report a human reads before running it for real', () => {
     expect(out).toMatch(/Awards read: 4/);
     expect(out).toMatch(/Total awarded: \$194,999\.99/);
     // Three EINs across four awards: one organization holds two years.
-    expect(out).toMatch(/Distinct organizations \(by EIN\): 3/);
+    expect(out).toMatch(/Organizations: 3/);
     expect(out).toMatch(/No problems found/);
+  });
+
+  it('counts an EIN-less row as its own organization, never folded into one', () => {
+    // The live 2025 backfill has no EINs at all. Counting the whole file as one
+    // organization is what the old summary did, and it is the number a human
+    // reads immediately before pressing Import.
+    const blank = withCol('ein', '');
+    // Rows 2 and 3 name the SAME nonprofit, and still count as two.
+    const noEins = csv(
+      withCol('external_reference', 'A', blank),
+      withCol('organization_name', 'Second Org', withCol('external_reference', 'B', blank)),
+      withCol('organization_name', 'Second Org', withCol('external_reference', 'C', blank)),
+    );
+    const out = formatAwardReport(parseAwardsCsv(noEins));
+    expect(out).toMatch(/Awards read: 3/);
+    expect(out).toMatch(/Organizations: 3/);
+    expect(out).toMatch(/3 with no EIN/);
+    expect(out).toMatch(/two organizations for an admin to merge/);
+  });
+
+  it('adds EIN-matched organizations to EIN-less ones rather than picking one', () => {
+    const mixed = csv(
+      ROW,
+      withCol('external_reference', 'B'),
+      withCol(
+        'organization_name',
+        'No EIN Org',
+        withCol('external_reference', 'C', withCol('ein', '')),
+      ),
+    );
+    const out = formatAwardReport(parseAwardsCsv(mixed));
+    // One EIN shared by two rows, plus one EIN-less row: two organizations.
+    expect(out).toMatch(/Organizations: 2/);
+    expect(out).toMatch(/1 matched on EIN, 1 with no EIN/);
   });
 
   it('warns when term dates are missing, because report dates come from them', () => {
