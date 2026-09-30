@@ -922,11 +922,29 @@ export const api = {
    * does not have to model the state machine -- only to make the press
    * deliberate.
    */
-  setCycleStatus: (id: string, next: 'open' | 'closed') =>
-    request<{ cycle: CycleRow }>(`/api/cycles/${encodeURIComponent(id)}/${next}`, {
-      method: 'POST',
-      body: {},
-    }),
+  setCycleStatus: (id: string, next: 'open' | 'closed') => {
+    /*
+     * THE STATUS AND THE ENDPOINT ARE DIFFERENT VOCABULARIES.
+     *
+     * Callers reason in statuses, because that is what the cycle row holds and
+     * what the confirm dialog talks about. The routes are verbs: /open and
+     * /close. Interpolating the status straight into the path worked for
+     * 'open' by coincidence and produced /closed -- a 404 -- for every close
+     * anyone ever attempted. Opening a cycle makes a public form live; closing
+     * one is the only way to stop it. The failure was on the safety-critical
+     * side of that pair.
+     *
+     * The two URLs are written out in full rather than built from a variable
+     * verb. That is deliberate and worth keeping: a path whose verb segment is
+     * interpolated cannot be checked against the server's route table without
+     * running it, and test/clientServerRoutes.test.ts does exactly that check
+     * statically. Spelling both out turns this seam into a build-time error.
+     */
+    const cycle = encodeURIComponent(id);
+    const url =
+      next === 'closed' ? `/api/cycles/${cycle}/close` : `/api/cycles/${cycle}/open`;
+    return request<{ cycle: CycleRow }>(url, { method: 'POST', body: {} });
+  },
 
   previewAwardImport: (csv: string) =>
     request<ImportPreview>('/api/awards/import/preview', { method: 'POST', body: { csv } }),
