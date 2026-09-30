@@ -71,6 +71,17 @@ single bucket-level mistake exposes both.
 | `[[env.production.r2_buckets]]` BACKUPS → `bucket_name` | `steward-production-backups` |
 | `[[env.production.kv_namespaces]]` SESSIONS → `id` | the KV id from Phase A |
 
+**What production inherits and what it does not.** Wrangler splits config in
+two, and the split is not obvious. `[assets]`, `[observability]`, `main` and
+`compatibility_date` are **inherited**, so production serves the React bundle
+without declaring anything. `routes` is inherited too, which is exactly why
+production sets `routes = []` explicitly -- without that line it would inherit
+the live hostnames and reassign them the first time anyone deployed it.
+Bindings and vars are **not** inherited: `[vars]`, `d1_databases`,
+`kv_namespaces` and `r2_buckets` must each be declared for production or they
+are simply absent. All four now are, and `check:config` fails the build if a
+var is ever added to the default environment without reaching production.
+
 These are committed. They are identifiers, not credentials — useless to anyone
 without account access, and committing them is what makes the deploy
 reproducible. The protection that matters is elsewhere and stays: `routes = []`
