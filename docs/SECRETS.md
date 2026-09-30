@@ -24,6 +24,45 @@ reaches `error_log`, but redaction is a backstop, not a licence.
 
 `RESEND_API_KEY` is now live code. The rest do not exist yet.
 
+## Where each value comes from
+
+Nobody wrote this down, and at cutover the question "where am I pasting from?"
+arrived with a live prompt already waiting. The answer differs per secret, and
+three of the four cannot be read back once created.
+
+| Secret | Where to get it | Readable again later? |
+|---|---|---|
+| `SESSION_SIGNING_KEY` | Generate it: `openssl rand -base64 48` | Never needs to be. Pipe it straight into `wrangler secret put` so it touches no clipboard and no shell history. |
+| `RESEND_API_KEY` | resend.com, API Keys, Create. "Sending access" is enough. | **No.** Shown once. |
+| `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY` | Cloudflare dashboard, R2 Object Storage, API, Manage API tokens, Create. | **No.** The secret half is shown once. |
+| `TURNSTILE_SECRET_KEY` | Cloudflare dashboard, Turnstile, the widget, Settings. | **Yes.** This is the only one you can go and re-read. |
+
+**You cannot recover a value from wrangler.** `wrangler secret list` prints
+names, never values. So a secret set in preview and not saved elsewhere is
+gone, and production needs a freshly created one -- which is the better shape
+anyway: a production credential should be revocable without taking preview
+down with it.
+
+**The signing key must be NEW for production.** Reusing preview's would let a
+session minted against test data validate against production.
+
+**Scope the R2 token to the production buckets only** --
+`steward-production-files` and `steward-production-backups`, Object Read &
+Write -- rather than granting it the whole account. A leaked production token
+then cannot reach preview, and the reverse holds too.
+
+**Turnstile is deliberately the SAME widget as preview.** A Turnstile widget
+binds to hostnames, and `apply.` and `grants.` do not change at cutover; they
+move from one Worker to another. The site key in `wrangler.toml` is the public
+half of that widget, so the secret must be that same widget's secret.
+
+**Set them one at a time.** `wrangler secret put` reads from stdin, so a
+pasted block of several commands feeds the next command line into the previous
+prompt as its value. You get a secret whose value is a command string, no
+error, and a failure that surfaces much later as something unrelated. If you
+are ever unsure whether a value landed, set it again: `secret put` overwrites,
+so re-running is free and always cheaper than wondering.
+
 ## Email: what the absence of a key does
 
 > **THIS NO LONGER DESCRIBES THE DEFAULT ENVIRONMENT. Read this first.**
