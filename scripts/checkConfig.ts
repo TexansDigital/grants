@@ -15,4 +15,12 @@ if (problems.length > 0) {
   console.error('wrangler.toml problems:\n' + problems.map((p) => `  - ${p}`).join('\n'));
   process.exit(1);
 }
-console.log('wrangler.toml OK: hostname surface pinned, production bindings still placeholders');
+/*
+ * Say what was actually checked, not what was true when this line was written.
+ * It read "production bindings still placeholders" long after the cutover
+ * began filling them in -- a green line asserting something false, which is
+ * the one thing a check must never do.
+ */
+console.log(
+  'wrangler.toml OK: hostname surface pinned, production shares no resource with preview',
+);

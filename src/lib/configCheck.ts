@@ -184,6 +184,7 @@ export function configProblems(src: string): string[] {
    * rather than a credential. R2 has no separate id, so there `bucket_name` is
    * the binding and is covered.
    */
+  const productionBindings: { key: string; value: string; line: number }[] = [];
   const BINDS_A_RESOURCE =
     /^\s*(id|database_id|preview_id|bucket_name|preview_bucket_name)\s*=\s*"([^"]*)"/;
   {
@@ -197,13 +198,51 @@ export function configProblems(src: string): string[] {
 
       const m = BINDS_A_RESOURCE.exec(line);
       if (!m) return;
-      if (m[2] !== 'FILL_IN_AT_DEPLOY_TIME_DO_NOT_COMMIT') {
+      productionBindings.push({ key: m[1]!, value: m[2]!, line: i + 1 });
+    });
+  }
+
+  /*
+   * WHAT CHANGED, AND WHY THE OLD RULE WENT.
+   *
+   * This required every production id to still be the placeholder, on the
+   * reasoning that a production id is a credential. It is not: a D1 id or a
+   * bucket name is an identifier, useless without account access, and keeping
+   * them out of the file made the deploy unreproducible and the cutover a
+   * sequence of hand edits nobody could review. That was a deliberate
+   * decision, so the rule that contradicted it had to go rather than be
+   * silenced at the call site.
+   *
+   * What replaces it guards the failure that actually costs something:
+   * PRODUCTION MUST NEVER NAME A RESOURCE THE DEFAULT ENVIRONMENT USES. A
+   * production block pointing at steward-preview would write real grantee
+   * records into the database everyone treats as disposable, and would do it
+   * silently, because every binding would resolve and every query would
+   * succeed.
+   *
+   * The placeholder is still accepted, because a cutover fills these in one at
+   * a time and a half-finished file must still be checkable.
+   */
+  {
+    const defaults = new Set<string>();
+    const upToFirstEnv = src.split(/\r?\n/);
+    for (const line of upToFirstEnv) {
+      if (/^\s*\[+\s*env\./.test(line)) break;
+      const m = /^\s*(id|database_id|preview_id|database_name|bucket_name|preview_bucket_name)\s*=\s*"([^"]*)"/.exec(
+        line,
+      );
+      if (m && m[2]) defaults.add(m[2]!);
+    }
+    for (const b of productionBindings) {
+      if (b.value === 'FILL_IN_AT_DEPLOY_TIME_DO_NOT_COMMIT') continue;
+      if (defaults.has(b.value)) {
         problems.push(
-          `line ${i + 1}: [env.production] ${m[1]} is "${m[2]}", not the placeholder. ` +
-            `Production ids must never be committed; a deliberate deploy fills them in.`,
+          `line ${b.line}: [env.production] ${b.key} is "${b.value}", which the DEFAULT ` +
+            `environment also uses. Production would share preview's resource and write ` +
+            `real records into it.`,
         );
       }
-    });
+    }
   }
 
   // -----------------------------------------------------------------------------

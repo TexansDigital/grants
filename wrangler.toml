@@ -5,10 +5,16 @@
 # resources ONLY. Production D1 and R2 hold real EINs, audited financial
 # statements, and operating budgets belonging to other organizations.
 #
-# There is deliberately NO usable production binding in this file. The
-# [env.production] block below carries placeholder IDs that will fail loudly.
-# A human fills them in, in a named deploy step, at the moment of deploy.
-# Do not commit real production IDs here.
+# Production IDs ARE committed here, deliberately. A D1 id or a bucket name is
+# an identifier, not a credential -- useless without account access -- and
+# keeping them out of the file made the deploy unreproducible and the cutover
+# a sequence of hand edits nobody could review.
+#
+# What protects production is not secrecy. It is that the production
+# environment declares routes = [] so it claims no hostname until a human
+# moves them, that every command touching it carries an explicit
+# --env production, and that check:config fails the build if any production
+# binding ever names a resource the default environment also uses.
 #
 name = "steward"
 main = "src/index.ts"
@@ -340,16 +346,16 @@ R2_ACCOUNT_ID = "15755cdb48de12ee8f25ae64e13f20e2"
 [[env.production.d1_databases]]
 binding = "DB"
 database_name = "steward-production"
-database_id = "FILL_IN_AT_DEPLOY_TIME_DO_NOT_COMMIT"
+database_id = "c2912466-2028-4f40-a4f8-6e90e85c8a20"
 migrations_dir = "migrations"
 
 [[env.production.r2_buckets]]
 binding = "FILES"
-bucket_name = "FILL_IN_AT_DEPLOY_TIME_DO_NOT_COMMIT"
+bucket_name = "steward-production-files"
 
 [[env.production.r2_buckets]]
 binding = "BACKUPS"
-bucket_name = "FILL_IN_AT_DEPLOY_TIME_DO_NOT_COMMIT"
+bucket_name = "steward-production-backups"
 
 [env.production.triggers]
 crons = ["0 7 * * *"]

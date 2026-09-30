@@ -122,39 +122,84 @@ describe('the hostname surface', () => {
   });
 });
 
-describe('production stays un-deployable from a checkout', () => {
-  it('catches a real production id committed to the file', () => {
+describe('production never shares a resource with preview', () => {
+  /*
+   * WHAT THIS SUITE USED TO ASSERT.
+   *
+   * It required every production binding to still be the placeholder, so that
+   * production was "un-deployable from a checkout". That rule was retired
+   * deliberately: a D1 id or a bucket name is an identifier, not a credential,
+   * and keeping them out of the file made the deploy unreproducible and the
+   * cutover a sequence of unreviewable hand edits.
+   *
+   * The guard that replaced it protects the failure that actually costs
+   * something. Production pointing at a preview resource would write real
+   * grantee records into the database everyone treats as disposable, and would
+   * do it silently: every binding resolves, every query succeeds.
+   */
+
+  it('catches production bound to the preview database', () => {
     failsWith(
-      edit('database_id = "FILL_IN_AT_DEPLOY_TIME_DO_NOT_COMMIT"',
-           'database_id = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"'),
-      /not the placeholder/i,
+      edit('database_id = "c2912466-2028-4f40-a4f8-6e90e85c8a20"',
+           'database_id = "f5be3d5c-642c-4706-b9e6-bdd8e0c9858e"'),
+      /which the DEFAULT environment also uses/i,
     );
   });
 
-  it('catches ANY production binding filled in, not a fixed number of them', () => {
+  it('catches EVERY production binding pointed at its preview twin, one at a time', () => {
     /*
-     * This check used to count placeholders and require at least three. A
-     * count is not an invariant: adding a fourth production binding (the
-     * backups bucket) let the file pass with one real id committed, because
-     * three placeholders still remained. It weakened the moment the config
-     * grew, which is how every "at least N" guard fails.
+     * Generative rather than a fixed list, for the same reason the old count
+     * was replaced: a binding added next year must be covered by nobody
+     * remembering anything. Each production resource value is swapped, on its
+     * own, for a value the default environment uses.
      */
-    const src = real;
-    const bindings = [...src.matchAll(/(id|bucket_name)\s*=\s*"FILL_IN_AT_DEPLOY_TIME_DO_NOT_COMMIT"/g)];
-    expect(bindings.length, 'production has several bindings to protect').toBeGreaterThan(2);
+    const NAMES_A_RESOURCE = /^\s*(?:id|database_id|preview_id|bucket_name|preview_bucket_name)\s*=\s*"([^"]+)"/;
+    const allLines = real.split('\n');
+    const firstEnv = allLines.findIndex((l) => /^\s*\[+\s*env\./.test(l));
+    const defaults = allLines
+      .slice(0, firstEnv)
+      .map((l) => NAMES_A_RESOURCE.exec(l)?.[1])
+      .filter((v): v is string => Boolean(v));
+    expect(defaults.length, 'the default environment names several resources').toBeGreaterThan(2);
 
-    // Every one of them, individually.
-    for (let i = 0; i < bindings.length; i += 1) {
-      let seen = -1;
-      const mutated = src.replace(
-        /(id|bucket_name)(\s*=\s*)"FILL_IN_AT_DEPLOY_TIME_DO_NOT_COMMIT"/g,
-        (whole, key: string, eq: string) => {
-          seen += 1;
-          return seen === i ? `${key}${eq}"real-value-committed-by-mistake"` : whole;
-        },
-      );
-      failsWith(mutated, /not the placeholder/i);
+    /*
+     * The HEADER, not the first mention: the phrase '[env.production]' appears
+     * in the file's opening comment, and slicing from there swept the default
+     * and staging blocks into the production set, so every mutation collided
+     * with itself and the test passed on nothing.
+     */
+    const headerLine = allLines.findIndex((l) => l.trim() === '[env.production]');
+    expect(headerLine, 'the production table header is present').toBeGreaterThan(-1);
+    const cut = allLines.slice(0, headerLine).join('\n').length + 1;
+    const prodBlock = real.slice(cut);
+    /*
+     * Mutate by LINE, never by String.replace on the value.
+     *
+     * [env.production.vars] carries R2_BUCKET_NAME = "steward-production-files",
+     * the same text as the bucket binding below it. A textual replace hit the
+     * var first -- a key the checker rightly ignores -- so the mutation landed
+     * somewhere harmless and the test reported no problem while believing it
+     * had introduced one. A mutation test that mutates the wrong line proves
+     * nothing and says it proved something.
+     */
+    const prodLines = prodBlock.split('\n');
+    const targets = prodLines
+      .map((l, i) => ({ i, value: NAMES_A_RESOURCE.exec(l)?.[1] }))
+      .filter((t): t is { i: number; value: string } => Boolean(t.value))
+      .filter((t) => t.value !== 'FILL_IN_AT_DEPLOY_TIME_DO_NOT_COMMIT');
+    expect(targets.length, 'production names several resources').toBeGreaterThan(1);
+
+    for (const target of targets) {
+      const mutated = [...prodLines];
+      mutated[target.i] = mutated[target.i]!.replace(`"${target.value}"`, `"${defaults[0]}"`);
+      failsWith(real.slice(0, cut) + mutated.join('\n'), /which the DEFAULT environment also uses/i);
     }
+  });
+
+  it('accepts a placeholder, because a cutover fills these in one at a time', () => {
+    const halfDone = edit('database_id = "c2912466-2028-4f40-a4f8-6e90e85c8a20"',
+                          'database_id = "FILL_IN_AT_DEPLOY_TIME_DO_NOT_COMMIT"');
+    expect(configProblems(halfDone)).toEqual([]);
   });
 
   it('leaves database_name alone, which is a label rather than a binding', () => {
