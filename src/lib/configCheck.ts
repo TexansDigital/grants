@@ -461,5 +461,43 @@ export function configProblems(src: string): string[] {
     }
   }
 
+  /*
+   * EVERY VAR THE DEFAULT ENVIRONMENT DECLARES MUST ALSO EXIST IN PRODUCTION.
+   *
+   * Production was written once, by hand, and then the default environment
+   * grew: Access, Turnstile and the R2 presigning pair were all added later
+   * and none reached [env.production.vars]. A wrangler env does NOT inherit
+   * top-level vars, so those would simply have been absent at cutover, and
+   * each absence fails silently in a different way -- staff locked out, no bot
+   * protection, and presigning unable to build a URL, which takes every upload
+   * and every download with it.
+   *
+   * Only presence is checked, never the value: production legitimately points
+   * at a different bucket, and an intentionally empty Access pair is the
+   * fail-closed posture that other checks above already police.
+   */
+  function varsIn(table: string): Set<string> {
+    const start = lines.findIndex((l) => l.trim() === table);
+    if (start === -1) return new Set();
+    const keys = new Set<string>();
+    for (let i = start + 1; i < lines.length; i++) {
+      if (/^\s*\[/.test(lines[i]!)) break;
+      const m = /^\s*([A-Z][A-Z0-9_]*)\s*=/.exec(lines[i]!);
+      if (m) keys.add(m[1]!);
+    }
+    return keys;
+  }
+
+  const productionVars = varsIn('[env.production.vars]');
+  if (productionVars.size > 0) {
+    const missing = [...varsIn('[vars]')].filter((k) => !productionVars.has(k));
+    if (missing.length > 0) {
+      problems.push(
+        `[env.production.vars] is missing ${missing.join(', ')}. A wrangler env ` +
+          `does not inherit top-level vars, so production would deploy without them.`,
+      );
+    }
+  }
+
   return problems;
 }

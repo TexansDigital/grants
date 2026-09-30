@@ -313,6 +313,30 @@ STAFF_BASE_URL = "https://grants.houstontexansfoundation.org"
 # the award was made against. See migrations/0018_retention.sql.
 RETENTION_DAYS = "90"
 
+# The five below were MISSING from production until this was written, and each
+# absence fails differently. Access vars empty means every staff route fails
+# closed -- safe, but it locks you out of your own site at cutover. An empty
+# Turnstile key means no bot protection renders on the public form. An empty
+# R2 pair means presigning cannot be built at all: no uploads and no
+# downloads, so a grantee can file a report but attach nothing to it.
+#
+# Same Access team, and the same Access APPLICATION, because an Access
+# application is bound to the hostname and the hostnames do not change at
+# cutover -- they move from one Worker to another. If you instead create a
+# NEW Access application for production, its audience tag differs and this
+# value must be updated to match, or every staff request is rejected.
+ACCESS_TEAM_DOMAIN = "texansdigital.cloudflareaccess.com"
+ACCESS_AUD = "25afd7973df7c8d398d252df5aa7b5886bdff3b54b34168b3a752b24dda7b15d"
+
+# A Turnstile SITE key is public by design -- it ships in the page. The secret
+# half is TURNSTILE_SECRET_KEY, which is a wrangler secret and is never here.
+TURNSTILE_SITE_KEY = "0x4AAAAAAE-1QKHwyJEDLSkb"
+
+# Presigning needs both: the bucket to sign against and the account whose S3
+# endpoint it lives on. The bucket differs from preview. The account does not.
+R2_BUCKET_NAME = "steward-production-files"
+R2_ACCOUNT_ID = "15755cdb48de12ee8f25ae64e13f20e2"
+
 [[env.production.d1_databases]]
 binding = "DB"
 database_name = "steward-production"
