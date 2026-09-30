@@ -26,12 +26,34 @@ reaches `error_log`, but redaction is a backstop, not a licence.
 
 ## Email: what the absence of a key does
 
-`RESEND_API_KEY` is deliberately **unset in preview and staging**, and that
-absence is a safety property rather than an oversight:
+> **THIS NO LONGER DESCRIBES THE DEFAULT ENVIRONMENT. Read this first.**
+>
+> `RESEND_API_KEY` **is set** on the default (preview-bound) Worker, and has
+> been since deliverability testing. The deployed `steward` Worker on
+> `apply.houstontexansfoundation.org` sends real email to real addresses. It
+> was proven on 2026-09-30 by a live magic link delivered to mail-tester.
+>
+> So the safety property below — "a preview run cannot mail a real applicant"
+> — **is gone for the deployed default environment**. It still holds for a
+> local `wrangler dev` run and for the test suite, neither of which has the
+> key.
+>
+> What this costs: any e2e harness driven against the deployed default Worker
+> mails whatever address it is given. The harnesses use `@example-*.org`
+> fixtures that bounce harmlessly, but a real address typed into one of them
+> reaches a real person.
+>
+> Once production exists, the default environment should have its key
+> **removed** and testing should move to a surface that cannot mail anyone.
+> Tracked in `docs/ROADMAP.md`.
+
+`RESEND_API_KEY` was originally **unset in preview and staging**, and that
+absence was a safety property rather than an oversight:
 
 - With no key, `transportFor()` returns null, `sendEmail()` records every send
-  as `suppressed` in `email_messages`, and nothing is called. A preview run or
-  a test cannot mail a real applicant.
+  as `suppressed` in `email_messages`, and nothing is called. A run without a
+  key cannot mail a real applicant. This still describes local development and
+  the test suite. It no longer describes the deployed default Worker.
 - Staging additionally sets `EMAIL_FROM = ""`, so a send there throws rather
   than delivering. Staging holds the friendly-organization fixtures, whose
   addresses reach real people.

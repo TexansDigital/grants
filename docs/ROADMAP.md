@@ -585,3 +585,20 @@ numbers are ordering, not reservations.)
   **Reversed.** It was built: every field on it was already recorded for
   another reason, so it cost no extra data entry, and it partly serves the
   external reporting that is manual today.
+
+## Remove RESEND_API_KEY from the default environment after cutover
+
+The deployed default Worker (`steward`, bound to `steward-preview`) has a live
+Resend key and sends real email to real addresses. That was needed to test
+deliverability against the real DNS, and it is fine while the only people
+being mailed are us.
+
+It removes a stated safety property: `docs/SECRETS.md` claimed a preview run
+could not mail a real applicant. It can. An e2e harness driven against the
+deployed default Worker mails whatever address it is handed.
+
+Once production is live, unset the key on the default environment
+(`npx wrangler secret delete RESEND_API_KEY --env ""`) so the testing surface
+is once again incapable of reaching a real person, and email testing happens
+deliberately against production or a staging environment that holds only
+fixtures.
