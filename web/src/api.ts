@@ -499,7 +499,7 @@ export interface StaffReport {
     adminFeedback: string | null;
     acceptedAt: string | null;
     answers: { fieldKey: string; label: string; display: string | null }[];
-    metrics: { metricKey: string; label: string; display: string | null }[];
+    metrics: { metricKey: string; label: string; display: string | null; metricType: string }[];
     attachments: { id: string; filename: string; sizeBytes: number }[];
   }[];
 }

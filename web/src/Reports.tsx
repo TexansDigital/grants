@@ -252,6 +252,34 @@ function ReportDetail({
   const [error, setError] = useState<ApiError | null>(null);
   const [feedback, setFeedback] = useState('');
   const [decision, setDecision] = useState<Decision>({ kind: 'idle' });
+  const [fetching, setFetching] = useState<string | null>(null);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
+
+  /*
+   * Open a file a grantee attached.
+   *
+   * This screen listed filenames and sizes as plain text, so a reviewer could
+   * see that three photographs existed and had no way to look at any of them.
+   * The endpoint has been there since 0017; this view simply never called it.
+   *
+   * Same shape as ApplicationDetail: the Worker mints a short-lived signed URL
+   * and the browser navigates to it. R2's Content-Disposition makes that a
+   * save rather than a navigation, so the tab closes itself.
+   */
+  async function download(attachmentId: string): Promise<void> {
+    setFetching(attachmentId);
+    setDownloadError(null);
+    try {
+      const grant = await api.downloadUrl(attachmentId);
+      window.location.assign(grant.url);
+    } catch (e) {
+      setDownloadError(
+        e instanceof ApiError ? e.message : 'That file could not be opened. Try again.',
+      );
+    } finally {
+      setFetching(null);
+    }
+  }
 
   useEffect(() => {
     const controller = new AbortController();
@@ -361,19 +389,52 @@ function ReportDetail({
             </p>
           )}
 
-          {s.metrics.length > 0 && (
+          {/*
+            * NUMBERS GET THE BIG TREATMENT. PROSE DOES NOT.
+            *
+            * Every metric used to render at display scale, so "Enriched
+            * wishes" and "Ethernet" were typeset like headline figures beside
+            * "500 people". The brand's stat tile is for an abbreviated figure
+            * under a short label; a sentence in that slot reads as a mistake,
+            * because it is one.
+            *
+            * Text metrics are not dropped -- they fall through to the list
+            * below with the narrative answers, which is where a sentence
+            * belongs.
+            */}
+          {s.metrics.some((m) => m.metricType !== 'text') && (
             <dl className="facts">
-              {s.metrics.map((m) => (
-                <div key={m.metricKey}>
-                  <dt>{m.label}</dt>
-                  <dd className="bignum">{m.display ?? '—'}</dd>
-                </div>
-              ))}
+              {s.metrics
+                .filter((m) => m.metricType !== 'text')
+                .map((m) => (
+                  <div key={m.metricKey}>
+                    <dt>{m.label}</dt>
+                    <dd className="bignum">{m.display ?? '—'}</dd>
+                  </div>
+                ))}
             </dl>
           )}
 
+          {/*
+            * Everything the grantee wrote, ONCE.
+            *
+            * A metric is also a form field, so every number appeared twice:
+            * as a tile above and again in this list. The tiles are the
+            * canonical rendering for the numeric ones, so those are dropped
+            * here. Metric-backed fields carry the METRIC_FIELD_PREFIX, which
+            * is how a field that came from a metric is told apart from one
+            * somebody wrote into the form.
+            */}
           <dl className="review-list">
-            {s.answers.map((a) => (
+            {s.answers
+              .filter((a) => {
+                if (!a.fieldKey.startsWith('metric_')) return true;
+                const key = a.fieldKey.slice('metric_'.length);
+                const metric = s.metrics.find((m) => m.metricKey === key);
+                // Shown above as a tile, unless it is prose, which is not.
+                return !metric || metric.metricType === 'text';
+              })
+              .map((a) => (
               <div className="review-row" key={a.fieldKey}>
                 <dt>{a.label}</dt>
                 <dd>{a.display ?? <span className="meta">Not answered</span>}</dd>
@@ -382,14 +443,29 @@ function ReportDetail({
           </dl>
 
           {s.attachments.length > 0 && (
-            <ul className="upload-list">
-              {s.attachments.map((f) => (
-                <li key={f.id}>
-                  <span className="upload-name">{f.filename}</span>
-                  <span className="upload-size">{Math.round(f.sizeBytes / 1024)} KB</span>
-                </li>
-              ))}
-            </ul>
+            <>
+              <ul className="upload-list">
+                {s.attachments.map((f) => (
+                  <li key={f.id}>
+                    <span className="upload-name">{f.filename}</span>
+                    <span className="upload-size">{Math.round(f.sizeBytes / 1024)} KB</span>
+                    <button
+                      type="button"
+                      className="btn secondary small"
+                      disabled={fetching === f.id}
+                      onClick={() => void download(f.id)}
+                    >
+                      {fetching === f.id ? 'Preparing…' : 'Open'}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+              {downloadError && (
+                <p className="banner danger" role="alert">
+                  {downloadError}
+                </p>
+              )}
+            </>
           )}
         </article>
       ))}

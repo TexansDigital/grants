@@ -215,7 +215,7 @@ export interface StaffReport {
     adminFeedback: string | null;
     acceptedAt: string | null;
     answers: StaffAnswer[];
-    metrics: { metricKey: string; label: string; display: string | null }[];
+    metrics: { metricKey: string; label: string; display: string | null; metricType: string }[];
     attachments: { id: string; filename: string; sizeBytes: number }[];
   }[];
 }
@@ -337,6 +337,14 @@ export async function readReportForStaff(
         metricKey: m.metric_key,
         label: m.label,
         display: formatMetric(m),
+        /*
+         * The TYPE, not just the value. The staff screen rendered every metric
+         * at display scale, which is right for "500 people" and absurd for a
+         * sentence: "Enriched wishes" arrived typeset like a headline figure.
+         * A number is a stat; prose is prose, and only the server knows which
+         * this is.
+         */
+        metricType: m.metric_type,
       })),
       attachments: (attachmentRows ?? []).map((a) => ({
         id: a.id,
