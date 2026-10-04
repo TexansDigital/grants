@@ -31,7 +31,7 @@ Production is "live" when all thirteen are true. Today: **0 of 13.**
 |---|---|---|---|
 | 1 | `steward-production` migrated clean from empty | **not done** | production has 1 table; see *Checking the databases* |
 | 2 | R2 buckets and KV created and bound | **done** | `npm run check:config` |
-| 3 | Five production secrets set, new signing key | **unknown** | `npx wrangler secret list --env production` |
+| 3 | Five production secrets set, new signing key | **done 2026-10-04** | `npx wrangler secret list --env production` lists all five |
 | 4 | Seeded config only; apps, awards, orgs all 0 | not done | *Checking the databases* |
 | 5 | Deployed, hostnames moved off the default Worker | not done | `npx wrangler deployments list --env production` |
 | 6 | `golive` clean | not done | `npm run golive` |
@@ -52,10 +52,16 @@ Production is "live" when all thirteen are true. Today: **0 of 13.**
 
 ## Blocked on you
 
-1. **Finish the production secrets** (condition 3). Five of them, **one at a
-   time** — `wrangler secret put` reads stdin, so pasting several commands at
-   once feeds the next command line into the previous prompt as its value.
-   Where each value comes from: `docs/SECRETS.md`.
+1. ~~Finish the production secrets.~~ **Done 2026-10-04.** All five present.
+   The signing key was freshly generated, not copied from preview. The R2 key
+   is scoped to `steward-production-files` only, by the reasoning in
+   `docs/R2-UPLOADS.md`.
+
+   One credential was exposed in a screenshot during this and **was rolled**:
+   the first `steward-production` R2 token was deleted and replaced with
+   `steward-production2`. The bucket was empty and nothing was deployed, so
+   nothing was reachable with it.
+
 2. ~~Close `FY26 fall test`.~~ **Done 2026-10-04.** Closed by
    adam.cann@houstontexans.com, audit row `cycle.closed` written with the real
    actor rather than `system`. No cycle is open, so nothing on
