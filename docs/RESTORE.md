@@ -7,8 +7,10 @@ not prove.
 **A backup you have never restored is a hypothesis.** The procedure below has
 been run end to end against a real export taken by the real scheduled handler,
 into an empty database. It has not been run against the *preview* bucket's
-nightly export, and it has never been run against production, which does not
-exist yet.
+nightly export, and it has never been run against production.
+
+Production now exists and holds real grantee records, so the drill below is
+owed. See **Drilling production** at the end.
 
 ---
 
@@ -88,3 +90,69 @@ database with no financial statements behind it.
 
 That the **preview or production** export is restorable. Only a drill against
 that export, pulled from that bucket, says anything about that one.
+
+
+---
+
+# Drilling production
+
+Production carries thirteen organizations' award history and their reports.
+This is the drill that turns the nightly export from a hypothesis into
+something you have seen work.
+
+## Before you can run it at all
+
+**An export has to exist.** `scheduledBackup` runs only from the cron, at
+07:00 UTC -- 2am Central -- and there is no route to trigger it on demand. The
+production Worker was deployed on 2026-10-04, so its first export is the
+morning of 2026-10-05. Until then the backups bucket is empty and the pull
+below will find nothing.
+
+Check before you start:
+
+    npx wrangler r2 object get steward-production-backups/d1/latest.json --file=/tmp/latest.json --remote
+
+A file means there is an export to drill. A 404 means the cron has not run
+yet, or ran and failed -- and the difference matters, so look at the Worker's
+logs rather than assuming the former.
+
+## The drill
+
+    npm run backup:pull -- --out=./export-prod --remote --bucket=steward-production-backups
+    npm run restore -- --from=./export-prod --persist-to=/tmp/steward-prod-drill
+
+The restore refuses any database whose name mentions production and has no
+flag to override it, so this cannot write to the thing it is proving. It
+builds a scratch database somewhere else entirely and loads the export into
+that.
+
+## Then do the part a script cannot
+
+The restore checks row counts against the manifest and that foreign keys
+resolve. Both agree just as happily with an export that is wrong in its
+values. So open the restored database and **recognise something**:
+
+    npx wrangler d1 execute steward-prod-drill --local --persist-to=/tmp/steward-prod-drill --json --command "SELECT o.legal_name, a.awarded_amount_cents, substr(a.awarded_at,1,10) FROM awards a JOIN organizations o ON o.id=a.organization_id ORDER BY o.legal_name"
+
+Thirteen organizations you can name, each at an amount you recognise, all
+awarded 2025-12-03, plus the test award. If a name is wrong or an amount is
+off by a factor of a hundred, the export is wrong and the row counts would
+never have told you.
+
+## What this drill still does not prove
+
+**That R2 still holds the files.** The database stores object keys. A restored
+database pointing at objects that are gone is a restored database with no
+photographs and no financial statements behind it. The export covers D1 only.
+
+**That search works.** Rebuild the index afterwards, against the real
+production hostname, or a reviewer's question gets a confident "no results"
+from an index that reports itself up to date:
+
+    curl -X POST https://grants.houstontexansfoundation.org/api/search/reindex
+
+## When to run it again
+
+After any migration that moves data rather than adding a column, and once a
+year regardless. An export format drifts; the first time you need it is the
+worst time to discover that.
