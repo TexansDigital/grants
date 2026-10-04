@@ -144,37 +144,28 @@ applications, no organizations, no awards and no cycles with data in them.
 node scripts/apply-sql.mjs --file=seeds/inspire-change.sql --db=steward-production --remote
 ```
 
-**D2. Metrics first, then the report form, in the staff UI.**
+**D2. Metrics only. The report form comes AFTER the cutover -- see Phase E4.**
 
-The report form is built FROM the program's metric definitions, so metrics have
-to exist before it is built. Inspire Change had none -- the ones in preview
-belong to the Phase 0 test program -- and a form built from an empty list asks
-for two paragraphs and some photos, with no number anywhere. `funds_spent_cents`
-is resolved from whichever metric claims it, so without metrics every report
-writes NULL and the dashboard shows a dash forever.
-
-Import the metrics, dry run first:
+Import the metrics now, dry run first:
 
 ```
 npm run metrics -- --program=inspire-change --file=docs/metrics-import-template.csv --db=steward-production
 npm run metrics -- --program=inspire-change --file=docs/metrics-import-template.csv --db=steward-production --apply
 ```
 
-Then build the form **in the staff UI**: Configuration, the program, "Build a
-report form from this program's metrics". Read the draft in the table below the
-button, then Publish it.
+**Do not try to build the report form yet.** It is built from the staff UI, and
+until Phase E moves the hostnames the staff UI serves PREVIEW: production
+declares `routes = []` and is not deployed, so no URL reaches it. Pressing the
+button now writes a draft into preview and looks like it worked -- the only
+tell is the question count, since preview's Inspire Change has no metrics and
+produces a four-question form where production produces nine.
 
-Do NOT reach for `scripts/buildReportFormSql.ts` here. That script exists so
-test harnesses, which cannot mint a Cloudflare Access assertion, can write a
-report form without a second hand-rolled copy of the scaffolder. It takes the
-metrics as a JSON argument and defaults to none, so running it by hand
-reproduces the empty-form problem this step exists to fix. `buildReportForm`
-reads `metric_definitions` at request time, which is why the button is right
-and the script is not.
-
-Publishing is one-way: trigger `form_definitions_publish_is_one_way` and the
-`form_fields_no_*_after_publish` family make a published definition immutable.
-Reword anything you want to change while it is still a draft.
+This step has now been wrong four times, each time for a different reason: a
+seed file nothing creates, a builder that exits with a usage error, the right
+tool in the wrong order, and this. The first three came from writing
+instructions from a script's name instead of from running it. This one came
+from forgetting that a UI step cannot precede the deploy that makes the UI
+reach the database it is meant to write to.
 
 **D3. Two admin accounts.** CLAUDE.md treats a single admin as a continuity
 failure, not a preference. `admin:sql` takes the addresses as **arguments** --
@@ -245,6 +236,17 @@ makes the handover explicit rather than a race.
 `grants.houstontexansfoundation.org` follows the hostname, not the Worker, so
 it should carry over — **confirm it, do not assume it**. An unprotected staff
 surface is the worst outcome of this whole runbook. See `docs/ACCESS-SETUP.md`.
+
+**E4. Build and publish the report form.** Only now does the staff UI reach
+production. Configuration, Inspire Change, "Build a report form from this
+program's metrics". The draft must show **nine** questions: two narrative, two
+uploads, and the five metrics. A four-question draft means you are still
+looking at preview -- check the hostname.
+
+Read the draft, then Publish. Publishing is one-way: `form_definitions_publish_is_one_way`
+and the `form_fields_no_*_after_publish` triggers freeze it. Publishing also
+opens every report obligation waiting on a form, which is why it belongs here,
+before any award exists, rather than after the import.
 
 **Verify, in this order:**
 
