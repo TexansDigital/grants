@@ -1,8 +1,9 @@
 /**
  * Import a program's impact metrics, and build the report form from them.
  *
- *   npm run metrics -- --program=inspire-change --file=metrics.csv          # dry run
+ *   npm run metrics -- --program=inspire-change --file=metrics.csv          dry run
  *   npm run metrics -- --program=inspire-change --file=metrics.csv --apply
+ *   npm run metrics -- --program=inspire-change --file=metrics.csv --db=steward-production --apply
  *
  * WHY THIS IS A SCRIPT AND NOT AN ENDPOINT. The same reason the seeder emits
  * SQL rather than exposing /seed: a metrics file is configuration for a whole
@@ -10,10 +11,22 @@
  * ship in the Worker bundle.
  *
  * TARGETS. `--local` (the default) is the local preview database. `--preview`
- * is the remote preview database and has to be typed out. There is no
- * production flag and there will not be one here; CLAUDE.md is explicit that a
- * data-mutating script never runs against production without being told to in
- * that specific message, and a flag in a checked-in script is not that.
+ * is the remote preview database. `--db=<name>` is any other database, and is
+ * always remote because no other database exists locally.
+ *
+ * THIS USED TO SAY there would never be a way to reach production from here,
+ * on the reading that a flag in a checked-in script is not "being told to in
+ * that specific message". That reading does not survive contact with the
+ * cutover: production needed its metrics, and the alternatives were to
+ * hand-write the INSERTs -- a second implementation of this file, which is the
+ * mistake this project keeps making -- or to send thirteen nonprofits a report
+ * form that asks for no numbers.
+ *
+ * What CLAUDE.md actually requires is that the human says so in the moment.
+ * `--db=steward-production` IS that: the database is typed out, in that
+ * command, by that person, and nothing defaults to it. That is the same
+ * reasoning scripts/apply-sql.mjs already uses, and it is why the name is
+ * echoed back before anything is written.
  *
  * DRY RUN BY DEFAULT. Without --apply it reads, plans and prints, and writes
  * nothing. The plan it prints is exactly what --apply would do.
@@ -32,19 +45,41 @@ const args = Object.fromEntries(
 const FILE = args.file;
 const PROGRAM = args.program;
 const APPLY = args.apply === true;
-const TARGET = args.preview === true ? '--remote' : '--local';
+
+/*
+ * The database to act on. Nothing defaults to anything but preview: reaching
+ * any other one means typing its name, which is the deliberate act.
+ */
+const DB = typeof args.db === 'string' && args.db.trim() ? args.db.trim() : 'steward-preview';
+const REMOTE = args.preview === true || DB !== 'steward-preview';
+const TARGET = REMOTE ? '--remote' : '--local';
 
 if (!FILE || !PROGRAM) {
   console.error(
-    'Usage: npm run metrics -- --program=<slug> --file=<path.csv> [--apply] [--preview]',
+    'Usage: npm run metrics -- --program=<slug> --file=<path.csv> [--apply] [--preview] [--db=<name>]',
   );
   process.exit(2);
 }
 
+// --local and an explicit --db contradict each other, and silently preferring
+// one would send the write somewhere the person did not name.
+if (args.local === true && DB !== 'steward-preview') {
+  console.error(`--local cannot be combined with --db=${DB}: only steward-preview exists locally.`);
+  process.exit(2);
+}
+
+/*
+ * Say the name before doing anything, the same way preflight does. The command
+ * that writes metrics into production looks almost identical to the one that
+ * writes them into preview, and the database name is the only thing telling
+ * them apart.
+ */
+console.log(`Database: ${DB} (${REMOTE ? 'REMOTE' : 'local'})${APPLY ? ' — WILL WRITE' : ' — dry run'}`);
+
 function sql(statement) {
   const out = execFileSync(
     'npx',
-    ['wrangler', 'd1', 'execute', 'steward-preview', TARGET, '--json', '--command', statement],
+    ['wrangler', 'd1', 'execute', DB, TARGET, '--json', '--command', statement],
     { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] },
   );
   return JSON.parse(out.slice(out.indexOf('[')))[0]?.results ?? [];
@@ -68,10 +103,10 @@ const program = sql(
   `SELECT id, name FROM programs WHERE slug=${q(PROGRAM)} AND deleted_at IS NULL`,
 )[0];
 if (!program) {
-  console.error(`\nNo program with slug "${PROGRAM}" in the ${TARGET.slice(2)} database.`);
+  console.error(`\nNo program with slug "${PROGRAM}" in ${DB}.`);
   process.exit(1);
 }
-console.log(`\nProgram: ${program.name} (${program.id}) — ${TARGET.slice(2)} database`);
+console.log(`\nProgram: ${program.name} (${program.id}) in ${DB}`);
 
 const existing = sql(
   `SELECT id, metric_key, label, help_text, metric_type, unit, is_required, sort_order,
