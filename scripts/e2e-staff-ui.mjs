@@ -274,23 +274,52 @@ const TYPES = {
   '.css': 'text/css; charset=utf-8',
   '.map': 'application/json',
   '.ico': 'image/x-icon',
+  // The bullhead in the masthead. Without this it is served as
+  // application/octet-stream, which a browser will not paint as an image, and
+  // the harness would show a broken mark on a page it reported as fine.
+  '.png': 'image/png',
+  '.svg': 'image/svg+xml',
+  '.jpg': 'image/jpeg',
+  '.webp': 'image/webp',
 };
 
 function serveAssets(root) {
   const server = createServer((req, res) => {
     const path = new URL(req.url, 'http://x').pathname;
-    // Every route is client-side, so anything that is not a real file is the
-    // shell -- exactly what the Worker's static-asset handler does.
-    const file = path.startsWith('/assets/') ? join(root, normalize(path)) : join(root, 'index.html');
-    readFile(file)
+    /*
+     * A REAL FILE IF THERE IS ONE, the shell otherwise -- which is what the
+     * Worker's static-asset handler does and what this comment always claimed.
+     *
+     * It used to serve only /assets/* and hand back index.html for everything
+     * else. That was indistinguishable from correct while index.html and the
+     * hashed bundle were the only files in ./public. The moment a static file
+     * landed beside them -- /bullhead.png -- the harness answered an image
+     * request with HTML, and the browser showed a broken image on a page the
+     * harness reported as fine.
+     *
+     * The traversal guard matters because the path now reaches the filesystem
+     * for any request, not just ones under a fixed prefix.
+     */
+    const candidate = join(root, normalize(path));
+    const wanted = candidate.startsWith(root) && path !== '/' ? candidate : join(root, 'index.html');
+    readFile(wanted)
       .then((body) => {
-        res.writeHead(200, { 'content-type': TYPES[extname(file)] ?? 'application/octet-stream' });
+        res.writeHead(200, { 'content-type': TYPES[extname(wanted)] ?? 'application/octet-stream' });
         res.end(body);
       })
-      .catch(() => {
-        res.writeHead(404, { 'content-type': 'text/plain' });
-        res.end('not found');
-      });
+      .catch(() =>
+        // Not a file on disk, so it is a client-side route: serve the shell.
+        readFile(join(root, 'index.html')).then(
+          (body) => {
+            res.writeHead(200, { 'content-type': 'text/html' });
+            res.end(body);
+          },
+          () => {
+            res.writeHead(404, { 'content-type': 'text/plain' });
+            res.end('not found');
+          },
+        ),
+      );
   });
   return new Promise((resolve) => {
     server.listen(0, '127.0.0.1', () => resolve({ server, port: server.address().port }));
