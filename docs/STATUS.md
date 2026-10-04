@@ -29,7 +29,7 @@ Production is "live" when all thirteen are true. Today: **0 of 13.**
 
 | # | Condition | State | How to check |
 |---|---|---|---|
-| 1 | `steward-production` migrated clean from empty | **not done** | production has 1 table; see *Checking the databases* |
+| 1 | `steward-production` migrated clean from empty | **done 2026-10-04** | 27 migrations, schema identical to preview: 41 tables, 95 indexes, 102 triggers in both |
 | 2 | R2 buckets and KV created and bound | **done** | `npm run check:config` |
 | 3 | Five production secrets set, new signing key | **done 2026-10-04** | `npx wrangler secret list --env production` lists all five |
 | 4 | Seeded config only; apps, awards, orgs all 0 | not done | *Checking the databases* |
