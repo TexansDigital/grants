@@ -77,14 +77,73 @@ function record(state, name, detail) {
 }
 
 /**
- * One SELECT, against steward-preview, and never production.
+ * WHICH DATABASE ANSWERS THE HOSTNAME WE ARE CHECKING?
+ *
+ * This script already learned once that the database must follow the surface;
+ * the comment above records it dying on a local scratch database while
+ * checking deployed hostnames. That fix made remote-versus-local follow the
+ * surface and left the NAME hardcoded to steward-preview, which was true only
+ * for as long as the preview Worker served those hostnames.
+ *
+ * At the cutover it stopped being true, and the script cheerfully reported
+ * preview's state under production's hostnames -- including "all 1 published
+ * report form(s) have a media field" when production had none at all. Green,
+ * confident, and about a different system.
+ *
+ * So the name is derived rather than written down: find the environment in
+ * wrangler.toml whose routes claim the staff hostname, and read its
+ * database_name. Move the hostname again and this follows, because the thing
+ * it reads is the same declaration that moved.
+ */
+function databaseForStaffHost(host) {
+  let toml;
+  try {
+    toml = readFileSync(new URL('../wrangler.toml', import.meta.url), 'utf8');
+  } catch {
+    return null;
+  }
+  const envs = new Map([['', { routes: [], db: null }]]);
+  let current = '';
+  for (const line of toml.split(/\r?\n/)) {
+    const header = /^\s*\[+\s*env\.([A-Za-z0-9_-]+)/.exec(line);
+    if (header) {
+      current = header[1];
+      if (!envs.has(current)) envs.set(current, { routes: [], db: null });
+      continue;
+    }
+    if (/^\s*\[/.test(line) && !/^\s*\[+\s*env\./.test(line)) current = '';
+    const bucket = envs.get(current);
+    if (!bucket) continue;
+    const route = /pattern\s*=\s*"([^"]+)"/.exec(line);
+    if (route) bucket.routes.push(route[1]);
+    const db = /^\s*database_name\s*=\s*"([^"]+)"/.exec(line);
+    if (db && !bucket.db) bucket.db = db[1];
+  }
+  for (const [, v] of envs) {
+    if (host && v.routes.includes(host) && v.db) return { db: v.db, derived: true };
+  }
+  return { db: envs.get('')?.db ?? null, derived: false };
+}
+
+const STAFF_HOST = (() => {
+  try {
+    return STAFF ? new URL(STAFF).host : null;
+  } catch {
+    return null;
+  }
+})();
+const PICKED = databaseForStaffHost(STAFF_HOST);
+const DB = PICKED.db ?? 'steward-preview';
+
+/**
+ * One SELECT, against whichever database serves the surface being checked.
  *
  * Returns { ok, rows, error } and THROWS NOTHING. Every caller is a check, and
  * a check that cannot run is a check whose answer is "unknown" -- it is not a
  * reason to abandon the other fifteen.
  */
 function sql(statement) {
-  const flags = ['d1', 'execute', 'steward-preview', remoteDb ? '--remote' : '--local',
+  const flags = ['d1', 'execute', DB, remoteDb ? '--remote' : '--local',
                  '--json', '--command', statement];
   try {
     const out = execFileSync('npx', ['wrangler', ...flags],
@@ -112,7 +171,20 @@ async function head(url) {
 console.log(`\nSteward — go-live check\n`);
 console.log(`  applicant surface : ${APPLY}`);
 console.log(`  staff surface     : ${STAFF ?? '(not checked locally)'}`);
-console.log(`  database          : steward-preview ${remoteDb ? '(remote preview)' : '(local)'}\n`);
+/*
+ * Say which it is AND how it was chosen. "Derived" means an environment
+ * actually claims this hostname; "fallback" means none does and this is the
+ * default environment's database, which is a guess and should read like one.
+ */
+console.log(
+  `  database          : ${DB} ${remoteDb ? '(remote)' : '(local)'}` +
+    (PICKED.derived
+      ? ` — the environment whose routes claim ${STAFF_HOST}`
+      : STAFF_HOST
+        ? ` — FALLBACK: no environment declares ${STAFF_HOST}, so this is the default environment's`
+        : ' — the default environment') +
+    '\n',
+);
 
 // ---------------------------------------------------------------------------
 // The hostnames
