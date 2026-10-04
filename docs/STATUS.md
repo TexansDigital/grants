@@ -32,8 +32,8 @@ Production is "live" when all thirteen are true. Today: **0 of 13.**
 | 1 | `steward-production` migrated clean from empty | **done 2026-10-04** | 27 migrations, schema identical to preview: 41 tables, 95 indexes, 102 triggers in both |
 | 2 | R2 buckets and KV created and bound | **done** | `npm run check:config` |
 | 3 | Five production secrets set, new signing key | **done 2026-10-04** | `npx wrangler secret list --env production` lists all five |
-| 4 | Seeded config only; apps, awards, orgs all 0 | not done | *Checking the databases* |
-| 5 | Deployed, hostnames moved off the default Worker | not done | `npx wrangler deployments list --env production` |
+| 4 | Seeded config only; apps, awards, orgs all 0 | **done 2026-10-04** | 1 program, 2 stages, 2 forms, 2 admins, 5 metrics; apps/awards/orgs all 0 |
+| 5 | Deployed, hostnames moved off the default Worker | **done 2026-10-04** | version 9878ea38; wrangler reassigned both custom domains from steward to steward-production |
 | 6 | `golive` clean | not done | `npm run golive` |
 | 7 | Access challenges `grants.` in a private window | not done | open it in a private window; you must be challenged |
 | 8 | `apply.` serving, no open cycles | partly — preview has no open cycle; production not deployed | open `apply.houstontexansfoundation.org` |
