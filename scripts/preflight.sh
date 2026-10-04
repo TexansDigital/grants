@@ -119,10 +119,23 @@ if (id !== pid) {
 
 echo
 bold "Production"
-if grep -q 'FILL_IN_AT_DEPLOY_TIME_DO_NOT_COMMIT' wrangler.toml; then
-  ok "production bindings are still placeholders — no production id is committed"
+# Production ids ARE committed now, deliberately: an id is an identifier, not a
+# credential. This used to warn on any real value, which turned into a warning
+# printed on every run for a state that is correct -- and a warning nobody can
+# act on is a warning people learn to scroll past.
+#
+# What is worth saying is which production resources a --env production command
+# would reach, and whether any of them is still unfilled.
+prod_block=$(sed -n '/^\[env.production\]/,$p' wrangler.toml)
+prod_db=$(printf '%s' "$prod_block" | grep -m1 'database_name *=' | cut -d'"' -f2)
+prod_files=$(printf '%s' "$prod_block" | grep -m1 -A2 'FILES' | grep -m1 'bucket_name *=' | cut -d'"' -f2)
+echo "  d1 database    ${prod_db:-(none declared)}"
+echo "  r2 FILES       ${prod_files:-(none declared)}"
+if printf '%s' "$prod_block" | grep -q 'FILL_IN_AT_DEPLOY_TIME_DO_NOT_COMMIT'; then
+  warn "a production binding is still a placeholder. Cutover is unfinished."
 else
-  warn "a production binding has a real value in it. See npm run check:config."
+  ok "every production binding is filled in. npm run check:config enforces that"
+  echo "     none of them names a resource the default environment also uses."
 fi
 
 echo
@@ -131,7 +144,7 @@ cat <<'NOTE'
   Local     --local          hits .wrangler/state in this directory. Safe.
   Preview   --remote         hits the preview database named above. Shared.
   Staging   --env staging    hits steward-staging. Holds real past data.
-  Prod      --env production Refuses to run until a human fills in the ids.
+  Prod      --env production Hits steward-production. Real grantee records.
 
   There is no flag that makes a mistake here reversible, so the rule is:
   read the database name printed above, out loud, before pressing enter.

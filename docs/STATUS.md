@@ -61,11 +61,12 @@ Production is "live" when all thirteen are true. Today: **0 of 13.**
    application against a cycle called "fall test". The Close button was broken
    until 2026-09-30 and is fixed; pressing it is also the proof that the fix
    works.
-3. **Fix the Cloudflare token's KV permission.** `wrangler kv namespace create`
-   failed with Authentication error 10000 while D1 and R2 succeeded with the
-   same credentials, which is what a token missing Workers KV looks like. It
-   was worked around once; it will bite again. `npm run whoami` shows which
-   credential is in use.
+3. ~~Fix the Cloudflare token's KV permission.~~ **Withdrawn. This was wrong.**
+   `npm run whoami` on 2026-10-04 shows the OAuth token carries
+   `workers_kv (write)`, so nothing is missing. The Authentication error 10000
+   on `wrangler kv namespace create --env production` had some other cause,
+   still unknown. The namespace exists, so it no longer blocks anything; it is
+   recorded here only so the wrong diagnosis does not get acted on later.
 
 ## Blocked on Claude
 
