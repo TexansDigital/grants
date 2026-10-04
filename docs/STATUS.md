@@ -34,7 +34,7 @@ Production is "live" when all thirteen are true. Today: **0 of 13.**
 | 3 | Five production secrets set, new signing key | **done 2026-10-04** | `npx wrangler secret list --env production` lists all five |
 | 4 | Seeded config only; apps, awards, orgs all 0 | **done 2026-10-04** | 1 program, 2 stages, 2 forms, 2 admins, 5 metrics; apps/awards/orgs all 0 |
 | 5 | Deployed, hostnames moved off the default Worker | **done 2026-10-04** | version 9878ea38; wrangler reassigned both custom domains from steward to steward-production |
-| 6 | `golive` clean | not done | `npm run golive` |
+| 6 | `golive` clean | **done 2026-10-04** | every automated check green against steward-production; four OPEN items remain, none automatable |
 | 7 | Access challenges `grants.`, and does NOT cover `apply.` | **done 2026-10-04** | staff shell resolved adam.cann as admin, which requires a valid Access JWT; apply. loads with no Access prompt |
 | 8 | `apply.` serving, no open cycles | **done 2026-10-04** | "Nothing is open right now", plus the Tell us about a grant we gave you entry point |
 
@@ -46,7 +46,7 @@ Production is "live" when all thirteen are true. Today: **0 of 13.**
 |---|---|---|---|
 | 9 | Thirteen imported, with an audit row each | not done | *Checking the databases* |
 | 10 | Update request dry-run matched 13, then run | not done | Configuration → Ask past grantees for an update |
-| 11 | A magic link clicked on a phone, from Outlook | not done | do it |
+| 11 | A magic link clicked on a phone, from Outlook, **with a photo attached** | not done | do it — the attachment proves production R2 presigning, which has never run |
 | 12 | Restore drill run against production | not done | `docs/RESTORE.md` |
 | 13 | One grantee claim approved end to end | not done | do it |
 
