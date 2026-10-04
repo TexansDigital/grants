@@ -687,3 +687,26 @@ everything else, because an API client parsing HTML is the worse failure.
 
 Not done now because it changes what every unmatched path returns, and the
 thirteen reports are open. It is a small change made at the wrong moment.
+
+## Connecting a claim to the wrong award cannot be undone in the app
+
+Approving a grantee claim creates or reuses a user, scopes it to the award's
+organization, emails a sign-in link, and generates report periods. There is no
+endpoint that reverses any of it. /api/users does not exist in any form, the
+only deactivation path is junk.ts, and junkOrganization refuses an organization
+holding awards -- correctly, they are financial records.
+
+So an admin who picks the wrong row in "Find the award" has handed an outside
+address access to another nonprofit's award and its reports, and the only way
+back is a hand-written UPDATE against production. The screen says "check the
+award is the right one before you do", which is true and is not a control.
+
+What is missing is small: a disconnect on the decided claim that deactivates
+the user it created, clears granted_user_id and granted_award_id, and writes
+the audit row. Not a hard delete -- the claim and its approval stay on the
+record, because what we want to answer later is "who had access and when",
+not "this never happened".
+
+Worth building before the 2026 cycle, when claims arrive from people none of
+us recognise. Through the pilot the queue is thirteen organizations we know
+by name.
