@@ -19,14 +19,28 @@
   background: var(--steel);
   color: var(--white);
   padding: var(--space-4) var(--space-5);
+  /* The brand's 6px red rule under a section opener. Here it is the one piece
+     of Battle Red on a page a nonprofit reads for an hour: enough to say whose
+     form this is, nowhere near enough to compete with the questions. */
+  border-bottom: 6px solid var(--red);
 }
 .masthead-inner {
   max-width: 1100px;
   margin: 0 auto;
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: var(--space-4);
   flex-wrap: wrap;
+}
+/*
+ * The bullhead. Decorative: the organization is named in the <h1> beside it,
+ * so the mark carries no information a screen reader needs and is hidden from
+ * one rather than announced twice.
+ */
+.masthead .mark {
+  height: 34px;
+  width: auto;
+  flex: none;
 }
 .masthead h1 {
   font-size: var(--step-1);
@@ -35,6 +49,12 @@
 .masthead .program {
   color: rgba(255, 255, 255, 0.72);
   font-size: var(--step--1);
+  /*
+   * Stays beside the title. It was briefly pushed right with margin-left:auto
+   * to make the mark and name read as one lockup -- which it did, and also
+   * made a subtitle look like a navigation item sitting alone at the far edge.
+   * A label that reads as a link is worse than a slightly looser lockup.
+   */
 }
 
 /* ---- layout -------------------------------------------------------------- */

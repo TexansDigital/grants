@@ -55,6 +55,9 @@ export function Shell({
 
       <header className="masthead">
         <div className="masthead-inner">
+          {/* Decorative, as on the applicant masthead: the product is named in
+              the h1 beside it. */}
+          <img className="mark" src="/bullhead.png" alt="" aria-hidden="true" />
           <h1>Steward</h1>
           <nav className="mainnav" aria-label="Sections">
             {NAV.filter((item) => !item.adminOnly || user.role === 'admin').map((item) => (

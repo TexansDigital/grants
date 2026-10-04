@@ -903,6 +903,9 @@ function PortalShell({
     <div className="page">
       <header className="masthead">
         <div className="masthead-inner">
+          {/* Decorative: the organization is named in the h1 beside it, so a
+              screen reader announcing the mark too would say it twice. */}
+          <img className="mark" src="/bullhead.png" alt="" aria-hidden="true" />
           <h1>Houston Texans Foundation</h1>
           <span className="program">{organization ?? heading ?? 'Grant reporting'}</span>
         </div>
