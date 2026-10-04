@@ -144,26 +144,37 @@ applications, no organizations, no awards and no cycles with data in them.
 node scripts/apply-sql.mjs --file=seeds/inspire-change.sql --db=steward-production --remote
 ```
 
-**D2. The report form. STOP HERE AND ASK.**
+**D2. Metrics first, then the report form, in the staff UI.**
 
-`reportform:build` takes four arguments -- `<programId> <formId> <formKey>
-<version>` -- and the program id does not exist until D1 has run. So this step
-cannot be written out in advance: the command has to be built from ids read out
-of the production database after the program is seeded.
+The report form is built FROM the program's metric definitions, so metrics have
+to exist before it is built. Inspire Change had none -- the ones in preview
+belong to the Phase 0 test program -- and a form built from an empty list asks
+for two paragraphs and some photos, with no number anywhere. `funds_spent_cents`
+is resolved from whichever metric claims it, so without metrics every report
+writes NULL and the dashboard shows a dash forever.
 
-Run D1, then ask Claude for the exact command. Claude can read production
-through the Cloudflare connector and will hand back the line with real ids in
-it. It emits SQL to **stdout**, so it is redirected to a file and applied:
+Import the metrics, dry run first:
 
 ```
-npm run reportform:build -- <args Claude gives you> > seeds/report-form.sql
-node scripts/apply-sql.mjs --file=seeds/report-form.sql --db=steward-production --remote
+npm run metrics -- --program=inspire-change --file=docs/metrics-import-template.csv --db=steward-production
+npm run metrics -- --program=inspire-change --file=docs/metrics-import-template.csv --db=steward-production --apply
 ```
 
-Recorded because the first version of this runbook told you to apply a
-`seeds/report-form.sql` that nothing creates, and the second told you to run a
-builder that exits with a usage error. Both were written from the script's
-name rather than from running it.
+Then build the form **in the staff UI**: Configuration, the program, "Build a
+report form from this program's metrics". Read the draft in the table below the
+button, then Publish it.
+
+Do NOT reach for `scripts/buildReportFormSql.ts` here. That script exists so
+test harnesses, which cannot mint a Cloudflare Access assertion, can write a
+report form without a second hand-rolled copy of the scaffolder. It takes the
+metrics as a JSON argument and defaults to none, so running it by hand
+reproduces the empty-form problem this step exists to fix. `buildReportForm`
+reads `metric_definitions` at request time, which is why the button is right
+and the script is not.
+
+Publishing is one-way: trigger `form_definitions_publish_is_one_way` and the
+`form_fields_no_*_after_publish` family make a published definition immutable.
+Reword anything you want to change while it is still a draft.
 
 **D3. Two admin accounts.** CLAUDE.md treats a single admin as a continuity
 failure, not a preference. `admin:sql` takes the addresses as **arguments** --
