@@ -622,3 +622,19 @@ report -- so the hint can name the right next step rather than one of two.
 Same shape as the import summary that counted thirteen organizations as one: a
 line of text beside a button, correct when written, wrong for the data in front
 of the person reading it.
+
+## golive should check bucket CORS, because nothing else can
+
+The production uploads bucket had no CORS rules, so every presigned PUT failed
+preflight. Nothing caught it: it is not in wrangler.toml, no deploy carries it,
+no test can reach a real bucket, and the only symptom is "upload was
+interrupted" in the grantee's browser with the reason in a console.
+
+golive already checks the half of this that lives in the Worker -- "the CSP
+admits uploads to R2" -- and was green while uploads were impossible, because
+the other half lives on the bucket. `wrangler r2 bucket cors list <bucket>` is
+one call and would have said so.
+
+Worth pairing with the CSP check rather than adding separately: both halves
+have to agree for an upload to happen at all, and either alone passing is the
+shape of the fault that shipped.

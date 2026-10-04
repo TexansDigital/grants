@@ -108,6 +108,29 @@ Generate one with:
 openssl rand -base64 48
 ```
 
+**B3. Put CORS on the production uploads bucket.** This is not in
+`wrangler.toml` and no deploy carries it: CORS is bucket-side configuration,
+and a bucket created yesterday has none.
+
+```
+npx wrangler r2 bucket cors set steward-production-files --file=config/r2-cors.json
+```
+
+It works under a plain `wrangler login`; bucket creation needs more, this does
+not. The file is already checked in and already names
+`https://apply.houstontexansfoundation.org`.
+
+Missing this does not fail at deploy, or in any test, or anywhere a log is
+kept. It fails in the grantee's browser, as "upload was interrupted", with the
+real reason only in a console nobody is watching:
+
+```
+blocked by CORS policy: No 'Access-Control-Allow-Origin' header
+```
+
+Found on 2026-10-04 by the single-award test, which is the entire argument for
+running one before thirteen nonprofits do.
+
 **Verify:** `npm run check:config` passes, and
 `npx wrangler secret list --env production` lists all five.
 
