@@ -175,6 +175,20 @@ npm run admin:sql -- first.admin@example.org second.admin@example.org
 node scripts/apply-sql.mjs --file=seeds/admins.sql --db=steward-production --remote
 ```
 
+**Staff access needs TWO things, and the failure between them is silent.**
+`src/lib/auth.ts` takes the email from the Cloudflare Access JWT and looks it
+up in `users`. So a person reaches the staff site only if the Access policy
+admits them AND a `users` row carries that exact address with a staff role.
+Miss either and they get a 404 -- deliberately identical to every other
+rejection, so nobody can enumerate staff by probing, and equally so nobody can
+tell a locked-out colleague why.
+
+The address must match exactly, lowercased. If someone's Access identity
+asserts an alias rather than the address you seeded, the lookup fails and
+looks like an account that does not exist. After seeding, have each admin open
+`grants.houstontexansfoundation.org` themselves and confirm they land inside,
+rather than assuming the row was enough.
+
 **D4. Impact metrics**, if the program's metric definitions are ready.
 
 **Verify:** counts are what you expect and nothing transactional came along.
