@@ -144,15 +144,26 @@ applications, no organizations, no awards and no cycles with data in them.
 node scripts/apply-sql.mjs --file=seeds/inspire-change.sql --db=steward-production --remote
 ```
 
-**D2. The report form.** `reportform:build` writes SQL to **stdout**, not to a
-file, so it has to be redirected. Checked by running it, because the runbook
-originally told you to apply a `seeds/report-form.sql` that nothing ever
-creates.
+**D2. The report form. STOP HERE AND ASK.**
+
+`reportform:build` takes four arguments -- `<programId> <formId> <formKey>
+<version>` -- and the program id does not exist until D1 has run. So this step
+cannot be written out in advance: the command has to be built from ids read out
+of the production database after the program is seeded.
+
+Run D1, then ask Claude for the exact command. Claude can read production
+through the Cloudflare connector and will hand back the line with real ids in
+it. It emits SQL to **stdout**, so it is redirected to a file and applied:
 
 ```
-npm run reportform:build > seeds/report-form.sql
+npm run reportform:build -- <args Claude gives you> > seeds/report-form.sql
 node scripts/apply-sql.mjs --file=seeds/report-form.sql --db=steward-production --remote
 ```
+
+Recorded because the first version of this runbook told you to apply a
+`seeds/report-form.sql` that nothing creates, and the second told you to run a
+builder that exits with a usage error. Both were written from the script's
+name rather than from running it.
 
 **D3. Two admin accounts.** CLAUDE.md treats a single admin as a continuity
 failure, not a preference. `admin:sql` takes the addresses as **arguments** --
