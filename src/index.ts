@@ -580,7 +580,15 @@ const routes: readonly Route[] = [
       '/my-reviews/:id/score',
       '/cycles/:id/letters',
       '/cycles/:id/scorecards',
+      '/cycles/:id/coverage',
       '/dashboard',
+      // The compliance desk and the claims queue. Both were missing, and both
+      // are reached by typing the address far more often than the others:
+      // /reporting is where an admin goes to see what is overdue, and
+      // /past-grantees is where a claim notice sends them. In-app navigation
+      // worked, so the gap was invisible until somebody typed one.
+      '/reporting',
+      '/past-grantees',
     ] as const
   ).map(
     (path) =>

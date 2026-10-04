@@ -669,3 +669,21 @@ A hard block is wrong: a grantee can legitimately spend more than the grant on
 a project the grant part-funded, and refusing their honest number teaches them
 to enter a false one. A warning at entry -- "that is more than the grant; is
 that right?" -- and a flag on the admin review is the proportionate shape.
+
+## A mistyped address returns raw JSON, not a page
+
+A path the Worker has no route for answers with the API's error envelope:
+
+    {"error":{"code":"NOT_FOUND","message":"That page could not be found.", ...}}
+
+Correct for /api/*, wrong for a browser. On apply.<domain> that is what a
+nonprofit sees if they mistype the address printed on a grant application, and
+it reads as a broken site rather than a wrong turn.
+
+The fix is to branch on what the client asked for: an Accept header naming
+HTML, or a path outside /api/, gets the app shell with a 404 status and a
+"that page does not exist" screen with a way back. The envelope stays for
+everything else, because an API client parsing HTML is the worse failure.
+
+Not done now because it changes what every unmatched path returns, and the
+thirteen reports are open. It is a small change made at the wrong moment.
