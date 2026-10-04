@@ -68,10 +68,14 @@ preview_urls = false
 # hostname on this Worker rather than `grants.` alone, then every applicant
 # consumes an Access seat and the 51st is locked out of their own application.
 # That is a one-request check and it cannot be reasoned about from here.
-routes = [
-  { pattern = "grants.houstontexansfoundation.org", custom_domain = true },
-  { pattern = "apply.houstontexansfoundation.org", custom_domain = true }
-]
+# EMPTY SINCE THE CUTOVER on 2026-10-04. Both hostnames moved to
+# [env.production]; the production Worker serves them now.
+#
+# Leaving them declared here would mean the next `npm run deploy:preview` took
+# the live site back, silently and with no error to notice. The preview Worker
+# still exists and still has its own database -- it simply has no public
+# hostname, which is the posture staging has always had.
+routes = []
 
 [observability]
 enabled = true
@@ -292,12 +296,26 @@ id = "a7b016bfcca94300be98cf3f992ba9c8"
 [env.production]
 name = "steward-production"
 
-# EMPTY, like staging, and for the same reason: without this, deploying
-# production REASSIGNS grants.houstontexansfoundation.org away from the Worker
-# currently serving it. The production hostname is a deliberate choice a human
-# makes at cutover, alongside the ids below -- not something inherited by
-# accident from the environment it is meant to replace.
-routes = []
+# THE LIVE HOSTNAMES. Moved here from the default environment at cutover on
+# 2026-10-04, having been deliberately empty until that moment.
+#
+# This list was empty precisely so that deploying production could never
+# reassign a hostname by accident. Filling it in IS the cutover: the deploy
+# that first carries these names takes them from the preview Worker, and the
+# default environment gave them up in the same commit so the handover cannot be
+# reversed by a routine preview deploy.
+#
+# custom_domain = true means wrangler owns the DNS record; there is no A or
+# CNAME to hand-write and nothing to change in the dashboard.
+#
+# Before telling any applicant `apply.`, load it and confirm you get the Steward
+# page and NOT a Cloudflare Access login. The Access application is scoped to a
+# hostname, and if it covers this Worker rather than `grants.` alone then every
+# applicant consumes an Access seat and the 51st is locked out.
+routes = [
+  { pattern = "grants.houstontexansfoundation.org", custom_domain = true },
+  { pattern = "apply.houstontexansfoundation.org", custom_domain = true }
+]
 
 [env.production.vars]
 ENVIRONMENT = "production"
