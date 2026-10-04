@@ -144,19 +144,23 @@ applications, no organizations, no awards and no cycles with data in them.
 node scripts/apply-sql.mjs --file=seeds/inspire-change.sql --db=steward-production --remote
 ```
 
-**D2. The report form.** Build it from the planner rather than re-clicking it
-in the UI, so production gets the same definition the preview database has:
+**D2. The report form.** `reportform:build` writes SQL to **stdout**, not to a
+file, so it has to be redirected. Checked by running it, because the runbook
+originally told you to apply a `seeds/report-form.sql` that nothing ever
+creates.
 
 ```
-npm run reportform:build
+npm run reportform:build > seeds/report-form.sql
 node scripts/apply-sql.mjs --file=seeds/report-form.sql --db=steward-production --remote
 ```
 
 **D3. Two admin accounts.** CLAUDE.md treats a single admin as a continuity
-failure, not a preference. Both are created here, before anyone needs them.
+failure, not a preference. `admin:sql` takes the addresses as **arguments** --
+it writes no file without them, and the resulting seed grants exactly those
+people staff access, so read the list before you run it.
 
 ```
-npm run admin:sql
+npm run admin:sql -- first.admin@example.org second.admin@example.org
 node scripts/apply-sql.mjs --file=seeds/admins.sql --db=steward-production --remote
 ```
 
