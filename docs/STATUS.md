@@ -35,8 +35,8 @@ Production is "live" when all thirteen are true. Today: **0 of 13.**
 | 4 | Seeded config only; apps, awards, orgs all 0 | **done 2026-10-04** | 1 program, 2 stages, 2 forms, 2 admins, 5 metrics; apps/awards/orgs all 0 |
 | 5 | Deployed, hostnames moved off the default Worker | **done 2026-10-04** | version 9878ea38; wrangler reassigned both custom domains from steward to steward-production |
 | 6 | `golive` clean | not done | `npm run golive` |
-| 7 | Access challenges `grants.` in a private window | not done | open it in a private window; you must be challenged |
-| 8 | `apply.` serving, no open cycles | partly — preview has no open cycle; production not deployed | open `apply.houstontexansfoundation.org` |
+| 7 | Access challenges `grants.`, and does NOT cover `apply.` | **done 2026-10-04** | staff shell resolved adam.cann as admin, which requires a valid Access JWT; apply. loads with no Access prompt |
+| 8 | `apply.` serving, no open cycles | **done 2026-10-04** | "Nothing is open right now", plus the Tell us about a grant we gave you entry point |
 
 ### The work itself
 
