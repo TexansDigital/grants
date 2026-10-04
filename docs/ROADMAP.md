@@ -602,3 +602,23 @@ Once production is live, unset the key on the default environment
 is once again incapable of reaching a real person, and email testing happens
 deliberately against production or a staging environment that holds only
 fixtures.
+
+## The import's "Next" hint points at a path that refuses awards without terms
+
+After a successful award import the panel says: "Next: Reporting → Create
+missing report obligations. Until that runs, these grants have no report due
+and no grantee will ever be asked."
+
+True for awards with term dates. False for awards without them, and the 2025
+backfill had none: planReportPeriods returns ok:false with "This award has no
+term dates, so report due dates cannot be worked out", so that path would have
+refused all thirteen and the reason would have arrived thirteen times.
+
+The route that works for them is "Ask past grantees for an update", which takes
+a due date from the admin instead of deriving one from a term. The parser
+already knows which case it is -- it counts term-less awards and says so in the
+report -- so the hint can name the right next step rather than one of two.
+
+Same shape as the import summary that counted thirteen organizations as one: a
+line of text beside a button, correct when written, wrong for the data in front
+of the person reading it.
