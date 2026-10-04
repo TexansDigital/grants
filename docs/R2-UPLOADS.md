@@ -114,6 +114,34 @@ The binding is enough for a Worker reading or writing objects directly. It is
 
 ### An API token for signing
 
+## Scope the access key to the UPLOADS bucket only
+
+The R2 API token that `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY` come from
+should name **only** the bucket this system presigns against. Not the backups
+bucket, and not "all buckets in this account".
+
+Two paths reach R2, and only one of them uses this credential:
+
+- **Presigning** (`src/lib/uploads.ts`) signs SigV4 against `R2_BUCKET_NAME`.
+  This is the only thing the access key is ever used for.
+- **The nightly export** (`src/lib/backup.ts`) writes through `env.BACKUPS`,
+  the Worker binding. A binding authenticates at deploy time and needs no
+  access key at all. The restore drill does not need one either:
+  `scripts/pull-backup.mjs` shells out to wrangler and uses your own login.
+
+So a token that includes the backups bucket grants reach the code never
+exercises -- and that bucket is the one worth protecting most, because a
+single nightly export contains every organization's data. `wrangler.toml`
+keeps FILES and BACKUPS separate for exactly that reason; a credential
+spanning both quietly undoes it.
+
+Leave **Client IP Address Filtering** empty. Workers have no stable egress
+IPs, so an IP restriction makes presigning fail intermittently and present as
+a credential fault.
+
+Permission: **Object Read & Write**. Admin scopes can create and delete
+buckets, which presigning never needs.
+
 Presigning is SigV4 against R2's S3 endpoint. The Worker binding cannot do it;
 it needs an access key pair.
 
