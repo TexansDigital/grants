@@ -638,3 +638,34 @@ one call and would have said so.
 Worth pairing with the CSP check rather than adding separately: both halves
 have to agree for an upload to happen at all, and either alone passing is the
 shape of the fault that shipped.
+
+## A failed upload leaves an attachment row with no parent and no object
+
+The CORS failure on 2026-10-04 left three rows in `attachments` with
+`parent_id` NULL, 7.5 MB of recorded size between them, pointing at R2 keys
+whose objects do not exist -- the preflight was refused, so no PUT was ever
+sent. The row is written when the Worker authorizes the upload; nothing undoes
+it when the browser's PUT never happens or fails.
+
+Two costs. Storage figures count bytes that were never stored, so
+dataHealth and the storage screen overstate. And a file list for that
+organization would show attachments nobody can open.
+
+Worth fixing in whichever direction is honest: either do not write the row
+until the object is confirmed, or sweep rows that have had no parent and no
+confirmed object for some hours. The second is probably right, because the
+row is what the confirm step updates.
+
+## Nothing checks reported spend against the award
+
+The test report recorded funds_spent_cents of 2,500,000 against an award of
+10,000 -- $25,000 spent on a $100 grant. It was accepted without comment.
+
+On a test that is funny. On a real grant it is a mistyped figure that flows
+into committed-versus-disbursed and the executive export, and surfaces as a
+board report that looks wrong months later with no trail back to the typo.
+
+A hard block is wrong: a grantee can legitimately spend more than the grant on
+a project the grant part-funded, and refusing their honest number teaches them
+to enter a false one. A warning at entry -- "that is more than the grant; is
+that right?" -- and a flag on the admin review is the proportionate shape.

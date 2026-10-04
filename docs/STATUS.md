@@ -46,7 +46,7 @@ Production is "live" when all thirteen are true. Today: **0 of 13.**
 |---|---|---|---|
 | 9 | Thirteen imported, with an audit row each | not done | *Checking the databases* |
 | 10 | Update request dry-run matched 13, then run | not done | Configuration → Ask past grantees for an update |
-| 11 | A magic link clicked on a phone, from Outlook, **with a photo attached** | not done | do it — the attachment proves production R2 presigning, which has never run |
+| 11 | A magic link clicked on a phone, from Outlook, with a photo attached | **done 2026-10-04** | link delivered to a shared M365 mailbox, opened on a phone; 3 files uploaded to steward-production-files after bucket CORS was set |
 | 12 | Restore drill run against production | not done | `docs/RESTORE.md` |
 | 13 | One grantee claim approved end to end | not done | do it |
 
