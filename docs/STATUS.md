@@ -36,7 +36,7 @@ Production is "live" when all thirteen are true. Today: **0 of 13.**
 | 5 | Deployed, hostnames moved off the default Worker | not done | `npx wrangler deployments list --env production` |
 | 6 | `golive` clean | not done | `npm run golive` |
 | 7 | Access challenges `grants.` in a private window | not done | open it in a private window; you must be challenged |
-| 8 | `apply.` serving, no open cycles | not done | open `apply.houstontexansfoundation.org` |
+| 8 | `apply.` serving, no open cycles | partly — preview has no open cycle; production not deployed | open `apply.houstontexansfoundation.org` |
 
 ### The work itself
 
@@ -56,11 +56,13 @@ Production is "live" when all thirteen are true. Today: **0 of 13.**
    time** — `wrangler secret put` reads stdin, so pasting several commands at
    once feeds the next command line into the previous prompt as its value.
    Where each value comes from: `docs/SECRETS.md`.
-2. **Close `FY26 fall test`.** It is still open, and every open cycle is
-   publicly listed, so a nonprofit who finds the site can start a real
-   application against a cycle called "fall test". The Close button was broken
-   until 2026-09-30 and is fixed; pressing it is also the proof that the fix
-   works.
+2. ~~Close `FY26 fall test`.~~ **Done 2026-10-04.** Closed by
+   adam.cann@houstontexans.com, audit row `cycle.closed` written with the real
+   actor rather than `system`. No cycle is open, so nothing on
+   `apply.houstontexansfoundation.org` is publicly applyable. This was also the
+   first live exercise of the cycle-close fix, which had never worked before
+   2026-09-30.
+
 3. ~~Fix the Cloudflare token's KV permission.~~ **Withdrawn. This was wrong.**
    `npm run whoami` on 2026-10-04 shows the OAuth token carries
    `workers_kv (write)`, so nothing is missing. The Authentication error 10000
