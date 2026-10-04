@@ -38,6 +38,8 @@ Production is "live" when all thirteen are true. Today: **0 of 13.**
 | 7 | Access challenges `grants.`, and does NOT cover `apply.` | **done 2026-10-04** | staff shell resolved adam.cann as admin, which requires a valid Access JWT; apply. loads with no Access prompt |
 | 8 | `apply.` serving, no open cycles | **done 2026-10-04** | "Nothing is open right now", plus the Tell us about a grant we gave you entry point |
 
+| 8b | Report form published in production | **done 2026-10-04** | version 1, 9 fields, 5 of them linked to metric definitions |
+
 ### The work itself
 
 | # | Condition | State | How to check |
