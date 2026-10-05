@@ -989,3 +989,187 @@ th.num {
   border-top: 1px solid var(--line);
 }
 .request-updates-plan ul { margin: var(--space-2) 0; padding-left: var(--space-5); }
+
+/* --- Claims waiting for a decision ------------------------------------------
+ *
+ * Cards, not table rows. A table invites comparison, and nobody compares
+ * claims -- each is one judgement, made once. Written out as a question so a
+ * first-time user can see that something is being asked of them.
+ */
+.claims {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+/*
+ * NO RED RULE. The first version carried --accent-rule down the left of every
+ * card, which looked deliberate and broke the one colour rule that matters:
+ * Battle Red is for the highest-priority accents and alerts only. A claim
+ * waiting to be read is a queue item, not an alarm, and a screen where
+ * everything is urgent has no way left to say that something is.
+ */
+.claim {
+  border: 1px solid var(--line);
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.claim-head h4 {
+  margin: 0 0 var(--space-1);
+  font-size: var(--step-1);
+}
+
+.claim-head p {
+  margin: 0 0 var(--space-1);
+}
+
+/* What they say the grant was, in their words -- the thing being checked. */
+.claim-says {
+  color: var(--ink);
+}
+
+/* The question, set off from the claim it is about. */
+.claim-step {
+  background: var(--surface-2);
+  border: 1px solid var(--line-2);
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+}
+
+.claim-step h5 {
+  margin: 0;
+  font-size: var(--step-0);
+}
+
+.claim-step p {
+  margin: 0;
+  max-width: 68ch;
+}
+
+.claim-step input {
+  width: min(100%, 32ch);
+}
+
+.claim-award {
+  font-size: var(--step-0);
+  line-height: 1.4;
+}
+
+.claim-note {
+  color: var(--warn-ink);
+}
+
+/* Said where the decision is taken, not in a paragraph at the top of the
+ * page. Somebody about to grant access reads this line or nothing. */
+.claim-actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.claim-consequence {
+  margin: 0;
+  max-width: 68ch;
+  font-size: var(--step--1);
+  color: var(--ink-2);
+}
+
+/* Help that belongs to the control above it, not to the page. */
+.field-hint {
+  margin: 0;
+  max-width: 62ch;
+  font-size: var(--step--1);
+  color: var(--ink-2);
+}
+
+.count {
+  color: var(--ink-3);
+  font-weight: 400;
+}
+
+/* --- InfoTip ----------------------------------------------------------------
+ *
+ * Toggled, never hovered. See web/src/InfoTip.tsx for why.
+ */
+.infotip {
+  display: inline;
+}
+
+.infotip-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.25rem;
+  height: 1.25rem;
+  padding: 0;
+  margin-left: 0.15rem;
+  vertical-align: baseline;
+  border: 1px solid var(--line-control);
+  background: var(--surface);
+  color: var(--blue-ink);
+  font: inherit;
+  font-size: var(--step--1);
+  line-height: 1;
+  cursor: pointer;
+}
+
+.infotip-toggle:hover {
+  background: var(--surface-3);
+}
+
+.infotip-toggle[aria-expanded='true'] {
+  background: var(--blue-fill);
+  border-color: var(--blue-fill);
+  color: var(--white);
+}
+
+/* In flow, so `.table-scroll`'s overflow cannot clip the thing somebody just
+ * asked to read. [hidden] is stated rather than left to the UA default,
+ * because the display below would otherwise beat it. */
+.infotip-body {
+  display: block;
+  max-width: 62ch;
+  margin: var(--space-2) 0;
+  padding: var(--space-3);
+  border-left: 3px solid var(--blue-fill);
+  background: var(--surface-2);
+  font-size: var(--step--1);
+  color: var(--ink-2);
+}
+
+.infotip-body[hidden] {
+  display: none;
+}
+
+/* A worded trigger, for prose. See web/src/InfoTip.tsx for why these are not
+ * question marks: an explanation that opens in flow splits the sentence it
+ * sits inside, and a "?" is only discoverable to somebody already looking. */
+/* Stacked, not side by side. Laid out in a row, opening the first one widens
+ * its flex item to the width of the explanation and shoves the second trigger
+ * across the screen -- the page moving under somebody who only asked a
+ * question. */
+.infotip-row {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+  margin: var(--space-3) 0 0;
+}
+
+.infotip-worded {
+  display: block;
+}
+
+.infotip-toggle.worded {
+  width: auto;
+  height: auto;
+  margin-left: 0;
+  padding: var(--space-1) var(--space-2);
+  text-align: left;
+}

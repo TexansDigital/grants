@@ -414,6 +414,50 @@ describe('the queue', () => {
       .toBeLessThan(decidedIdx);
   });
 
+  /*
+   * WHO DID WE LET IN, answerable from the queue itself.
+   *
+   * The decided list showed the organization name the CLAIMANT typed, which is
+   * the right thing to keep on the record and no use at all for an audit: a
+   * nonprofit writes "Harbor Trust" about an award filed to "Invented Harbor
+   * Trust", and the two differ exactly when somebody should be looking. So the
+   * granted award is joined separately from the guessed one.
+   *
+   * Asserted on a claim whose own wording does NOT match the award, because a
+   * LEFT JOIN that silently resolves to null looks identical to a correct one
+   * when the two names happen to agree.
+   */
+  it('says which award a decided claim was actually connected to', async () => {
+    const funded = await fundedOrg();
+    const body = { ...claimBody(), organizationName: 'A Name Nobody Filed It Under' };
+    await post('/api/public/grantee-claim', body);
+    const claimId = (await db.prepare(`SELECT id FROM grantee_claims WHERE contact_email=?`)
+      .bind(body.email).first<{ id: string }>())!.id;
+    await approveClaim(env(), ctxFor(admin), admin, claimId, { awardId: funded.awardId },
+      { transport: null });
+
+    const row = (await listClaims(db)).find((r) => r.id === claimId)!;
+    expect(row.organizationName, 'the claim keeps the claimant own words')
+      .toBe('A Name Nobody Filed It Under');
+    expect(row.grantedOrganizationName, 'and names the organization the access went to')
+      .toMatch(/^Invented Bayou Alliance/);
+    expect(row.grantedAwardLabel).toMatch(/\$25,000/);
+  });
+
+  it('leaves the granted award empty on a claim nobody connected', async () => {
+    // The other half: a declined claim must not borrow the guessed award and
+    // read as though access was given.
+    const body = claimBody();
+    await post('/api/public/grantee-claim', body);
+    const claimId = (await db.prepare(`SELECT id FROM grantee_claims WHERE contact_email=?`)
+      .bind(body.email).first<{ id: string }>())!.id;
+    await rejectClaim(db, ctxFor(admin), admin, claimId, 'No record.');
+
+    const row = (await listClaims(db)).find((r) => r.id === claimId)!;
+    expect(row.grantedOrganizationName).toBeNull();
+    expect(row.grantedAwardLabel).toBeNull();
+  });
+
   it('is admin only', async () => {
     const res = await worker.fetch(
       new Request(`${ORIGIN}/api/grantee-claims`, { headers: { 'cf-connecting-ip': '203.0.113.9' } }),

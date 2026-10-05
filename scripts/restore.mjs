@@ -341,7 +341,30 @@ console.log('What this establishes: these bytes, from this export, reconstruct a
 console.log('whose row counts match the manifest and whose foreign keys resolve.');
 console.log('');
 console.log('What it does NOT establish: that the rows are CORRECT. Row counts and foreign');
-console.log("keys agree with an export that was wrong in its values too. And a drill run");
-console.log('against a fixture proves the script works, not that the real nightly export is');
-console.log('restorable — that needs a real export, pulled from R2, run through this.');
+console.log("keys agree with an export that was wrong in its values too. Open the database");
+console.log('and recognise something -- a name, an amount -- because no check here can.');
+console.log('');
+/*
+ * WHETHER THIS WAS THE REAL THING, SAID HONESTLY.
+ *
+ * This paragraph used to claim unconditionally that a real-export drill still
+ * had not happened -- printed at the end of runs that had just done one. Its
+ * whole job is to stop somebody over-claiming a green result, and stating the
+ * opposite of what just happened makes them UNDER-claim instead: re-run it for
+ * nothing, or write the condition down as unmet.
+ *
+ * The manifest already knows which it was. scheduledBackup writes a prefix of
+ * d1/<date>/<time>; a fixture has no such shape. So ask, rather than assume.
+ */
+const REAL_EXPORT = /^d1\/\d{4}-\d{2}-\d{2}\//.test(String(manifest.prefix ?? ''));
+if (REAL_EXPORT) {
+  console.log(`These were the real bytes: the export the scheduled handler wrote at`);
+  console.log(`${manifest.startedAt}, under ${manifest.prefix}. That is what makes this a`);
+  console.log('drill rather than a test of the script. It says nothing about any OTHER');
+  console.log("bucket's export -- each one is only proven by restoring that one.");
+} else {
+  console.log('This ran against a FIXTURE, not a scheduled export. That proves the script');
+  console.log('works and nothing about whether the nightly export is restorable. For that,');
+  console.log('pull a real one: npm run backup:pull -- --out=<dir> --remote [--bucket=...]');
+}
 process.exit(failures === 0 ? 0 : 1);

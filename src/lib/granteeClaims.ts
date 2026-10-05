@@ -29,6 +29,7 @@ import { verifyTurnstile } from './turnstile';
 import { checkRateLimit, SIGN_IN_EMAIL_LIMIT, SIGN_IN_IP_LIMIT } from './rateLimit';
 import { generateReportPeriods } from './reportPeriods';
 import { sendEmail, transportFor, type EmailTransport } from './email';
+import { formatCents } from './money';
 import { GRANTEE_CLAIM_RECEIVED, GRANTEE_CLAIM_APPROVED } from './emailTemplates';
 
 export interface ClaimInput {
@@ -267,19 +268,43 @@ export interface ClaimRow {
   matchedAwardId: string | null;
   matchedAwardLabel: string | null;
   grantedAwardId: string | null;
+  /**
+   * The organization the access actually went to, and the award it was on.
+   * Null until a claim is approved. NOT the same as organizationName, which is
+   * whatever the claimant typed -- and when the two differ, that difference is
+   * the thing a reviewer most needs to see.
+   */
+  grantedOrganizationName: string | null;
+  grantedAwardLabel: string | null;
 }
 
 /** GET /api/grantee-claims — the queue, pending first, oldest first within it. */
 export async function listClaims(db: D1Database, status?: string): Promise<ClaimRow[]> {
   const where = status ? `WHERE gc.status = ? AND gc.deleted_at IS NULL` : `WHERE gc.deleted_at IS NULL`;
   const stmt = db.prepare(
+    /*
+     * TWO awards are joined, and they are not the same question.
+     *
+     * matched_* is what the system GUESSED from an EIN. granted_* is what a
+     * reviewer actually connected this person to, and it is the only one that
+     * means anything after a decision -- the Decided list showed the
+     * organization name the CLAIMANT typed, which is right for the record and
+     * useless for "who did we give access to". Somebody auditing this later
+     * needs the award, not the claim's own wording.
+     */
     `SELECT gc.*, o.legal_name AS matched_org_name,
             w.awarded_amount_cents AS matched_amount, w.awarded_at AS matched_awarded_at,
-            p.name AS matched_program
+            p.name AS matched_program,
+            go.legal_name AS granted_org_name,
+            gw.awarded_amount_cents AS granted_amount, gw.awarded_at AS granted_awarded_at,
+            gp.name AS granted_program
        FROM grantee_claims gc
        LEFT JOIN organizations o ON o.id = gc.matched_organization_id
        LEFT JOIN awards w       ON w.id = gc.matched_award_id
        LEFT JOIN programs p     ON p.id = w.program_id
+       LEFT JOIN awards gw      ON gw.id = gc.granted_award_id
+       LEFT JOIN organizations go ON go.id = gw.organization_id
+       LEFT JOIN programs gp    ON gp.id = gw.program_id
        ${where}
       ORDER BY CASE gc.status WHEN 'pending' THEN 0 ELSE 1 END, gc.created_at`,
   );
@@ -305,6 +330,12 @@ export async function listClaims(db: D1Database, status?: string): Promise<Claim
         ? null
         : `${String(r.matched_program ?? 'Grant')} — ${String(r.matched_awarded_at ?? '').slice(0, 4)}`,
     grantedAwardId: r.granted_award_id === null ? null : String(r.granted_award_id),
+    grantedOrganizationName: r.granted_org_name === null ? null : String(r.granted_org_name),
+    grantedAwardLabel:
+      r.granted_award_id === null
+        ? null
+        : `${String(r.granted_program ?? 'Grant')} ${String(r.granted_awarded_at ?? '').slice(0, 4)}` +
+          (r.granted_amount === null ? '' : ` · ${formatCents(Number(r.granted_amount))}`),
   }));
 }
 

@@ -12,12 +12,25 @@
  * it is a decision somebody made rather than a default they scrolled past.
  * matched_award_id comes from an EIN printed on a public tax filing; acting
  * on it automatically would make the guess the decision.
+ *
+ * WHY WAITING IS CARDS AND DECIDED IS A TABLE. This used to be one table for
+ * both, and a foundation manager seeing it for the first time read it as data
+ * rather than as a question being asked of them. A table is for comparing
+ * rows; nobody compares claims. Each one is a separate judgement — is this
+ * really them, and which grant do they mean — made once and not revisited. So
+ * Waiting states the question in words and walks one claim at a time, and
+ * Decided stays a table, because looking back over what was granted IS a scan.
+ *
+ * Every piece of copy here answers something somebody actually got stuck on:
+ * what an EIN match was for, why Connect was greyed out, what the search box
+ * searches, and that declining sends nobody anything.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ReactElement } from 'react';
 import { ApiError, api } from './api';
 import type { GranteeClaimRow, AwardChoice } from './api';
+import { InfoTip } from './InfoTip';
 import { formatCents } from '../../src/lib/money';
 
 interface Props {
@@ -29,6 +42,15 @@ const STATE: Record<string, { label: string; tone: string }> = {
   approved: { label: 'Connected', tone: 'resting' },
   rejected: { label: 'Declined', tone: 'resting' },
 };
+
+/** Said the same way in three places, so it is written once. */
+const EIN_EXPLAINER = (
+  <>
+    An Employer Identification Number: the nine-digit number the IRS gives a
+    nonprofit. It identifies the <em>organization</em>, never a particular
+    grant — so a match tells you who they are, not which award they mean.
+  </>
+);
 
 export function GranteeClaims({ isAdmin }: Props): ReactElement {
   const [claims, setClaims] = useState<GranteeClaimRow[] | null>(null);
@@ -76,8 +98,6 @@ export function GranteeClaims({ isAdmin }: Props): ReactElement {
     }, 250);
     return () => clearTimeout(t);
   }, [query, picking]);
-
-
 
   const load = useCallback(async (signal?: AbortSignal) => {
     try {
@@ -178,181 +198,226 @@ export function GranteeClaims({ isAdmin }: Props): ReactElement {
   const waiting = claims.filter((c) => c.status === 'pending');
   const decided = claims.filter((c) => c.status !== 'pending');
 
+  /** One claim, as the decision it is. */
+  function claimCard(c: GranteeClaimRow): ReactElement {
+    const pick = chosen[c.id];
+    const isPicking = picking === c.id;
+
+    return (
+      <article className="claim" data-claim key={c.id}>
+        {/* 1. WHO IS ASKING, in their own words. */}
+        <header className="claim-head">
+          <h4>{c.organizationName}</h4>
+          <p className="meta">
+            {c.contactName} · {c.contactEmail}
+            {c.contactJobTitle && ` · ${c.contactJobTitle}`}
+          </p>
+          <p className="claim-says">
+            Says we funded them
+            {c.grantYear ? ` in ${c.grantYear}` : ''}
+            {c.grantDescription ? `: “${c.grantDescription}”` : '.'}
+          </p>
+          <p className="meta">
+            {c.ein ? `EIN ${c.ein}` : 'They gave no EIN'}{' '}
+            <InfoTip label="EIN">{EIN_EXPLAINER}</InfoTip>
+          </p>
+        </header>
+
+        {/* 2. THE QUESTION, asked out loud. */}
+        <div className="claim-step">
+          {pick ? (
+            <>
+              <h5>You are about to connect them to</h5>
+              <p className="claim-award">
+                <strong>{pick.organizationName}</strong>
+                <br />
+                {pick.programName} {pick.awardedYear} ·{' '}
+                {formatCents(pick.awardedAmountCents)}
+              </p>
+              {pick.alreadyHeldBy && (
+                <p className="claim-note">
+                  Somebody already has access to this award: {pick.alreadyHeldBy}. Two
+                  people from one nonprofit is ordinary — this is only worth a look.
+                </p>
+              )}
+              {isAdmin && (
+                <button
+                  type="button"
+                  className="btn secondary small"
+                  onClick={() => {
+                    setChosen((p) => {
+                      const next = { ...p };
+                      delete next[c.id];
+                      return next;
+                    });
+                    setPicking(c.id);
+                    setQuery('');
+                  }}
+                >
+                  Change
+                </button>
+              )}
+            </>
+          ) : (
+            <>
+              <h5>Which award is this?</h5>
+              {/*
+                THE EIN RESULT IN PLAIN WORDS. "No match on EIN" stated the
+                outcome of a process nobody had seen, did not say whether it
+                was bad, and did not say what to do next.
+              */}
+              <p className="meta">
+                {c.matchedOrganizationName
+                  ? `Their EIN matches awards for ${c.matchedOrganizationName}. An EIN ` +
+                    'identifies the organization, not the grant, so check which award ' +
+                    'they mean.'
+                  : 'We compared their EIN against the awards on file and nothing ' +
+                    'matched. That is common and not a problem — nonprofits often give ' +
+                    'a slightly different number, or none. Search for the award yourself.'}
+              </p>
+
+              {isPicking ? (
+                <>
+                  <label className="sr-only" htmlFor={`find-${c.id}`}>
+                    Find the award for {c.organizationName}
+                  </label>
+                  <input
+                    id={`find-${c.id}`}
+                    value={query}
+                    autoFocus
+                    placeholder="Organization name or EIN"
+                    onChange={(e) => setQuery(e.target.value)}
+                  />
+                  {/*
+                    THE SENTENCE THAT WOULD HAVE SAVED THE FIRST REAL USER.
+                    The box is seeded with what the CLAIMANT wrote, which reads
+                    as "this is the thing being searched for" -- and it usually
+                    is not what the award is filed under.
+                  */}
+                  <p className="field-hint">
+                    This searches the organization name <em>on the award</em>, or its
+                    EIN — not what they wrote above. One distinctive word finds more
+                    than the full legal name.
+                  </p>
+                  {searching && <p className="meta">Searching…</p>}
+                  {found !== null && found.length === 0 && !searching && (
+                    <p className="meta">
+                      Nothing matches. If this grant predates the system, it has to be
+                      imported before anyone can be connected to it.
+                    </p>
+                  )}
+                  {found && found.length > 0 && (
+                    <p className="field-hint">Choose the award this claim is for:</p>
+                  )}
+                  {found?.map((a) => (
+                    <button
+                      key={a.id}
+                      type="button"
+                      className="btn secondary small"
+                      onClick={() => {
+                        setChosen((p) => ({ ...p, [c.id]: a }));
+                        setPicking(null);
+                        setQuery('');
+                        setFound(null);
+                      }}
+                    >
+                      {a.organizationName} · {a.programName} {a.awardedYear} ·{' '}
+                      {formatCents(a.awardedAmountCents)}
+                      {a.ein ? ` · EIN ${a.ein}` : ''}
+                    </button>
+                  ))}
+                </>
+              ) : (
+                isAdmin && (
+                  <button
+                    type="button"
+                    className="btn secondary small"
+                    onClick={() => {
+                      setPicking(c.id);
+                      setQuery(c.ein ?? c.organizationName);
+                    }}
+                  >
+                    Find the award
+                  </button>
+                )
+              )}
+            </>
+          )}
+        </div>
+
+        {/* 3. THE DECISION, with the consequence stated where it is taken. */}
+        {isAdmin && (
+          <footer className="claim-actions">
+            <p className="claim-consequence" id={`consequence-${c.id}`}>
+              {pick ? (
+                <>
+                  <strong>{c.contactEmail}</strong> will be able to sign in and see this
+                  grant and its reports. There is no way to undo this here.
+                </>
+              ) : (
+                'Choose an award above, and Connect will become available.'
+              )}
+            </p>
+            <div className="row-actions">
+              <button
+                type="button"
+                className="btn small"
+                disabled={busy === c.id || !pick}
+                aria-describedby={`consequence-${c.id}`}
+                onClick={() => void approve(c)}
+              >
+                Connect
+              </button>
+              <button
+                type="button"
+                className="btn secondary small"
+                disabled={busy === c.id}
+                onClick={() => void decline(c)}
+              >
+                Decline
+              </button>
+            </div>
+          </footer>
+        )}
+      </article>
+    );
+  }
+
   return (
     <>
       <section className="panel">
         {heading}
         <p className="meta">
-          Nonprofits telling us we funded them. Approving one connects that email address to
-          an award and lets them sign in and report on it — so check the award is the right
-          one before you do.
+          Nonprofits telling us we funded them, asking to report on it. For each one:
+          find the award they mean, then <strong>connect them to it</strong> — or{' '}
+          <strong>decline</strong>.
+        </p>
+        {/* Underneath, not inside the sentence: an explanation that opens in
+            flow would otherwise split that sentence around itself. */}
+        <p className="infotip-row">
+          <InfoTip label="connecting somebody" trigger="What happens when I connect somebody?">
+            Connecting links that email address to one award. They can then sign in and
+            see that grant and its reports — and nothing belonging to any other
+            organization. It cannot be undone from this screen, so check the award first.
+          </InfoTip>
+          <InfoTip label="declining a claim" trigger="What happens when I decline?">
+            Declining records a reason for whoever reads this next. It sends them
+            nothing, on purpose: “we have no record of funding you” should come from a
+            person who can answer the next question. Somebody still has to tell them.
+          </InfoTip>
         </p>
         {actionError && <p className="banner danger" role="alert">{actionError}</p>}
         {notice && <p className="banner" role="status">{notice}</p>}
       </section>
 
-      <section className="panel">
-        <h3>Waiting</h3>
+      <section className="panel" aria-labelledby="waiting-heading">
+        <h3 id="waiting-heading">
+          Waiting{waiting.length > 0 && <span className="count"> · {waiting.length}</span>}
+        </h3>
         {waiting.length === 0 ? (
           <p className="meta">Nothing is waiting.</p>
         ) : (
-          <div className="table-scroll">
-            <table>
-              <thead>
-                <tr>
-                  <th scope="col">Organization</th>
-                  <th scope="col">Who</th>
-                  <th scope="col">The grant, as they describe it</th>
-                  <th scope="col">The award</th>
-                  {isAdmin && <th scope="col"><span className="sr-only">Actions</span></th>}
-                </tr>
-              </thead>
-              <tbody>
-                {waiting.map((c) => (
-                  <tr key={c.id}>
-                    <th scope="row">
-                      {c.organizationName}
-                      {c.ein && <span className="meta"> · EIN {c.ein}</span>}
-                    </th>
-                    <td>
-                      {c.contactName}
-                      <br />
-                      <span className="meta">{c.contactEmail}</span>
-                      {c.contactJobTitle && <span className="meta"> · {c.contactJobTitle}</span>}
-                    </td>
-                    <td>
-                      {c.grantYear && <strong>{c.grantYear}</strong>}
-                      {c.grantDescription && <p className="meta">{c.grantDescription}</p>}
-                    </td>
-                    <td>
-                      {/*
-                        THE AWARD, CHOSEN. Never a typed id: nobody has one to
-                        hand, so an admin would go and find one in another tab
-                        and paste it -- which is exactly the moment a wrong id
-                        gets pasted, and a wrong id here connects a nonprofit
-                        to somebody else's grant.
-                      */}
-                      {chosen[c.id] ? (
-                        <>
-                          <strong>{chosen[c.id]!.organizationName}</strong>
-                          <p className="meta">
-                            {chosen[c.id]!.programName} {chosen[c.id]!.awardedYear} ·{' '}
-                            {formatCents(chosen[c.id]!.awardedAmountCents)}
-                          </p>
-                          {chosen[c.id]!.alreadyHeldBy && (
-                            <p className="meta">
-                              Somebody already has access to this award:{' '}
-                              {chosen[c.id]!.alreadyHeldBy}
-                            </p>
-                          )}
-                          {isAdmin && (
-                            <button
-                              type="button"
-                              className="btn secondary small"
-                              onClick={() => {
-                                setChosen((p) => {
-                                  const next = { ...p };
-                                  delete next[c.id];
-                                  return next;
-                                });
-                                setPicking(c.id);
-                                setQuery('');
-                              }}
-                            >
-                              Change
-                            </button>
-                          )}
-                        </>
-                      ) : picking === c.id ? (
-                        <>
-                          <label className="sr-only" htmlFor={`find-${c.id}`}>
-                            Find the award for {c.organizationName}
-                          </label>
-                          <input
-                            id={`find-${c.id}`}
-                            value={query}
-                            autoFocus
-                            placeholder="Organization name or EIN"
-                            onChange={(e) => setQuery(e.target.value)}
-                          />
-                          {searching && <p className="meta">Searching…</p>}
-                          {found !== null && found.length === 0 && !searching && (
-                            <p className="meta">
-                              Nothing matches. If this grant predates the system, it has to be
-                              imported before anyone can be connected to it.
-                            </p>
-                          )}
-                          {found?.map((a) => (
-                            <button
-                              key={a.id}
-                              type="button"
-                              className="btn secondary small"
-                              onClick={() => {
-                                setChosen((p) => ({ ...p, [c.id]: a }));
-                                setPicking(null);
-                                setQuery('');
-                                setFound(null);
-                              }}
-                            >
-                              {a.organizationName} · {a.programName} {a.awardedYear} ·{' '}
-                              {formatCents(a.awardedAmountCents)}
-                              {a.ein ? ` · EIN ${a.ein}` : ''}
-                            </button>
-                          ))}
-                        </>
-                      ) : (
-                        <>
-                          {/*
-                            The EIN match is a STARTING POINT for the search,
-                            not an answer. Choosing it is still a click on a
-                            named award below.
-                          */}
-                          <span className="meta">
-                            {c.matchedOrganizationName ?? 'No match on EIN'}
-                          </span>
-                          {isAdmin && (
-                            <>
-                              <br />
-                              <button
-                                type="button"
-                                className="btn secondary small"
-                                onClick={() => {
-                                  setPicking(c.id);
-                                  setQuery(c.ein ?? c.organizationName);
-                                }}
-                              >
-                                Find the award
-                              </button>
-                            </>
-                          )}
-                        </>
-                      )}
-                    </td>
-                    {isAdmin && (
-                      <td className="row-actions">
-                        <button
-                          type="button"
-                          className="btn small"
-                          disabled={busy === c.id || !chosen[c.id]}
-                          onClick={() => void approve(c)}
-                        >
-                          Connect
-                        </button>
-                        <button
-                          type="button"
-                          className="btn secondary small"
-                          disabled={busy === c.id}
-                          onClick={() => void decline(c)}
-                        >
-                          Decline
-                        </button>
-                      </td>
-                    )}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <div className="claims">{waiting.map(claimCard)}</div>
         )}
       </section>
 
@@ -365,9 +430,18 @@ export function GranteeClaims({ isAdmin }: Props): ReactElement {
             <table>
               <thead>
                 <tr>
-                  <th scope="col">Organization</th>
+                  {/* Named at length on purpose: this is the claimant's own
+                      wording, and the next column is what it resolved to. */}
+                  <th scope="col">Organization, as they wrote it</th>
                   <th scope="col">Who</th>
                   <th scope="col">Outcome</th>
+                  {/*
+                    WHAT THE ACCESS ACTUALLY WENT TO. The organization column is
+                    what the CLAIMANT typed, which is right for the record and
+                    no use at all for "who did we let in" -- the two differ
+                    exactly when somebody should be looking.
+                  */}
+                  <th scope="col">Connected to</th>
                   <th scope="col">Note</th>
                 </tr>
               </thead>
@@ -380,6 +454,17 @@ export function GranteeClaims({ isAdmin }: Props): ReactElement {
                       <td><span className="meta">{c.contactEmail}</span></td>
                       <td>
                         <span className="portal-chip" data-tone={state.tone}>{state.label}</span>
+                      </td>
+                      <td>
+                        {c.grantedOrganizationName ? (
+                          <>
+                            {c.grantedOrganizationName}
+                            <br />
+                            <span className="meta">{c.grantedAwardLabel}</span>
+                          </>
+                        ) : (
+                          <span className="meta">Nothing — no access was given</span>
+                        )}
                       </td>
                       <td className="meta">{c.decisionNote ?? ''}</td>
                     </tr>

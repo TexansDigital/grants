@@ -725,3 +725,22 @@ pager to open devtools and type a fetch is not a runbook step, it is a trick.
 It belongs on the data health screen as a button that says what it does, how
 many applications are unindexed right now, and what it will cost -- which is
 also the only place the unindexed count is worth showing.
+
+## The rest of the screens have not had this pass
+
+Past grantees was rebuilt around what a foundation manager is actually being
+asked to do, after the first real user got stuck twice on it in one evening --
+once on a disabled button with no stated reason, once on a search box seeded
+with text that could not match what it searches.
+
+Neither was a knowledge gap. Both were the screen withholding one sentence.
+
+The same read has not been done on Reporting, Pipeline, Configuration or Data
+health, and the same two faults are likely in all of them: controls disabled
+without saying why, and fields whose label does not say what they do. The
+pattern to reuse is here -- state the question in words, explain a disabled
+control where it sits, and put the consequence of an irreversible action
+beside the button rather than in a paragraph at the top.
+
+InfoTip is the component. Worded triggers for prose, a bare "?" only at the
+end of a short label, and never a hover.

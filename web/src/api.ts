@@ -1063,6 +1063,13 @@ export interface GranteeClaimRow {
   matchedAwardId: string | null;
   matchedAwardLabel: string | null;
   grantedAwardId: string | null;
+  /**
+   * What the access ACTUALLY went to, once a claim is approved. Null before
+   * that. Deliberately separate from organizationName, which is whatever the
+   * claimant typed: the two differ exactly when somebody should be looking.
+   */
+  grantedOrganizationName: string | null;
+  grantedAwardLabel: string | null;
 }
 
 /** An award a reviewer can connect a claim to. See src/lib/granteeClaims.ts. */

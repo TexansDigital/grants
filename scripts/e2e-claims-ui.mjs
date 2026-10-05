@@ -60,6 +60,8 @@ const MATCHED = {
   matchedAwardId: 'award-harbor-2024',
   matchedAwardLabel: 'Inspire Change — 2024',
   grantedAwardId: null,
+  grantedOrganizationName: null,
+  grantedAwardLabel: null,
 };
 const UNMATCHED = {
   ...MATCHED,
@@ -80,6 +82,24 @@ const DECIDED = {
   status: 'rejected',
   decidedAt: '2026-09-21T10:00:00.000Z',
   decisionNote: 'No award in our records for this EIN.',
+};
+/*
+ * A claim that WAS connected, and connected to an award filed under a
+ * different name than the claimant typed. That mismatch is the normal case --
+ * "Harbor Trust" writing in about an award to "Invented Harbor Trust, Inc." --
+ * and it is the only reason the Decided list needs to say what access went to.
+ */
+const CONNECTED = {
+  ...MATCHED,
+  id: 'claim-connected',
+  organizationName: 'Harbor Trust',
+  contactEmail: 'ops@example-invented.org',
+  status: 'approved',
+  decidedAt: '2026-09-22T10:00:00.000Z',
+  decisionNote: null,
+  grantedAwardId: 'award-harbor-2024',
+  grantedOrganizationName: 'Invented Harbor Trust',
+  grantedAwardLabel: 'Inspire Change 2024 · $25,000',
 };
 
 /*
@@ -135,7 +155,7 @@ const json = (route, body) =>
 
 /** What the screen sent, so "it used the right award" is observable. */
 const calls = { approve: [], reject: [] };
-let claims = [MATCHED, UNMATCHED, DECIDED];
+let claims = [MATCHED, UNMATCHED, DECIDED, CONNECTED];
 
 async function stubApi(page, { role }) {
   await page.route('**/api/**', async (route) => {
@@ -194,17 +214,29 @@ await page.waitForTimeout(700);
 
 const body = await page.locator('main').innerText();
 check('both waiting claims are listed', /Invented Harbor Trust/.test(body) && /Invented Bayou Alliance/.test(body), true);
-check('a decided one is not in the waiting table',
-  (await page.locator('table').first().innerText()).includes('Invented Reach Collective'), false);
-check('the unmatched claim says so rather than showing nothing',
-  /No match on EIN/.test(body), true);
+check('a decided one is not in the waiting queue',
+  (await page.locator('[data-claim]').allInnerTexts()).join(' ')
+    .includes('Invented Reach Collective'), false);
+/*
+ * THE EIN RESULT, IN WORDS A PROGRAM MANAGER CAN ACT ON. This used to read
+ * "No match on EIN", which states the outcome of a process the reader never
+ * saw, does not say whether it is bad, and does not say what to do next.
+ */
+check('an unmatched claim explains the result and what to do instead',
+  /nothing matched/i.test(body) && /Search for the award yourself/i.test(body), true);
+/*
+ * A DISABLED CONTROL WITH NO REASON READS AS BROKEN. The first real user hit
+ * exactly this and asked why the buttons were greyed out.
+ */
+check('the greyed-out Connect says why it is greyed out',
+  /Choose an award above/i.test(body), true);
 
 /*
  * THE SUGGESTION IS A BUTTON, NOT A DEFAULT. If the award box arrived
  * pre-filled, a reviewer in a hurry approves whatever an EIN printed on a
  * public tax filing pointed at.
  */
-const row = page.locator('tr', { hasText: 'Invented Harbor Trust' });
+const row = page.locator('[data-claim]', { hasText: 'Invented Harbor Trust' });
 check('Connect is disabled until an award is chosen',
   await row.getByRole('button', { name: 'Connect' }).isDisabled(), true);
 
@@ -216,6 +248,14 @@ await page.waitForTimeout(800);
  */
 check('the search starts from the EIN on the claim',
   await page.locator('#find-claim-matched').inputValue(), '001234567');
+/*
+ * The box is seeded with what the CLAIMANT wrote, which reads as "this is
+ * what is being searched for" -- and usually is not what the award is filed
+ * under. The first real user searched the claimant's wording, got nothing,
+ * and concluded the screen was broken.
+ */
+check('and says what it actually searches',
+  /on the award/i.test(await row.innerText()), true);
 
 const options = page.locator('#find-claim-matched ~ button');
 check('both of that organization awards are offered', await options.count(), 2);
@@ -242,7 +282,7 @@ check('and says what happened, including the report period',
  * is ordinary -- but it is always worth seeing before approving, and it is
  * invisible from the claim itself.
  */
-await page.locator('tr', { hasText: 'Invented Bayou Alliance' })
+await page.locator('[data-claim]', { hasText: 'Invented Bayou Alliance' })
   .getByRole('button', { name: 'Find the award' }).click();
 await page.fill('#find-claim-unmatched', 'Invented Harbor Trust');
 await page.waitForTimeout(800);
@@ -251,7 +291,7 @@ check('an award somebody already holds is offered, and flagged once chosen', awa
   await page.locator('#find-claim-unmatched ~ button').nth(1).click();
   await page.waitForTimeout(300);
   return /already has access/.test(
-    await page.locator('tr', { hasText: 'Invented Bayou Alliance' }).innerText(),
+    await page.locator('[data-claim]', { hasText: 'Invented Bayou Alliance' }).innerText(),
   );
 })(), true);
 void held;
@@ -259,7 +299,7 @@ void held;
 
 // --- declining --------------------------------------------------------------
 page.on('dialog', (d) => void d.accept('No award in our records.'));
-await page.locator('tr', { hasText: 'Invented Bayou Alliance' })
+await page.locator('[data-claim]', { hasText: 'Invented Bayou Alliance' })
   .getByRole('button', { name: 'Decline' }).click();
 await page.waitForTimeout(700);
 check('the reason reaches the API', calls.reject.map((c) => c.note), ['No award in our records.']);
@@ -270,17 +310,48 @@ check('the reason reaches the API', calls.reject.map((c) => c.note), ['No award 
 check('and the screen says nobody has been told',
   /has not been told/.test(await page.locator('main').innerText()), true);
 
+/*
+ * WHO DID WE LET IN. The Decided list showed the organization name the
+ * CLAIMANT typed, which is right for the record and no use for an audit: the
+ * two differ exactly when somebody should be looking.
+ */
+const connectedRow = await page.locator('tr', { hasText: 'Harbor Trust' }).last().innerText();
+check('a connected claim names the award the access went to',
+  /Invented Harbor Trust/.test(connectedRow) && /Inspire Change 2024/.test(connectedRow), true);
+check('and a declined one says plainly that nothing was granted',
+  /Nothing — no access was given/.test(
+    await page.locator('tr', { hasText: 'Invented Reach Collective' }).innerText()), true);
+
 check('no uncaught errors', errors, []);
 
 // --- a reviewer -------------------------------------------------------------
-claims = [MATCHED, UNMATCHED, DECIDED];
+claims = [MATCHED, UNMATCHED, DECIDED, CONNECTED];
 const reviewerCtx = await browser.newContext();
 const reviewer = await reviewerCtx.newPage();
 await stubApi(reviewer, { role: 'reviewer' });
 await reviewer.goto(`${base}/past-grantees`, { waitUntil: 'networkidle' });
 await reviewer.waitForTimeout(600);
+/*
+ * EXACT, and it has to be. Playwright matches an accessible name by SUBSTRING
+ * by default, and the panel carries an InfoTip whose name is "What does
+ * connecting somebody mean?" -- which contains "connect". Without exact, this
+ * check counted an explanation as a way to grant access and failed on a build
+ * where the guard was perfectly intact. A test that reports a fault it
+ * invented is worse than no test.
+ */
 check('a reviewer gets no way to connect anybody',
-  await reviewer.getByRole('button', { name: 'Connect' }).count(), 0);
+  await reviewer.getByRole('button', { name: 'Connect', exact: true }).count(), 0);
+check('nor to decline, nor to go looking for an award',
+  [
+    await reviewer.getByRole('button', { name: 'Decline', exact: true }).count(),
+    await reviewer.getByRole('button', { name: 'Find the award', exact: true }).count(),
+  ], [0, 0]);
+/*
+ * But they DO see the queue. Hiding it entirely would tell a reviewer the
+ * screen was broken; what they must not have is the act.
+ */
+check('but still sees the claims themselves',
+  await reviewer.locator('[data-claim]').count(), 2);
 
 await browser.close();
 server.close();
