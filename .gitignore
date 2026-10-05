@@ -20,3 +20,23 @@ seeds/admins.sql
 /public/*
 !/public/.assetsignore
 .metricsbuild.mjs
+
+# Build artifacts from scripts that bundle themselves and run the bundle.
+# .reportform.mjs got committed -- 180 lines of generated code with no source
+# in the repository.
+#
+# IGNORED RATHER THAN DELETED BY THE SCRIPT. A trailing `&& rm` looks like the
+# fix and is not: buildReportFormSql requires arguments, so the bare run that
+# left this behind FAILS, and the cleanup after && never happens. Doing it
+# unconditionally needs `; code=$?; rm; exit $code`, which npm then breaks by
+# appending any `--` arguments after the `exit`. The ignore holds in every one
+# of those cases; a cleanup step holds in one.
+.reportform.mjs
+.cfgcheck.mjs
+
+# Working files from the runbooks. export-prod/ is a production database export
+# -- thirteen organizations' records -- pulled onto a laptop for the restore
+# drill in docs/RESTORE.md. It must never reach the repository.
+export-prod/
+export-preview/
+demo-award.csv
