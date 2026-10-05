@@ -82,6 +82,13 @@ Production is "live" when all thirteen are true. Today: **0 of 13.**
 
 Nothing. The next move is yours.
 
+## Waiting on the Foundation team
+
+Decisions for people, not engineering, collected in **docs/ONBOARDING.md**.
+The one that gates the pilot is the **due date for the 2025 update**: it is
+also the send schedule, because the nightly job mails at 14 days, 3 days and
+on the day, so a date inside two weeks means everybody is emailed tomorrow.
+
 ## Blocked on neither, but owed before the public form
 
 - A **human security review**. Claude cannot certify this and has said so
