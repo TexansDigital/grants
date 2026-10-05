@@ -182,3 +182,34 @@ for it yet; there should be, and it is on the roadmap.
 After any migration that moves data rather than adding a column, and once a
 year regardless. An export format drifts; the first time you need it is the
 worst time to discover that.
+
+---
+
+# What the production drill found
+
+Run 2026-10-05 against `d1/2026-10-05/070101`, the export the scheduled
+handler wrote at 07:01 UTC that morning.
+
+573 rows across 33 tables. Every table held exactly what the manifest claimed,
+102 triggers came off and went back on, no foreign key was left dangling. The
+thirteen organizations and their amounts were read back and recognised, which
+is the half no script can do.
+
+**The run also cost three corrections to this file**, all found by following
+it rather than by reading it:
+
+1. The verification step named the `--persist-to` directory as if it were a
+   database, so the one step that checks the rows are recognisable failed
+   outright.
+2. The reindex step was a curl at a hostname behind Cloudflare Access, which
+   never reaches the handler.
+3. `pull-backup.mjs` refused any bucket whose name contained "prod", so the
+   first command in the drill was rejected by its own script.
+
+That is the argument for drilling a backup rather than trusting one, made
+three times in two days. None of the three was visible from reading the code.
+
+**Still not proven by any of it:** that R2 holds the files those rows point
+at. The export covers D1 only, and a restored database pointing at objects a
+lifecycle rule deleted is a restored database with no financial statements
+behind it.
