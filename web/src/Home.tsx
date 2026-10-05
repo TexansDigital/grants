@@ -293,6 +293,26 @@ function RequestUpdatesPanel({ programId }: { programId: string }): ReactElement
     [programId, from, to, label, due],
   );
 
+  /*
+   * CHANGING A FIELD THROWS THE PLAN AWAY.
+   *
+   * The plan is a statement about the four values that produced it. Leaving it
+   * on screen after one of them changes made the panel lie at the worst
+   * possible moment: the confirm dialog quotes `plan.dueDate` from the dry
+   * run, while the write sends the CURRENT `due`. Run a dry run with one date,
+   * change the date, press the button, and you are asked to confirm a date
+   * that is not the one being written -- against thirteen grants, on an action
+   * that cannot be re-dated afterwards, because a second run skips every award
+   * that already has a period.
+   *
+   * The panel's whole promise is "nothing is written until you have seen the
+   * list". A list computed from values that no longer apply is not that list.
+   */
+  const edit = <T,>(set: (v: T) => void) => (v: T) => {
+    set(v);
+    setState((prev) => (prev.kind === 'idle' ? prev : { kind: 'idle' }));
+  };
+
   const plan = state.kind === 'planned' ? state.plan : null;
   const done = state.kind === 'done' ? state.plan : null;
 
@@ -307,24 +327,24 @@ function RequestUpdatesPanel({ programId }: { programId: string }): ReactElement
       <div className="request-updates-fields">
         <label>
           Grants awarded from
-          <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
+          <input type="date" value={from} onChange={(e) => edit(setFrom)(e.target.value)} />
         </label>
         <label>
           to
-          <input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
+          <input type="date" value={to} onChange={(e) => edit(setTo)(e.target.value)} />
         </label>
         <label>
           What the grantee sees it called
           <input
             type="text"
             value={label}
-            onChange={(e) => setLabel(e.target.value)}
+            onChange={(e) => edit(setLabel)(e.target.value)}
             placeholder="2025 grant update"
           />
         </label>
         <label>
           Due
-          <input type="date" value={due} onChange={(e) => setDue(e.target.value)} />
+          <input type="date" value={due} onChange={(e) => edit(setDue)(e.target.value)} />
         </label>
       </div>
 

@@ -1056,19 +1056,52 @@ async function main() {
       /nothing to fill in until one is/i.test(planText));
     truthy('the due date is the one typed', planText.includes('2027-11-14'));
 
+    /*
+     * CHANGING A FIELD MUST THROW THE PLAN AWAY.
+     *
+     * It did not, and the result was a panel that lied at the only moment it
+     * matters. The confirm dialog quotes the DRY RUN's due date; the write
+     * sends whatever is in the field right now. Dry-run one date, change the
+     * date, press the button, and you confirm a date that is not the one being
+     * committed -- against every grant in the window, on an action that cannot
+     * be re-dated, because a second run skips any award that already has a
+     * period.
+     *
+     * So the list must disappear the moment it stops describing the inputs.
+     */
+    await dates.nth(2).fill('2027-11-21');
+    check('changing the due date retracts the plan',
+      await ask.locator('.request-updates-plan').count(), 0);
+    check('and asks the server for nothing on its own', updateRequestCalls.length, 1);
+
+    await ask.locator('input[type="text"]').fill('2025 grant update, reworded');
+    await ask.getByRole('button', { name: /what this would do/i }).click();
+    await ask.locator('.request-updates-plan').waitFor();
+    truthy('a fresh dry run quotes the NEW date',
+      (await ask.locator('.request-updates-plan').innerText()).includes('2027-11-21'));
+
+    // Put the original wording back, then re-plan, so the assertions below
+    // still describe what an admin would be confirming.
+    await ask.locator('input[type="text"]').fill('2025 grant update');
+    await dates.nth(2).fill('2027-11-14');
+    await ask.getByRole('button', { name: /what this would do/i }).click();
+    await ask.locator('.request-updates-plan').waitFor();
+
     // The confirm is the whole point. Refuse it and nothing must be written.
     pageTz.once('dialog', (d) => void d.dismiss());
     await ask.getByRole('button', { name: /^Ask 2 organizations$/ }).click();
     await pageTz.waitForTimeout(400);
-    check('dismissing the confirm asks for nothing', updateRequestCalls.length, 1);
+    check('dismissing the confirm asks for nothing',
+      updateRequestCalls.filter((c) => !c.dryRun).length, 0);
 
     pageTz.once('dialog', (d) => void d.accept());
     await ask.getByRole('button', { name: /^Ask 2 organizations$/ }).click();
     await ask.locator('[role="status"]').waitFor();
-    check('accepting it sends the real one', updateRequestCalls.map((c) => c.dryRun), [true, false]);
+    check('accepting it sends the real one',
+      updateRequestCalls.filter((c) => !c.dryRun).length, 1);
     check('and it carries the window and the date the admin typed',
-      { from: updateRequestCalls[1].awardedFrom, to: updateRequestCalls[1].awardedTo,
-        due: updateRequestCalls[1].dueDate, label: updateRequestCalls[1].label },
+      (() => { const w = updateRequestCalls.find((c) => !c.dryRun);
+        return { from: w.awardedFrom, to: w.awardedTo, due: w.dueDate, label: w.label }; })(),
       { from: '2025-01-01', to: '2025-12-31', due: '2027-11-14', label: '2025 grant update' });
     truthy('and it says what happened',
       /2 update requests created, due 2027-11-14/i.test(
