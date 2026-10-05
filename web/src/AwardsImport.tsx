@@ -149,9 +149,26 @@ function AwardsImportPanel(): ReactElement {
             sign-in{state.result.usersCreated === 1 ? '' : 's'}.
             {state.result.skipped > 0 && ` ${state.result.skipped} were already here.`}
           </p>
+          {/*
+            WHICH NEXT STEP DEPENDS ON THE FILE, and naming only one of them
+            misdirects most imports.
+
+            "Create missing report obligations" derives a schedule from an
+            award's TERM, so NEEDS_PERIODS_SQL requires term_start and term_end.
+            A spreadsheet of historic grants rarely carries either -- none of
+            the thirteen 2025 Inspire Change awards do -- and for those awards
+            that action finds nothing and does nothing, having just been
+            named as the thing standing between a grantee and ever being asked.
+
+            The route for an award with no term is "Ask past grantees for an
+            update", which takes a due date instead of deriving one.
+          */}
           <p className="meta">
-            Next: Reporting → <strong>Create missing report obligations</strong>. Until that runs,
-            these grants have no report due and no grantee will ever be asked.
+            Nobody is asked for anything yet. Where these grants carry a term,
+            Reporting → <strong>Create missing report obligations</strong> builds the schedule
+            from it. Where they do not — which is usual for historic grants — use
+            Configuration → <strong>Ask past grantees for an update</strong>, which takes a due
+            date rather than working one out.
           </p>
         </div>
       )}
