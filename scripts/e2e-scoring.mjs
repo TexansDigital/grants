@@ -99,6 +99,7 @@ function sheetState(over = {}) {
     comments: { c1: null, c2: null, c3: null },
     completedAt: null,
     conflictDeclaredAt: null,
+    conflictClearedAt: null,
     decided: false,
     saves: [],
     decisions: [],
@@ -109,7 +110,7 @@ function sheetState(over = {}) {
 const totalBp = (state) =>
   CRITERIA.reduce((t, c) => t + (state.scores[c.id] ?? 0) * c.weight_bp, 0);
 
-async function stubApi(page, state, { role = 'reviewer' } = {}) {
+async function stubApi(page, state, { role = 'reviewer', dropConflictCleared = false } = {}) {
   await page.route('**/api/**', async (route) => {
     const url = new URL(route.request().url());
     const p = url.pathname;
@@ -149,6 +150,15 @@ async function stubApi(page, state, { role = 'reviewer' } = {}) {
         totalSoFarBp: totalBp(state),
         completedAt: state.completedAt,
         conflictDeclaredAt: state.conflictDeclaredAt,
+        /*
+         * SENT BECAUSE THE REAL ENDPOINT SENDS IT. src/lib/scoring.ts selects
+         * conflict_cleared_at and always returns it, null when nobody has
+         * cleared the conflict. Leaving it out here made this stub disagree
+         * with the server about the shape of its own response, and the sheet
+         * then rendered as "decided" rather than "blocked" -- a failure that
+         * said nothing about the product.
+         */
+        ...(dropConflictCleared ? {} : { conflictClearedAt: state.conflictClearedAt ?? null }),
         editable: !state.decided && state.conflictDeclaredAt === null,
       });
     }
@@ -417,6 +427,31 @@ async function main() {
       true,
     );
     await ctxC.close();
+
+    /*
+     * THE SAME CONFLICT, WITH THE CLEARED FIELD ABSENT RATHER THAN NULL.
+     *
+     * Written strictly, `undefined === null` is false, the block reads as
+     * "cleared", and a reviewer who declared a conflict is handed a scoring
+     * sheet that works. It looks entirely normal, which is what makes it the
+     * worst direction for this check to fail in.
+     *
+     * The field is deleted rather than set, because that is the shape an
+     * older client, a partial response or a trimmed payload actually has.
+     */
+    const ctxU = await browser.newContext();
+    const pageU = await ctxU.newPage();
+    await stubApi(pageU, sheetState({ conflictDeclaredAt: '2026-08-10T12:00:00.000Z' }), {
+      dropConflictCleared: true,
+    });
+    await pageU.goto(`${base}/my-reviews/ra1/score`);
+    await pageU.getByText('You declared a conflict on this application').waitFor();
+    check(
+      'a conflict still blocks when the cleared field is absent, not null',
+      await pageU.locator('input[id^="score-"]:not([disabled])').count(),
+      0,
+    );
+    await ctxU.close();
 
     // ---- a reviewer sees no comparison ------------------------------------
     const ctxR = await browser.newContext();

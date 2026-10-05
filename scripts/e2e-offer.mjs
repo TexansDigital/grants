@@ -93,6 +93,9 @@ async function stubApi(page, s) {
     if (p === '/api/grantee/home') {
       return json(route, {
         organization: { name: 'Invented Chorus' },
+        // The real endpoint always sends this (src/lib/granteeRoutes.ts), and
+        // the portal renders an applications section from it.
+        applications: [],
         awards: s.answered
           ? [
               {
@@ -126,6 +129,14 @@ async function stubApi(page, s) {
       s.answered = true;
       return json(route, { awardId: 'w1', declinedAt: new Date().toISOString() });
     }
+    /*
+     * ANYTHING ELSE GETS AN EMPTY ENVELOPE, and that is the point: it is the
+     * shape a 200 takes when something upstream has gone wrong without
+     * failing. The portal is expected to survive it -- /api/public/cycles
+     * lands here, and the page used to crash on the undefined list that came
+     * back. Do not "fix" this by stubbing every endpoint; the fallback is a
+     * test of the client's nerve.
+     */
     return json(route, {});
   });
 }

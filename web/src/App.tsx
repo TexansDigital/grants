@@ -452,8 +452,21 @@ export function App(): ReactElement {
             publicApi.cycles(signal).catch(() => ({ cycles: [] as OpenCycle[] })),
           ]);
           setPortal(home);
-          setPendingAwards(offers.awards);
-          setPortalCycles(cycles.cycles);
+          /*
+           * DEFENDED, like `portal.applications ?? []` below it.
+           *
+           * The .catch() above only fires on a REJECTION. A 200 carrying an
+           * unexpected body resolves perfectly happily, and then
+           * `cycles.cycles` is undefined, `openCycles.length` throws, and the
+           * whole portal falls into the error boundary -- on the one page a
+           * nonprofit has for filing a report they are being chased for.
+           *
+           * The server always sends these arrays. This is for the day it
+           * does not: a missing list should cost that list's section, never
+           * the page.
+           */
+          setPendingAwards(offers.awards ?? []);
+          setPortalCycles(cycles.cycles ?? []);
         } else if (route?.name === 'report') {
           setReport(await granteeApi.report(route.id, signal));
         }

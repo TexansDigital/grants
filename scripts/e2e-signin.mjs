@@ -39,18 +39,19 @@
  *
  *   npm run dev:applicant
  *
- * THAT SCRIPT LOOKS WRONG AND IS NOT. It sets APPLICANT_BASE_URL to the
- * `grants.` hostname, which in production is the STAFF one. The reason is that
- * `wrangler dev` rewrites every incoming request's URL to the first hostname
- * declared in `routes`, so a Worker running locally sees
- * `http://grants.houstontexansfoundation.org/...` no matter what you typed in
- * the browser. Pointing APPLICANT_BASE_URL at that hostname is therefore how
- * you make local dev present the APPLICANT surface -- and plain `npm run dev`,
- * where the two differ, gives you the staff one.
+ * THAT SCRIPT SETS APPLICANT_BASE_URL TO 127.0.0.1:8787, which is the address
+ * the Worker actually sees. `isApplicantHost` compares the request's host to
+ * that value, so this is what makes local dev present the APPLICANT surface;
+ * plain `npm run dev`, where the two differ, gives you the staff one.
  *
- * Found by probing request.url from inside the Worker after this harness
- * reported the hostname guard inert while its unit tests passed. The guard was
- * correct; the local address was a fiction.
+ * IT USED TO NAME A REAL HOSTNAME, and that was correct at the time: wrangler
+ * dev rewrites an incoming request's URL to the first hostname in `routes`, so
+ * the Worker saw grants.houstontexansfoundation.org whatever you typed. The
+ * production cutover emptied top-level `routes` -- the live hostnames moved to
+ * [env.production] -- and with nothing to rewrite to, the Worker went back to
+ * seeing 127.0.0.1. The guard stayed correct and this harness quietly stopped
+ * exercising it. A config change in one file silently disarmed a test in
+ * another, which is the kind of drift only running the thing finds.
  *
  * Writes invented data only, to the LOCAL preview database.
  */
@@ -117,10 +118,21 @@ const run = async () => {
   const browser = await chromium.launch({ executablePath: BROWSER });
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
 
-  // --- the root path ------------------------------------------------------
+  /*
+   * --- the root path ------------------------------------------------------
+   *
+   * IT LANDS ON /apply, NOT /sign-in, and that is a decision rather than a
+   * drift. A nonprofit typing this address has no account, has been sent no
+   * link, and is not looking for a credentials box; /apply says which
+   * programmes are open, when they close, and carries the route for a past
+   * grantee. Somebody returning to a draft reaches sign-in from there.
+   *
+   * This check asserted /sign-in long after serveRoot stopped sending anyone
+   * there.
+   */
   await page.goto(`${APP}/`, { waitUntil: 'networkidle' });
-  check("'/' lands on the sign-in page", new URL(page.url()).pathname, '/sign-in');
-  truthy('a sign-in heading is shown', await page.isVisible('h2:has-text("Sign in")'));
+  check("'/' lands on the public front door", new URL(page.url()).pathname, '/apply');
+  truthy('and names what it is', await page.isVisible('h2:has-text("Apply for a grant")'));
   truthy(
     'the staff pipeline is NOT rendered here',
     !(await page.isVisible('text=Pipeline')),
@@ -130,7 +142,18 @@ const run = async () => {
     !(await page.isVisible('text=Reload and sign in')),
   );
 
-  // --- readability, the cross-surface bug ---------------------------------
+  /*
+   * --- readability, the cross-surface bug ---------------------------------
+   *
+   * NAVIGATED TO EXPLICITLY. This used to run on whatever '/' had rendered,
+   * which was the sign-in page until serveRoot started sending people to
+   * /apply instead -- after which document.querySelector('.sign-in') returned
+   * null and getComputedStyle threw, taking the whole run down several checks
+   * before it should have ended.
+   */
+  await page.goto(`${APP}/sign-in`, { waitUntil: 'networkidle' });
+  truthy('the sign-in page itself has a heading', await page.isVisible('h2:has-text("Sign in")'));
+
   const contrast = await page.evaluate(() => {
     const card = document.querySelector('.sign-in');
     const label = document.querySelector('label[for="sign-in-email"]');

@@ -201,7 +201,20 @@ export function ScoringSheet({ assignmentId, onBack }: Props): ReactElement {
 
   const unscored = sheet.criteria.filter((c) => c.score === null).length;
   /** Declared and not yet resolved. A resolved disclosure does not block. */
-  const blocked = sheet.conflictDeclaredAt !== null && sheet.conflictClearedAt === null;
+  /*
+   * LOOSE, and deliberately so: `!= null` catches undefined as well as null.
+   *
+   * This is the conflict-of-interest guard. Written strictly, an absent
+   * `conflictClearedAt` reads as "cleared" -- because `undefined === null` is
+   * false -- and the block silently lifts, letting a reviewer who declared a
+   * conflict score the application anyway. That is the worst direction for
+   * this particular check to fail in, and it fails invisibly: the page looks
+   * entirely normal.
+   *
+   * src/lib/reviewAssign.ts already uses the loose form for the same concept.
+   * This now matches it.
+   */
+  const blocked = sheet.conflictDeclaredAt != null && sheet.conflictClearedAt == null;
 
   return (
     <>
