@@ -744,3 +744,26 @@ beside the button rather than in a paragraph at the top.
 
 InfoTip is the component. Worded triggers for prose, a bare "?" only at the
 end of a short label, and never a hover.
+
+## The email logo is unverified from here
+
+Every outgoing email now carries the bullhead from
+https://apply.houstontexansfoundation.org/bullhead.png. That hostname is the
+right one -- grants.<domain> is behind Cloudflare Access and would answer a
+recipient's mail client with a login page instead of a PNG -- but the sandbox
+this was built in cannot reach either hostname, so nobody has confirmed the
+URL actually serves the image.
+
+It is one request to settle, and it has to be made signed OUT, or from a
+machine that has never held an Access session:
+
+    curl -sI https://apply.houstontexansfoundation.org/bullhead.png
+
+A 200 and image/png is the answer. Anything else means every email we send
+has a broken image in it, and it is exactly the fault nobody at the Foundation
+would ever see -- our own browsers carry an Access session, so it would look
+right to us and broken to all thirteen.
+
+The letters are designed so this is cosmetic rather than fatal: the image is
+decorative, carries alt="", and the masthead reads correctly without it. The
+test suite pins the hostname rule; it cannot pin that the file is there.

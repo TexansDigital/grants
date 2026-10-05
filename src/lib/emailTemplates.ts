@@ -11,11 +11,35 @@
  * A grant decision email with an empty organization name is not a rendering
  * bug, it is an outgoing letter with a hole in it.
  *
- * DESIGN: light ground, brand palette, no emoji, no images, no external CSS.
- * Inline styles only -- email clients discard <style> blocks unpredictably, and
- * a stylesheet that does not load must still leave a readable letter. Every
- * template must read correctly as plain text alone, because some recipients
- * will only ever see that version.
+ * DESIGN: light ground, brand palette, no emoji, no external CSS. Inline styles
+ * only -- email clients discard <style> blocks unpredictably, and a stylesheet
+ * that does not load must still leave a readable letter. Every template must
+ * read correctly as plain text alone, because some recipients will only ever
+ * see that version.
+ *
+ * WHICH TEXANS IDENTITY, AND WHY IT IS THE QUIET ONE. The brand carries two:
+ * Steel, which is loud and is the voice of the team, and H-Town, which is the
+ * same system in blue on white and is what the organization uses for partners
+ * and league-facing work. A nonprofit we fund is a partner, not an audience at
+ * a game. H-Town also matches the public application form, which is light by
+ * deliberate decision -- a dark ground under forty fields is a readability
+ * problem, not a brand win -- so an applicant moving between the form and the
+ * confirmation email sees one thing rather than two.
+ *
+ * ONE IMAGE, AND THE LETTER IS WHOLE WITHOUT IT. This file used to say "no
+ * images", which was right about the risk and wrong about the conclusion.
+ * Gmail and Outlook block remote images from an unknown sender by default, so
+ * anything a design NEEDS from an image it does not have. The bullhead is
+ * therefore decorative and nothing else: it is marked alt="" and sits beside a
+ * wordmark set in text, so a blocked image leaves exactly the letter that was
+ * there before. The authority signal that always arrives is the 6px Battle Red
+ * rule, which is the brand's section opener and costs no bytes.
+ *
+ * NO WEB FONTS. The licensed HelveticaNeueLT Extended cuts cannot be used
+ * here: Outlook on Windows renders through Word, which ignores @font-face, and
+ * most of the rest strip it. The brand's own rule is that body copy uses the
+ * system Helvetica stack, so that half already complies; display type is
+ * approximated with uppercase and letter-spacing rather than faked.
  */
 
 /** Brand palette. Kept here rather than imported: this file must stay pure. */
@@ -25,6 +49,32 @@ const BLUE = '#0075b5'; // Brand blue darkened to clear 4.5:1 on white.
 const RULE = '#d7dde2';
 const PAPER = '#ffffff';
 const GROUND = '#f4f6f8';
+/**
+ * Battle Red. Decorative only -- it carries the masthead rule and never text,
+ * so it has no contrast ratio to clear.
+ *
+ * #ED0028 is this repository's value, per CLAUDE.md. The design system's own
+ * readme says #EB0028 for the H-Town theme. Two hex values a hair apart is the
+ * ordinary state of a brand documented in more than one place; this file
+ * follows the project, and somebody should reconcile them once.
+ */
+const RED = '#ed0028';
+
+/**
+ * The bullhead, absolute because an email has no origin to be relative to.
+ *
+ * IT MUST BE THE APPLICANT HOSTNAME. grants.<domain> is behind Cloudflare
+ * Access, which would answer the recipient's mail client with a login page
+ * instead of a PNG -- every image broken, in every email, for everybody
+ * outside the Foundation. apply.<domain> is the hostname nonprofits already
+ * use and is deliberately not behind Access.
+ *
+ * Hard-coded rather than derived from APPLICANT_BASE_URL because this file is
+ * pure by design and takes no env. The cost is that a preview send points at
+ * the production logo, which is a public image on a public hostname and is the
+ * cheaper of the two problems.
+ */
+const LOGO_URL = 'https://apply.houstontexansfoundation.org/bullhead.png';
 
 /**
  * Escape text for HTML.
@@ -94,18 +144,35 @@ interface LayoutParts {
    * Plain text. Escaped here, unlike `blocks`, because a footer is a sentence
    * rather than markup -- and the moment one carries an organization name, an
    * unescaped footer is an injection with nothing to catch it.
+   *
+   * MAY BE EMPTY, and then the row is not drawn at all. Identity is carried by
+   * the stamp underneath it on every letter, so a footer that only repeated
+   * the organization's name printed it twice, one line above the other. A
+   * footer is for a sentence the recipient can act on, or for nothing.
    */
   footer: string;
 }
 
 function layout(parts: LayoutParts): string {
+  // Drawn only when there is a sentence to put in it. An empty bordered strip
+  // above the stamp reads as something that failed to load.
+  const footer = parts.footer.trim()
+    ? `<tr><td style="padding:16px 28px 8px 28px;border-top:1px solid ${RULE};
+                     font-family:Arial,Helvetica,sans-serif;font-size:13px;
+                     line-height:1.5;color:${INK_SOFT};">${escapeHtml(parts.footer)}</td></tr>`
+    : '';
+
+  // Square. The brand's radius is none, 4px at the absolute most for
+  // interactive chrome, and a rounded button is the detail that makes a
+  // careful letter look like it came from a template gallery.
   const action = parts.action
     ? `
         <tr><td style="padding:8px 0 24px 0;">
           <a href="${safeUrl(parts.action.url)}"
              style="display:inline-block;background:${BLUE};color:${PAPER};
-                    text-decoration:none;font-weight:600;font-size:16px;
-                    padding:14px 24px;border-radius:6px;">${escapeHtml(parts.action.label)}</a>
+                    text-decoration:none;font-weight:700;font-size:16px;
+                    letter-spacing:0.04em;text-transform:uppercase;
+                    padding:14px 26px;border-radius:2px;">${escapeHtml(parts.action.label)}</a>
         </td></tr>`
     : '';
 
@@ -123,13 +190,53 @@ function layout(parts: LayoutParts): string {
        style="background:${GROUND};padding:24px 12px;">
   <tr><td align="center">
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
-           style="max-width:560px;background:${PAPER};border:1px solid ${RULE};border-radius:8px;">
-      <tr><td style="background:${INK};padding:20px 28px;border-radius:8px 8px 0 0;">
-        <span style="color:${PAPER};font-family:Arial,Helvetica,sans-serif;
-                     font-size:15px;font-weight:700;letter-spacing:0.02em;">Houston Texans Foundation</span>
+           style="max-width:560px;background:${PAPER};border:1px solid ${RULE};">
+      <!--
+        THE MASTHEAD. Logo and wordmark in one table row rather than one
+        alongside the other, because Outlook does not lay out inline-block and
+        a floated image lands wherever Word decides.
+
+        The image carries explicit width and height: Outlook reserves no space
+        for a remote image without them, so the row collapses and the type
+        jumps when the picture finally loads.
+
+        alt="" and role="presentation" on purpose. The wordmark beside it
+        already says who this is, so an alt text would have a screen reader
+        read the organization twice, and a blocked image would print a grey
+        box of placeholder words across the top of the letter.
+      -->
+      <tr><td style="background:${INK};padding:18px 28px;">
+        <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
+          <td style="padding-right:12px;" valign="middle">
+            <img src="${LOGO_URL}" width="35" height="32" alt=""
+                 style="display:block;border:0;outline:none;text-decoration:none;" />
+          </td>
+          <td valign="middle">
+            <span style="color:${PAPER};font-family:Arial,Helvetica,sans-serif;
+                         font-size:15px;font-weight:700;letter-spacing:0.08em;
+                         text-transform:uppercase;">Houston Texans Foundation</span>
+          </td>
+        </tr></table>
       </td></tr>
+      <!--
+        The brand's section opener, and the only authority signal in this
+        letter that cannot fail to arrive: six pixels of Battle Red, drawn by
+        the mail client out of a background colour, with no image to block and
+        no font to load. It is also the one place red appears -- red is for
+        emphasis, and a letter where everything shouts says nothing.
+      -->
+      <tr><td style="background:${RED};font-size:0;line-height:0;height:6px;">&nbsp;</td></tr>
       <tr><td style="padding:28px;font-family:Arial,Helvetica,sans-serif;color:${INK};">
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+          <!--
+            SENTENCE CASE, deliberately, and it is the one place this letter
+            declines to follow the deck. The brand sets display type uppercase
+            because a slide headline is read across a room in two words. This
+            is a letter to somebody who runs a nonprofit, often about money
+            they were or were not given, and SHOUTING THE SUBJECT AT THEM reads
+            as a notice rather than as a person writing. The brand's own rule
+            agrees: prose is sentence case.
+          -->
           <tr><td style="padding:0 0 12px 0;">
             <h1 style="margin:0;font-size:21px;line-height:1.3;color:${INK};">${escapeHtml(parts.heading)}</h1>
           </td></tr>
@@ -142,9 +249,22 @@ function layout(parts: LayoutParts): string {
           ${action}
         </table>
       </td></tr>
-      <tr><td style="padding:16px 28px 22px 28px;border-top:1px solid ${RULE};
-                     font-family:Arial,Helvetica,sans-serif;font-size:13px;
-                     line-height:1.5;color:${INK_SOFT};">${escapeHtml(parts.footer)}</td></tr>
+      ${footer}
+      <!--
+        The brand's stamp, with // as its separator. Set in the system mono
+        stack because the licensed caption face cannot load here, uppercase and
+        widely tracked the way the source art sets it.
+
+        It is also the practical answer to "is this really from them": the same
+        line, in the same place, on every letter we send. A recipient learns
+        what ours look like, which is worth more against a forgery than any
+        single ornament -- a forger can copy a logo from the website.
+      -->
+      <tr><td style="padding:${parts.footer.trim() ? '0' : '16px'} 28px 20px 28px;
+                     ${parts.footer.trim() ? '' : `border-top:1px solid ${RULE};`}
+                     font-family:Consolas,Menlo,Monaco,'Courier New',monospace;
+                     font-size:11px;letter-spacing:0.18em;text-transform:uppercase;
+                     color:${INK_SOFT};">Houston Texans Foundation // Grants</td></tr>
     </table>
   </td></tr>
 </table>
@@ -1047,7 +1167,7 @@ export const GRANTEE_CLAIM_RECEIVED: EmailTemplate<GranteeClaimReceivedVars> = {
           `<p style="margin:0;">There is nothing else you need to do for now, and you do not
            need to fill the form in again.</p>`,
         ],
-        footer: 'Houston Texans Foundation',
+        footer: '',
       }),
     };
   },
@@ -1105,7 +1225,7 @@ export const GRANTEE_CLAIM_APPROVED: EmailTemplate<GranteeClaimApprovedVars> = {
            remember.</p>`,
         ],
         action: { label: 'Sign in', url: v.signInUrl },
-        footer: 'Houston Texans Foundation',
+        footer: '',
       }),
     };
   },

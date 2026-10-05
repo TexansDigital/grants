@@ -852,6 +852,47 @@ describe('templates', () => {
         /\p{Extended_Pictographic}/u.test(r.subject + r.text + r.html),
         `${k}: contains an emoji`,
       ).toBe(false);
+
+      /*
+       * THE BRAND CHROME, ON EVERY LETTER WITHOUT EXCEPTION.
+       *
+       * Consistency is the authority signal that actually works. A recipient
+       * who has seen four of our emails knows what the fifth should look like,
+       * and that is worth more against a forgery than any single ornament --
+       * a forger can lift a logo off the website in a second.
+       *
+       * The red rule and the stamp are asserted rather than the image, because
+       * these two are drawn from a background colour and a system font: they
+       * arrive even when images are blocked, which for most recipients is the
+       * default.
+       */
+      expect(r.html, `${k}: no Battle Red masthead rule`).toContain('background:#ed0028');
+      expect(r.html, `${k}: no brand stamp`).toContain('Houston Texans Foundation // Grants');
+
+      /*
+       * AND THE IMAGE MUST NOT COME FROM THE STAFF HOSTNAME.
+       *
+       * grants.<domain> is behind Cloudflare Access. An <img> pointing there
+       * is answered with a login page rather than a PNG, so every image in
+       * every email breaks for everybody outside the Foundation -- and never
+       * for us, because our own browsers hold an Access session. It is a fault
+       * that cannot be found by reading your own inbox.
+       */
+      const imgs = [...r.html.matchAll(/<img[^>]+src="([^"]+)"/g)].map((m) => m[1]!);
+      for (const src of imgs) {
+        expect(src, `${k}: image served from the Access-protected hostname`)
+          .not.toMatch(/^https:\/\/grants\./);
+        expect(src, `${k}: image must be absolute https`).toMatch(/^https:\/\//);
+      }
+
+      /*
+       * The letter has to be whole without it. A decorative image carries
+       * alt="", so a blocked image leaves blank space rather than printing a
+       * line of placeholder words across the top of the letter.
+       */
+      for (const tag of r.html.match(/<img[^>]*>/g) ?? []) {
+        expect(tag, `${k}: an image without alt=""`).toContain('alt=""');
+      }
     }
   });
 
