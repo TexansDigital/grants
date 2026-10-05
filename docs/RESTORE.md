@@ -45,9 +45,11 @@ confident no.
 The restore script does not load `application_search_state`, and prints a
 warning naming how many applications are unindexed. Rebuild it:
 
-    curl -X POST https://grants.houstontexansfoundation.org/api/search/reindex
+    await fetch('/api/search/reindex', { method: 'POST' }).then((r) => r.json())
 
-Admin only, behind Access, idempotent, and it writes an audit row. It rebuilds
+Run from the browser console while signed in as an admin -- the route is
+behind Cloudflare Access and curl from a terminal has no session to present.
+Admin only, idempotent, and it writes an audit row. It rebuilds
 every submitted application from what is stored, and clears the index entry of
 anything sitting in draft. Applications it cannot rebuild are listed in the
 response rather than skipped silently.
@@ -132,7 +134,13 @@ The restore checks row counts against the manifest and that foreign keys
 resolve. Both agree just as happily with an export that is wrong in its
 values. So open the restored database and **recognise something**:
 
-    npx wrangler d1 execute steward-prod-drill --local --persist-to=/tmp/steward-prod-drill --json --command "SELECT o.legal_name, a.awarded_amount_cents, substr(a.awarded_at,1,10) FROM awards a JOIN organizations o ON o.id=a.organization_id ORDER BY o.legal_name"
+    npx wrangler d1 execute steward-preview --local --persist-to=/tmp/steward-prod-drill --json --command "SELECT o.legal_name, a.awarded_amount_cents, substr(a.awarded_at,1,10) FROM awards a JOIN organizations o ON o.id=a.organization_id ORDER BY o.legal_name"
+
+THE NAME IS `steward-preview`, NOT the directory. This read the wrong way for
+as long as this file has existed, and it fails outright: wrangler resolves a
+database NAME against wrangler.toml, and `steward-prod-drill` is not in there.
+What isolates the drill is `--persist-to`, which hands wrangler a different
+directory to keep the file in. The name is only how wrangler finds the entry.
 
 Thirteen organizations you can name, each at an amount you recognise, all
 awarded 2025-12-03, plus the test award. If a name is wrong or an amount is
@@ -147,9 +155,17 @@ photographs and no financial statements behind it. The export covers D1 only.
 
 **That search works.** Rebuild the index afterwards, against the real
 production hostname, or a reviewer's question gets a confident "no results"
-from an index that reports itself up to date:
+from an index that reports itself up to date.
 
-    curl -X POST https://grants.houstontexansfoundation.org/api/search/reindex
+NOT WITH curl. The route is behind Cloudflare Access, a terminal has no Access
+session, and the request never reaches the handler. Sign in to Steward as an
+admin, open the browser console, and run:
+
+    await fetch('/api/search/reindex', { method: 'POST' }).then((r) => r.json())
+
+The page already holds the Access cookie, so this is the one place a devtools
+console is the simple answer rather than the clever one. There is no button
+for it yet; there should be, and it is on the roadmap.
 
 ## When to run it again
 

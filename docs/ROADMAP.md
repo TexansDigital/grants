@@ -710,3 +710,18 @@ not "this never happened".
 Worth building before the 2026 cycle, when claims arrive from people none of
 us recognise. Through the pilot the queue is thirteen organizations we know
 by name.
+
+## Rebuilding the search index needs a devtools console
+
+/api/search/reindex is admin-only and behind Cloudflare Access, with no button
+anywhere in the interface. The only way to call it is a fetch typed into the
+browser console while signed in -- curl from a terminal has no Access session
+and never reaches the handler.
+
+That is fine for me and wrong for anybody else. It is needed after any
+restore, and a restore is already a bad day; telling whoever is holding the
+pager to open devtools and type a fetch is not a runbook step, it is a trick.
+
+It belongs on the data health screen as a button that says what it does, how
+many applications are unindexed right now, and what it will cost -- which is
+also the only place the unindexed count is worth showing.
