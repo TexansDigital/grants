@@ -123,6 +123,16 @@ logs rather than assuming the former.
     npm run backup:pull -- --out=./export-prod --remote --bucket=steward-production-backups
     npm run restore -- --from=./export-prod --persist-to=/tmp/steward-prod-drill
 
+THE FIRST COMMAND USED TO BE REFUSED BY ITS OWN SCRIPT. pull-backup.mjs
+rejected any bucket whose name contained "prod", so this runbook said to pass
+`--bucket=steward-production-backups` and the script said no -- the drill was
+unrunnable, and nobody found out until somebody followed these steps.
+
+Reading an export is not writing to production. What CLAUDE.md protects is the
+FILES bucket, which holds applicants' financial statements; that one is still
+refused, and `scripts/lib/buckets.mjs` draws the line by what is in the bucket
+rather than by what its name contains.
+
 The restore refuses any database whose name mentions production and has no
 flag to override it, so this cannot write to the thing it is proving. It
 builds a scratch database somewhere else entirely and loads the export into

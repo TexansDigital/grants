@@ -4,6 +4,13 @@
  *   npm run backup:pull -- --out=./export            (local R2, from wrangler dev)
  *   npm run backup:pull -- --out=./export --remote   (the real preview bucket)
  *   npm run backup:pull -- --out=./export --remote --prefix=d1/2026-09-21
+ *   npm run backup:pull -- --out=./export-prod --remote --bucket=steward-production-backups
+ *
+ * THAT LAST ONE IS ALLOWED, and used to be refused by a guard that read
+ * "production" in the name and stopped. See scripts/lib/buckets.mjs: reading a
+ * database export is the restore drill, reading the FILES bucket would be
+ * pulling applicants' financial statements onto a laptop, and only the second
+ * is the thing CLAUDE.md is protecting.
  *
  * WHY A SCRIPT. A restore drill needs the bytes the nightly job actually
  * wrote, not bytes reconstructed from the live database -- reconstructing
@@ -19,6 +26,7 @@
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { refusalForRead, isProductionBucket } from './lib/buckets.mjs';
 
 const args = Object.fromEntries(
   process.argv.slice(2).map((a) => {
@@ -31,9 +39,20 @@ const OUT = args.out ?? './export';
 const REMOTE = args.remote === true;
 const BUCKET = args.bucket ?? 'steward-preview-backups';
 
-if (/prod/i.test(String(BUCKET))) {
-  console.error(`refusing to read "${BUCKET}". CLAUDE.md: preview bindings only.`);
+const refusal = refusalForRead(BUCKET);
+if (refusal) {
+  console.error(refusal);
   process.exit(2);
+}
+
+/*
+ * Said out loud, because the bytes about to land on this disk are thirteen
+ * organizations' award history. The pull is legitimate -- it is the drill --
+ * but it should never happen without somebody noticing it happened.
+ */
+if (isProductionBucket(BUCKET)) {
+  console.log('PRODUCTION EXPORT. These bytes are real grantee records.');
+  console.log(`Delete ${OUT} when the drill is done.\n`);
 }
 
 function get(key, dest) {
