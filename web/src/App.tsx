@@ -54,7 +54,7 @@ import { OrganizationDetail } from './OrganizationDetail';
 import { AwardsList } from './AwardsList';
 import { OrganizationsList } from './OrganizationsList';
 import { ImpactScreen } from './ImpactScreen';
-import { Shell } from './Shell';
+import { Shell, SectionNav } from './Shell';
 import {
   loadPreference,
   savePreference,
@@ -908,8 +908,29 @@ export function App(): ReactElement {
     return shell(<Retention isAdmin={home.user.role === 'admin'} />);
   }
 
+  /*
+   * THE TWO SECOND VIEWS. Grants and the compliance desk are the same subject
+   * at two grains -- grants, and what those grants owe -- and Organizations
+   * and the past-grantee claims queue are the same subject too. Each pair
+   * shares a section rather than taking two slots in a navigation bar that
+   * had already run out of room.
+   */
+  const grantsViews = [
+    { path: '/awards', label: 'All grants', route: 'awardsList' },
+    { path: '/reporting', label: 'Reports', route: 'reporting' },
+  ];
+  const organizationViews = [
+    { path: '/organizations', label: 'All organizations', route: 'organizationsList' },
+    { path: '/past-grantees', label: 'Past grantee claims', route: 'granteeClaims' },
+  ];
+
   if (route.name === 'granteeClaims') {
-    return shell(<GranteeClaims isAdmin={home.user.role === 'admin'} onNavigate={navigate} />);
+    return shell(
+      <>
+        <SectionNav items={organizationViews} active="granteeClaims" onNavigate={navigate} />
+        <GranteeClaims isAdmin={home.user.role === 'admin'} onNavigate={navigate} />
+      </>,
+    );
   }
 
   if (route.name === 'toDo') {
@@ -945,30 +966,39 @@ export function App(): ReactElement {
 
   if (route.name === 'awardsList') {
     return shell(
-      <AwardsList
-        programs={home.programs}
-        query={search}
-        onQueryChange={setPipelineQuery}
-        onNavigate={navigate}
-      />,
+      <>
+        <SectionNav items={grantsViews} active="awardsList" onNavigate={navigate} />
+        <AwardsList
+          programs={home.programs}
+          query={search}
+          onQueryChange={setPipelineQuery}
+          onNavigate={navigate}
+        />
+      </>,
     );
   }
 
   if (route.name === 'organizationsList') {
     return shell(
-      <OrganizationsList query={search} onQueryChange={setPipelineQuery} onNavigate={navigate} />,
+      <>
+        <SectionNav items={organizationViews} active="organizationsList" onNavigate={navigate} />
+        <OrganizationsList query={search} onQueryChange={setPipelineQuery} onNavigate={navigate} />
+      </>,
     );
   }
 
   if (route.name === 'reporting') {
     return shell(
-      <Reports
-        programs={home.programs}
-        isAdmin={home.user.role === 'admin'}
-        query={search}
-        onQueryChange={setPipelineQuery}
-        onNavigate={navigate}
-      />,
+      <>
+        <SectionNav items={grantsViews} active="reporting" onNavigate={navigate} />
+        <Reports
+          programs={home.programs}
+          isAdmin={home.user.role === 'admin'}
+          query={search}
+          onQueryChange={setPipelineQuery}
+          onNavigate={navigate}
+        />
+      </>,
     );
   }
 

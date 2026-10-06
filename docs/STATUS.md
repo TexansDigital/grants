@@ -256,6 +256,33 @@ confident lie than the number alone.
 Check it: `npm run e2e:impact`, which writes `/tmp/impact-light.png` and
 `/tmp/impact-dark.png`.
 
+### The navigation
+
+Six items in the bar, the rest behind **More**:
+
+| In the bar | Behind More |
+|---|---|
+| To do · Grants · Organizations · Applications · Impact · Results | My reviews · Data health · Retention · Programs |
+
+Renamed: Pipeline → **Applications**, Dashboard → **Results**, Configuration →
+**Programs**. A pipeline is a word about the system; nobody goes looking for a
+dashboard; and "configuration" is why nobody could guess what was in it.
+
+**Two sections have a second view rather than a second tab.** The compliance
+desk sits under Grants and the past-grantee claims queue under Organizations —
+each is the same subject as its section at a different grain, and being on
+either still highlights the section it belongs to. That is two fewer things to
+scan.
+
+**The split is by role**, because "rarely used" is a fact about a person. My
+reviews is an admin's occasional errand and a reviewer's whole job, so it is
+in the bar for a reviewer. And a menu that would hold one item doesn't appear
+at all — the item goes in the bar instead.
+
+Check it: `npm run e2e:nav`, which measures that the bar is one line at
+1280px, that Escape *and* a background click close the menu, and that opening
+something from the menu still tells you where you are.
+
 ### Bugs found and fixed during this work
 
 Recorded because all four were invisible to a green test suite, and three were
@@ -271,6 +298,15 @@ found by reading real output rather than by testing:
   failure if any var is added to the default and not to production.
 - **`docs/SECRETS.md` claimed preview could not email real people.** It can,
   and has since deliverability testing.
+- **`/reporting?report=<id>` was a link that silently did nothing.** The open
+  report was local state only, so the To Do screen and the award page both
+  sent people to the compliance desk with no sign of which row they had been
+  sent to. On thirteen rows that is an annoyance; on three hundred it is a
+  dead link. The open report is in the address now, which also makes one
+  report forwardable.
+- **The More menu opened off the right edge at phone width**, with half its
+  entries unreachable. Anchored to the button, a toggle near the right edge
+  opens a 180px panel past it. At phone width it now spans the masthead.
 - **A metric could vanish from Impact entirely.** The query filtered rows
   where the value did not count, so a programme whose one filed report had
   been sent back for revision lost the whole metric from the screen rather

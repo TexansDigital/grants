@@ -1415,3 +1415,84 @@ td > .meta {
   gap: var(--space-3);
   margin: var(--space-4) 0 0;
 }
+
+/* ---- the More menu --------------------------------------------------------- */
+
+.navmore {
+  position: relative;
+  display: inline-flex;
+}
+.navmore-caret {
+  margin-left: var(--space-1);
+  font-size: 0.7em;
+}
+
+/* Anchored to the button, not to the masthead, so it stays put when the
+   email and role beside it change width. z-index above the page because the
+   panels below it establish stacking contexts of their own. */
+.navmore-menu {
+  position: absolute;
+  top: calc(100% + var(--space-2));
+  left: 0;
+  z-index: 30;
+  min-width: 180px;
+  display: flex;
+  flex-direction: column;
+  padding: var(--space-2);
+  gap: 2px;
+  background: var(--steel);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: var(--radius);
+  box-shadow: 0 10px 30px rgba(2, 16, 24, 0.45);
+}
+.navmore-menu button {
+  text-align: left;
+  white-space: nowrap;
+}
+
+/* ---- the second view inside a section -------------------------------------- */
+
+/* Deliberately NOT styled like the masthead nav. These are views of one
+   subject, not sections of the app, and making them look the same would
+   claim a parity they do not have. */
+.sectionnav {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-5);
+  border-bottom: 1px solid var(--line);
+}
+.sectionnav button {
+  font: inherit;
+  font-size: var(--step--1);
+  font-weight: 600;
+  color: var(--ink-3);
+  background: none;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  padding: var(--space-2) var(--space-3);
+  margin-bottom: -1px;
+  cursor: pointer;
+}
+.sectionnav button:hover {
+  color: var(--ink);
+}
+.sectionnav button[aria-current='page'] {
+  color: var(--ink);
+  border-bottom-color: var(--blue);
+}
+
+/* Phone width: the menu spans the masthead rather than hanging off the
+   button. Anchored to the button, a toggle sitting near the right edge opens
+   a 180px panel past it and half the entries are unreachable -- which the
+   browser pass caught at 390px. */
+@media (max-width: 36rem) {
+  .navmore {
+    position: static;
+  }
+  .navmore-menu {
+    left: var(--space-4);
+    right: var(--space-4);
+    min-width: 0;
+  }
+}

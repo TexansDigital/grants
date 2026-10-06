@@ -50,8 +50,26 @@ export function Reports({ programs, isAdmin, query, onQueryChange, onNavigate }:
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<ApiError | null>(null);
-  const [openId, setOpenId] = useState<string | null>(null);
+  /*
+   * THE OPEN REPORT IS IN THE ADDRESS.
+   *
+   * It was local state only, which made `/reporting?report=<id>` a link that
+   * silently did nothing: the To Do screen and the award page both send
+   * people here naming a specific report, and both landed them on the desk
+   * with no indication of which row they had been sent to. On a list of
+   * thirteen that is an annoyance; on a list of three hundred it is a dead
+   * link. Reading it from the query also makes the report itself linkable --
+   * which is what somebody forwarding "can you look at this one" needs.
+   */
+  const [openId, setOpenId] = useState<string | null>(() => params.get('report'));
   const [reloadKey, setReloadKey] = useState(0);
+
+  // Follow the address when it changes under us -- a Back press, or a second
+  // link arriving while this screen is already open.
+  useEffect(() => {
+    setOpenId(params.get('report'));
+  }, [params]);
+
 
   const set = useCallback(
     (key: string, value: string) => {
@@ -61,6 +79,22 @@ export function Reports({ programs, isAdmin, query, onQueryChange, onNavigate }:
       onQueryChange(next.toString());
     },
     [onQueryChange, params],
+  );
+
+  /*
+   * Opening and closing a report writes the address, so Back closes the
+   * report rather than leaving the screen entirely. `set` replaces rather
+   * than pushes, which is right for a filter and wrong here -- but the whole
+   * screen uses replaceState, and a report that pushed while filters replaced
+   * would make Back behave differently depending on what you touched last.
+   * Consistency wins; the close button is the way out and it is always there.
+   */
+  const openReport = useCallback(
+    (id: string | null) => {
+      setOpenId(id);
+      set('report', id ?? '');
+    },
+    [set],
   );
 
   useEffect(() => {
@@ -165,7 +199,7 @@ export function Reports({ programs, isAdmin, query, onQueryChange, onNavigate }:
                     <button
                       type="button"
                       className="rowlink"
-                      onClick={() => setOpenId(r.reportPeriodId)}
+                      onClick={() => openReport(r.reportPeriodId)}
                     >
                       {r.organizationName}
                     </button>
@@ -242,9 +276,9 @@ export function Reports({ programs, isAdmin, query, onQueryChange, onNavigate }:
         <ReportDetail
           reportPeriodId={openId}
           isAdmin={isAdmin}
-          onClose={() => setOpenId(null)}
+          onClose={() => openReport(null)}
           onDecided={() => {
-            setOpenId(null);
+            openReport(null);
             setReloadKey((n) => n + 1);
           }}
         />

@@ -31,6 +31,9 @@
   align-items: center;
   gap: var(--space-4);
   flex-wrap: wrap;
+  /* The positioning context the More menu falls back to at phone width, where
+     anchoring to the button itself puts it off the right edge. */
+  position: relative;
 }
 /*
  * The bullhead. Decorative: the organization is named in the <h1> beside it,

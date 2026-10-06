@@ -1,11 +1,33 @@
 /**
  * The internal chrome: masthead, primary navigation, theme toggle.
  *
- * Extracted from Home the moment there was more than one internal screen. The
- * navigation is a real <nav> with aria-current, so a screen reader announces
- * which section you are in rather than reading four identical links.
+ * THE NAVIGATION IS TWO LISTS, not one, and that is the whole point of this
+ * file. It reached twelve items and wrapped onto a second line, at which stage
+ * a navigation stops being a map and becomes a search problem -- the reader
+ * scans every label every time, because nothing tells them which few matter.
+ *
+ * So the bar carries only what this Foundation touches week to week, and
+ * everything else lives behind one "More" button. The split is by HOW OFTEN
+ * somebody goes there, not by what the code calls it:
+ *
+ *   Bar     -- To do, Grants, Organizations, Applications, Impact, Results
+ *   More    -- My reviews, Data health, Retention, Programs
+ *
+ * AND IT DIFFERS BY ROLE, because "rarely used" is a fact about a person. A
+ * reviewer's only screen is My reviews; burying it would be the same mistake
+ * in the other direction. So it is promoted into the bar for a reviewer and
+ * tucked into More for an admin, who visits it during a cycle and not
+ * otherwise.
+ *
+ * TWO SECTIONS HAVE A SECOND VIEW RATHER THAN A SECOND TAB. Reporting is the
+ * same subject as Grants at a different grain -- grants, and what those grants
+ * owe -- and the past-grantee claims queue is the same subject as
+ * Organizations. Each is a sub-navigation inside its section instead of a
+ * top-level entry, which is two fewer things to scan and a truer description
+ * of what they are.
  */
 
+import { useEffect, useId, useRef, useState } from 'react';
 import type { ReactElement, ReactNode } from 'react';
 import type { SessionUser } from './api';
 import { labelFor, type ResolvedTheme, type ThemePreference } from './theme';
@@ -20,30 +42,83 @@ interface Props {
   children: ReactNode;
 }
 
-const NAV: { path: string; label: string; route: string; adminOnly?: boolean }[] = [
-  // FIRST, and the landing page. Everything else in this nav is a place to go
-  // looking; this is the only one that tells you whether you needed to.
-  { path: '/to-do', label: 'To do', route: 'toDo' },
-  // Grants and Organizations: the two nouns this Foundation actually works
-  // in. Both admin-only, because both lists carry award amounts.
-  { path: '/awards', label: 'Grants', route: 'awardsList', adminOnly: true },
-  { path: '/organizations', label: 'Organizations', route: 'organizationsList', adminOnly: true },
-  { path: '/pipeline', label: 'Pipeline', route: 'pipeline' },
-  // Shown to everyone with a staff session, admins included: an admin who
-  // is also assigned as a reviewer needs somewhere to do that work.
-  { path: '/my-reviews', label: 'My reviews', route: 'reviewQueue' },
-  { path: '/reporting', label: 'Reporting', route: 'reporting' },
-  // Admin only, and hidden rather than shown-and-refused. The route is guarded
-  // server-side regardless; this is so a reviewer is not offered a door that
-  // answers FORBIDDEN, which reads as a fault rather than a boundary.
-  // Beside data health rather than under reporting: what is here is a queue of
-  // decisions, not a report on the past.
-  { path: '/past-grantees', label: 'Past grantees', route: 'granteeClaims', adminOnly: true },
-  { path: '/data-health', label: 'Data health', route: 'dataHealth', adminOnly: true },
-  { path: '/dashboard', label: 'Dashboard', route: 'dashboard', adminOnly: true },
-  { path: '/impact', label: 'Impact', route: 'impact', adminOnly: true },
-  { path: '/retention', label: 'Retention', route: 'retention', adminOnly: true },
-  { path: '/configuration', label: 'Configuration', route: 'home' },
+interface NavItem {
+  path: string;
+  label: string;
+  /** The route name this entry owns, plus any that live inside its section. */
+  routes: string[];
+  adminOnly?: boolean;
+  /** In the bar for an admin, or behind More. */
+  primary: boolean;
+  /** Promoted into the bar for a reviewer, whose work this is. */
+  primaryForReviewer?: boolean;
+}
+
+const NAV: NavItem[] = [
+  /*
+   * FIRST, and the landing page. Everything else here is a place to go
+   * looking; this is the only one that tells you whether you needed to.
+   */
+  { path: '/to-do', label: 'To do', routes: ['toDo'], primary: true, primaryForReviewer: true },
+  /*
+   * Grants and Organizations: the two nouns this Foundation works in. Each
+   * owns a second view -- the compliance desk under Grants, the claims queue
+   * under Organizations -- so being on either highlights its section here.
+   */
+  {
+    path: '/awards',
+    label: 'Grants',
+    routes: ['awardsList', 'award', 'reporting'],
+    adminOnly: true,
+    primary: true,
+  },
+  {
+    path: '/organizations',
+    label: 'Organizations',
+    routes: ['organizationsList', 'organization', 'granteeClaims'],
+    adminOnly: true,
+    primary: true,
+  },
+  /*
+   * "Applications", not "Pipeline". A pipeline is a word about the system;
+   * applications are the thing on the screen, and the person reading this nav
+   * is looking for the latter.
+   */
+  {
+    path: '/pipeline',
+    label: 'Applications',
+    routes: ['pipeline', 'application'],
+    primary: true,
+    primaryForReviewer: true,
+  },
+  { path: '/impact', label: 'Impact', routes: ['impact'], adminOnly: true, primary: true },
+  /*
+   * "Results", not "Dashboard". Nobody goes looking for a dashboard; they go
+   * looking for how the programme did.
+   */
+  { path: '/dashboard', label: 'Results', routes: ['dashboard'], adminOnly: true, primary: true },
+
+  // ---- behind More ---------------------------------------------------------
+  /*
+   * Shown to everyone with a staff session, admins included: an admin who is
+   * also assigned as a reviewer needs somewhere to do that work. Primary for a
+   * reviewer, for whom it is the whole job.
+   */
+  {
+    path: '/my-reviews',
+    label: 'My reviews',
+    routes: ['reviewQueue', 'scoringSheet'],
+    primary: false,
+    primaryForReviewer: true,
+  },
+  { path: '/data-health', label: 'Data health', routes: ['dataHealth'], adminOnly: true, primary: false },
+  { path: '/retention', label: 'Retention', routes: ['retention'], adminOnly: true, primary: false },
+  /*
+   * "Programs", not "Configuration". It is where a programme, its cycles, its
+   * forms and its rubrics are set up -- which is a subject, not a settings
+   * screen, and calling it settings is why nobody could guess what was in it.
+   */
+  { path: '/configuration', label: 'Programs', routes: ['home', 'rubrics'], primary: false },
 ];
 
 export function Shell({
@@ -55,6 +130,56 @@ export function Shell({
   onNavigate,
   children,
 }: Props): ReactElement {
+  const [moreOpen, setMoreOpen] = useState(false);
+  const moreRef = useRef<HTMLDivElement | null>(null);
+  const menuId = useId();
+
+  /*
+   * A menu that cannot be dismissed is a trap. Both exits are here because a
+   * mouse user reaches for the background and a keyboard user reaches for
+   * Escape, and a menu that answers only one of them is broken for the other.
+   */
+  useEffect(() => {
+    if (!moreOpen) return undefined;
+    const onDown = (e: MouseEvent): void => {
+      if (moreRef.current && !moreRef.current.contains(e.target as Node)) setMoreOpen(false);
+    };
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') setMoreOpen(false);
+    };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [moreOpen]);
+
+  const visible = NAV.filter((item) => !item.adminOnly || user.role === 'admin');
+  const inBar = (item: NavItem): boolean =>
+    user.role === 'reviewer' ? (item.primaryForReviewer ?? false) : item.primary;
+
+  let bar = visible.filter(inBar);
+  let more = visible.filter((item) => !inBar(item));
+  /*
+   * A ONE-ITEM MENU IS WORSE THAN THE ITEM. It costs a click and a guess to
+   * reach something that would have fitted in the space the "More" button
+   * occupies. A reviewer hit this exactly: everything they can see is their
+   * daily work except Programs, so they were offered a dropdown containing
+   * one entry.
+   */
+  if (more.length === 1) {
+    bar = [...bar, ...more];
+    more = [];
+  }
+  const current = (item: NavItem): boolean => item.routes.includes(active);
+  /*
+   * The More button is marked current when the open screen lives inside it.
+   * Without this, opening Retention leaves nothing in the bar highlighted and
+   * the reader has no idea where they are.
+   */
+  const moreHoldsCurrent = more.some(current);
+
   return (
     <div className="page">
       <a className="skip-link" href="#main">
@@ -68,22 +193,54 @@ export function Shell({
           <img className="mark" src="/bullhead.png" alt="" aria-hidden="true" />
           <h1>Steward</h1>
           <nav className="mainnav" aria-label="Sections">
-            {NAV.filter((item) => !item.adminOnly || user.role === 'admin').map((item) => (
+            {bar.map((item) => (
               <button
                 key={item.path}
                 type="button"
                 // `page`, not `true`: the section IS the current page, and
                 // screen readers announce it that way.
-                aria-current={
-                  active === item.route || (item.route === 'pipeline' && active === 'application')
-                    ? 'page'
-                    : undefined
-                }
+                aria-current={current(item) ? 'page' : undefined}
                 onClick={() => onNavigate(item.path)}
               >
                 {item.label}
               </button>
             ))}
+
+            {more.length > 0 ? (
+              <div className="navmore" ref={moreRef}>
+                <button
+                  type="button"
+                  className="navmore-toggle"
+                  aria-expanded={moreOpen}
+                  aria-haspopup="true"
+                  aria-controls={menuId}
+                  aria-current={moreHoldsCurrent ? 'page' : undefined}
+                  onClick={() => setMoreOpen((v) => !v)}
+                >
+                  More
+                  <span aria-hidden="true" className="navmore-caret">
+                    ▾
+                  </span>
+                </button>
+                {moreOpen ? (
+                  <div className="navmore-menu" id={menuId}>
+                    {more.map((item) => (
+                      <button
+                        key={item.path}
+                        type="button"
+                        aria-current={current(item) ? 'page' : undefined}
+                        onClick={() => {
+                          setMoreOpen(false);
+                          onNavigate(item.path);
+                        }}
+                      >
+                        {item.label}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
           </nav>
           <span className="spacer" />
           <span className="program">
@@ -99,5 +256,38 @@ export function Shell({
         {children}
       </main>
     </div>
+  );
+}
+
+/**
+ * The second view inside a section.
+ *
+ * Grants and its compliance desk are the same subject at two grains, as are
+ * Organizations and the queue of people claiming a past grant. Making each of
+ * those a top-level tab said they were unrelated, and cost two slots in a bar
+ * that had already run out.
+ */
+export function SectionNav({
+  items,
+  active,
+  onNavigate,
+}: {
+  items: { path: string; label: string; route: string }[];
+  active: string;
+  onNavigate: (path: string) => void;
+}): ReactElement {
+  return (
+    <nav className="sectionnav" aria-label="Views">
+      {items.map((item) => (
+        <button
+          key={item.path}
+          type="button"
+          aria-current={active === item.route ? 'page' : undefined}
+          onClick={() => onNavigate(item.path)}
+        >
+          {item.label}
+        </button>
+      ))}
+    </nav>
   );
 }
