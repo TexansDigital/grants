@@ -77,12 +77,14 @@ export function OrganizationDetail({ organizationId, onNavigate }: Props): React
   return (
     <>
       <section className="panel">
+        {/* Up to the section, not back to the landing page -- see the note
+            on the award page's crumbs for why. */}
         <div className="crumbs">
-          <button type="button" className="linklike" onClick={() => onNavigate('/to-do')}>
-            To do
+          <button type="button" className="linklike" onClick={() => onNavigate('/organizations')}>
+            Organizations
           </button>
           <span aria-hidden="true">/</span>
-          <span>Organization</span>
+          <span>{data.legalName}</span>
         </div>
 
         <div className="panel-head">

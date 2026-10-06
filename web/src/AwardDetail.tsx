@@ -118,20 +118,33 @@ export function AwardDetail({ awardId, onNavigate }: Props): ReactElement {
   return (
     <>
       <section className="panel">
+        {/*
+          UP TO THE SECTION THIS PAGE LIVES IN, not back to the landing page.
+          It pointed at To do, which was right when To do was the only way
+          here; now that Grants is a section with a list in it, "up" means the
+          list, and a reader who arrived from the compliance desk or a search
+          should land somewhere they can keep looking.
+        */}
         <div className="crumbs">
-          <button type="button" className="linklike" onClick={() => onNavigate('/to-do')}>
-            To do
+          <button type="button" className="linklike" onClick={() => onNavigate('/awards')}>
+            Grants
           </button>
           <span aria-hidden="true">/</span>
-          <span>Grant</span>
+          <span>{data.organizationName}</span>
         </div>
 
         <div className="panel-head">
           <h2>{data.organizationName}</h2>
+          <span className={`badge badge-${data.status}`}>{data.status}</span>
+          {data.isMultiYear ? <span className="badge">Multi-year</span> : null}
+          {data.isPublic ? <span className="badge badge-published">Listed publicly</span> : null}
           {/*
-            The grantee's own page, from the grant. The question a grant most
-            often raises is "what else have we done with these people", and
-            before this there was nowhere to go and ask it.
+            AFTER the badges, not between the name and its status. It sat in
+            the middle and the heading read "Bayou Harbor Trust All their
+            grants ACTIVE" -- a link interrupting a name and its state. The
+            question a grant most often raises is "what else have we done with
+            these people", and before this page existed there was nowhere to
+            go and ask it.
           */}
           <button
             type="button"
@@ -140,9 +153,6 @@ export function AwardDetail({ awardId, onNavigate }: Props): ReactElement {
           >
             All their grants
           </button>
-          <span className={`badge badge-${data.status}`}>{data.status}</span>
-          {data.isMultiYear ? <span className="badge">Multi-year</span> : null}
-          {data.isPublic ? <span className="badge badge-published">Listed publicly</span> : null}
         </div>
 
         <dl className="facts">

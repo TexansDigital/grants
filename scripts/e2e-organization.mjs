@@ -278,6 +278,11 @@ async function main() {
         /\bnull\b|\bundefined\b/i.test(body) || /\bNaN\b/.test(body),
       );
       falsy('no console errors on the emptiest organization', errors.length > 0);
+
+      // Up to the section, and named, for the same reason as the award page.
+      const crumbs = await page.locator('.crumbs').innerText();
+      truthy(`the crumb goes up to Organizations (${JSON.stringify(crumbs)})`, /^Organizations/.test(crumbs));
+      truthy('and names the nonprofit', /Bayou Harbor Trust/.test(crumbs));
       await page.close();
     }
 

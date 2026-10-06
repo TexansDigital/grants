@@ -316,6 +316,21 @@ async function main() {
         /no application|None/i.test(text),
       );
       falsy('no console errors on the emptiest award', errors.length > 0);
+
+      /*
+       * UP GOES TO THE SECTION. It pointed at To do, which was right when To
+       * do was the only way here; with a Grants list to return to, a reader
+       * who arrived from the compliance desk or a search should land
+       * somewhere they can keep looking rather than back at the front door.
+       */
+      const crumbs = await page.locator('.crumbs').innerText();
+      truthy(`the crumb goes up to Grants (${JSON.stringify(crumbs)})`, /^Grants/.test(crumbs));
+      truthy('and names the grantee rather than the word "Grant"', /Bayou Harbor Trust/.test(crumbs));
+      // Scoped to the crumb: "Grants" is also the section in the nav bar, and
+      // an unscoped match is ambiguous between them.
+      await page.locator('.crumbs button').click();
+      await page.waitForURL(`${base}/awards`, { timeout: 10_000 });
+      check('and it works', new URL(page.url()).pathname, '/awards');
       await page.close();
     }
 
