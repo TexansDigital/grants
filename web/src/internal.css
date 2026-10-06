@@ -1375,3 +1375,43 @@ td > .meta {
 .filter-lead .btn[aria-pressed='false']:hover {
   border-color: var(--blue);
 }
+
+/* ---- impact ---------------------------------------------------------------- */
+
+/* The sentence that must be read before the numbers are. Given a rule and a
+   colour so it is not mistaken for a caption, and placed above the figures
+   because a coverage note underneath is a footnote, and footnotes do not
+   travel with a number somebody has copied into a slide. */
+.coverage {
+  margin: 0 0 var(--space-5);
+  padding: var(--space-3) var(--space-4);
+  border-left: 3px solid var(--blue);
+  background: var(--surface-2);
+  color: var(--ink-2);
+}
+
+.impact-facts {
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: var(--space-5);
+}
+.impact-facts dd {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+
+/* Large, because it is the figure somebody came for -- but never larger than
+   the coverage line is legible, which is why that sits above rather than
+   beside it. */
+.impact-number {
+  font-size: var(--step-3);
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+.year-picker {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin: var(--space-4) 0 0;
+}

@@ -84,6 +84,7 @@ import { buildReportForm, publishReportForm } from './lib/reportForm';
 import { todo } from './lib/todo';
 import { awardOverview, listAwards } from './lib/awardPage';
 import { organizationOverview, listOrganizations } from './lib/organizationPage';
+import { impact } from './lib/impact';
 import { findDuplicateCandidates, planMerge, applyMerge } from './lib/merge';
 import {
   junkOrganization, restoreOrganization, junkApplication, listRemovedOrganizations,
@@ -585,6 +586,7 @@ const routes: readonly Route[] = [
       '/awards',
       '/awards/:id',
       // The nonprofit's own page.
+      '/impact',
       '/organizations',
       '/organizations/:id',
       '/programs/:id/rubrics',
@@ -827,6 +829,29 @@ const routes: readonly Route[] = [
         ctx,
       ),
   },
+  // ---- what the money did --------------------------------------------------
+  {
+    /*
+     * ADMIN_ONLY. These are whole-programme totals across every grantee,
+     * which is outside a reviewer's scope in the same way award amounts are.
+     */
+    method: 'GET',
+    path: '/api/impact',
+    roles: ADMIN_ONLY,
+    handler: async ({ env, ctx, url, session }) => {
+      const raw = url.searchParams.get('year');
+      /*
+       * A year that is not a year is "everything", not NaN. The parameter
+       * arrives from a query string anybody can edit, and NaN bound into the
+       * comparison matches nothing -- an empty Impact page with no
+       * explanation, which reads as "we have achieved nothing".
+       */
+      const parsed = raw === null ? NaN : Number(raw);
+      const year = Number.isInteger(parsed) && parsed > 1900 && parsed < 3000 ? parsed : null;
+      return json(await impact(env.DB, session, nowIso(), year), ctx);
+    },
+  },
+
   // ---- the lists -----------------------------------------------------------
   {
     /*

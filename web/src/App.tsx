@@ -53,6 +53,7 @@ import { AwardDetail } from './AwardDetail';
 import { OrganizationDetail } from './OrganizationDetail';
 import { AwardsList } from './AwardsList';
 import { OrganizationsList } from './OrganizationsList';
+import { ImpactScreen } from './ImpactScreen';
 import { Shell } from './Shell';
 import {
   loadPreference,
@@ -69,6 +70,7 @@ type Route =
   | { name: 'organization'; id: string }
   | { name: 'awardsList' }
   | { name: 'organizationsList' }
+  | { name: 'impact' }
   | { name: 'home' }
   | { name: 'pipeline' }
   | { name: 'application'; id: string }
@@ -161,6 +163,7 @@ function parseRoute(pathname: string): Route | null {
   if (parts.length === 1 && parts[0] === 'organizations') {
     return { name: 'organizationsList' };
   }
+  if (parts.length === 1 && parts[0] === 'impact') return { name: 'impact' };
   // The nonprofit's own page: their grants, their applications, and whether
   // anybody there can sign in.
   if (parts.length === 2 && parts[0] === 'organizations' && parts[1]) {
@@ -407,6 +410,7 @@ export function App(): ReactElement {
           route?.name === 'organization' ||
           route?.name === 'awardsList' ||
           route?.name === 'organizationsList' ||
+          route?.name === 'impact' ||
           route?.name === 'home' ||
           route?.name === 'pipeline' ||
           route?.name === 'application' ||
@@ -918,6 +922,25 @@ export function App(): ReactElement {
 
   if (route.name === 'organization') {
     return shell(<OrganizationDetail organizationId={route.id} onNavigate={navigate} />);
+  }
+
+  if (route.name === 'impact') {
+    /*
+     * The year lives in the address, like every other filter, so a year's
+     * impact is a link somebody can put in an email. Parsed defensively: a
+     * query string anybody can edit must not produce NaN, which would ask the
+     * server for an impossible year and render an empty page that reads as
+     * "we achieved nothing".
+     */
+    const raw = new URLSearchParams(search).get('year');
+    const parsed = raw === null ? NaN : Number(raw);
+    const year = Number.isInteger(parsed) && parsed > 1900 && parsed < 3000 ? parsed : null;
+    return shell(
+      <ImpactScreen
+        year={year}
+        onYearChange={(next) => setPipelineQuery(next === null ? '' : `year=${next}`)}
+      />,
+    );
   }
 
   if (route.name === 'awardsList') {

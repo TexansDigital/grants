@@ -251,6 +251,34 @@ export interface OrganizationListRow {
   canSignIn: boolean;
 }
 
+/** Mirrors src/lib/impact.ts. */
+export interface ImpactMetric {
+  metricDefinitionId: string;
+  label: string;
+  metricType: string;
+  unit: string | null;
+  total: number | null;
+  answered: number;
+}
+
+export interface ImpactProgram {
+  programId: string;
+  programName: string;
+  metrics: ImpactMetric[];
+  obligations: number;
+  accepted: number;
+  grantsNeverAsked: number;
+  grants: number;
+  totalAwardedCents: number;
+}
+
+export interface Impact {
+  generatedAt: string;
+  year: number | null;
+  years: number[];
+  programs: ImpactProgram[];
+}
+
 export interface RubricRow {
   id: string;
   program_id: string;
@@ -978,6 +1006,8 @@ export const api = {
   todo: (signal?: AbortSignal) => get<TodoScreen>('/api/todo', signal),
   award: (id: string, signal?: AbortSignal) =>
     get<AwardOverview>(`/api/awards/${encodeURIComponent(id)}`, signal),
+  impact: (year: number | null, signal?: AbortSignal) =>
+    get<Impact>(`/api/impact${year === null ? '' : `?year=${year}`}`, signal),
   awards: (query: string, signal?: AbortSignal) =>
     get<{ rows: AwardListRow[]; total: number }>(
       `/api/awards${query ? `?${query}` : ''}`,

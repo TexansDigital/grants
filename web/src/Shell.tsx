@@ -41,6 +41,7 @@ const NAV: { path: string; label: string; route: string; adminOnly?: boolean }[]
   { path: '/past-grantees', label: 'Past grantees', route: 'granteeClaims', adminOnly: true },
   { path: '/data-health', label: 'Data health', route: 'dataHealth', adminOnly: true },
   { path: '/dashboard', label: 'Dashboard', route: 'dashboard', adminOnly: true },
+  { path: '/impact', label: 'Impact', route: 'impact', adminOnly: true },
   { path: '/retention', label: 'Retention', route: 'retention', adminOnly: true },
   { path: '/configuration', label: 'Configuration', route: 'home' },
 ];

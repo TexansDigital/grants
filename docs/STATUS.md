@@ -223,6 +223,39 @@ can send. Check them: `npm run e2e:lists`.
 is the rename-and-move phase, which is next: To do · Grants · Organizations ·
 Applications · Results · Impact · Programs, with Reporting folded into Grants.
 
+### The Impact screen
+
+A new tab at `/impact`: what grantees have reported back, per programme, with
+a grant-year picker.
+
+**Every figure is shown with its denominator, and that is the point of the
+screen.** "4,200 people served" is a fact if every grantee has filed and a
+floor if three of thirteen have, and the number reads identically either way —
+on its way into a board paper or a press line where nobody can see behind it.
+So a coverage sentence sits *above* the figures (a note underneath is a
+footnote, and footnotes do not travel with a copied number): *"Based on 3 of 13
+updates accepted, covering $120,000 of grants."*
+
+Three absences are deliberately different, because conflating them would
+misrepresent the grantees:
+
+- A metric nobody has answered reads **"Not reported yet"**, never `0`.
+- A grantee who genuinely reached nobody reads **`0`** — their answer is not erased.
+- A written answer shows **who answered** and no figure at all. A summed sentence is a fabrication.
+
+A programme where nothing has been asked says exactly that, rather than
+presenting "0 of 0 updates" as a complete year. That is the state all thirteen
+2025 grants are in today.
+
+Only accepted reports count. A figure no member of staff has read must not be
+in a published total, and one sent back for revision comes straight out again.
+
+No charts. A bar chart of a number whose denominator is three would be a more
+confident lie than the number alone.
+
+Check it: `npm run e2e:impact`, which writes `/tmp/impact-light.png` and
+`/tmp/impact-dark.png`.
+
 ### Bugs found and fixed during this work
 
 Recorded because all four were invisible to a green test suite, and three were
@@ -238,6 +271,13 @@ found by reading real output rather than by testing:
   failure if any var is added to the default and not to production.
 - **`docs/SECRETS.md` claimed preview could not email real people.** It can,
   and has since deliverability testing.
+- **A metric could vanish from Impact entirely.** The query filtered rows
+  where the value did not count, so a programme whose one filed report had
+  been sent back for revision lost the whole metric from the screen rather
+  than reading "nobody has answered yet" — and a year with no accepted reports
+  looked like a year with no metrics. The condition now lives inside `COUNT`
+  and `SUM`; the definition is always present and only its numbers depend on
+  what has been accepted.
 - **The unreachable-grantees toggle looked identical on and off.** The rule
   styled the pressed state blue; `.btn` is already blue-filled, so it changed
   nothing. The one control on that screen that exists to be switched gave no

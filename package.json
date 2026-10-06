@@ -55,7 +55,8 @@
     "e2e:todo": "node scripts/e2e-todo.mjs",
     "e2e:award": "node scripts/e2e-award.mjs",
     "e2e:organization": "node scripts/e2e-organization.mjs",
-    "e2e:lists": "node scripts/e2e-lists.mjs"
+    "e2e:lists": "node scripts/e2e-lists.mjs",
+    "e2e:impact": "node scripts/e2e-impact.mjs"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.12.21",
