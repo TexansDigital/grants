@@ -83,6 +83,7 @@ import {
 import { buildReportForm, publishReportForm } from './lib/reportForm';
 import { todo } from './lib/todo';
 import { awardOverview } from './lib/awardPage';
+import { organizationOverview } from './lib/organizationPage';
 import { findDuplicateCandidates, planMerge, applyMerge } from './lib/merge';
 import {
   junkOrganization, restoreOrganization, junkApplication, listRemovedOrganizations,
@@ -577,6 +578,8 @@ const routes: readonly Route[] = [
       // The grant's own page. Typed and pasted far more often than most --
       // it is what an admin sends a colleague when asking about a grant.
       '/awards/:id',
+      // The nonprofit's own page.
+      '/organizations/:id',
       '/programs/:id/rubrics',
       // A reviewer's own queue and one scoring sheet. Separate from /pipeline
       // on purpose: "everything" and "mine" are different questions and must
@@ -1965,6 +1968,28 @@ const routes: readonly Route[] = [
     roles: ADMIN_ONLY,
     handler: async ({ env, ctx }) =>
       json({ organizations: await listRemovedOrganizations(env.DB) }, ctx),
+  },
+
+  // ---- one nonprofit, on one page ------------------------------------------
+  {
+    /*
+     * DECLARED AFTER EVERY LITERAL SIBLING, and that is load-bearing: the
+     * router gives a literal segment no preference over a parameter, so this
+     * route placed above /duplicates or /removed would hand the organization
+     * page that word as an id and break the merge tool or the removed list.
+     * It was first written above /removed -- a route this file is long enough
+     * to hide -- and test/routeShadowing.test.ts caught it.
+     *
+     * ADMIN_ONLY because it carries award amounts, which CLAUDE.md puts
+     * outside a reviewer's reach. A reviewer's institutional memory is the
+     * history panel on the application they are scoring, which is scoped to
+     * their own assignments and shows counts rather than money.
+     */
+    method: 'GET',
+    path: '/api/organizations/:id',
+    roles: ADMIN_ONLY,
+    handler: async ({ env, ctx, params, session }) =>
+      json(await organizationOverview(env.DB, session, params.id!), ctx),
   },
   // ---- review assignment ----------------------------------------------------
   //

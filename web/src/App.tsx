@@ -50,6 +50,7 @@ import { AwardOffer } from './AwardOffer';
 import { ApplicationDetail } from './ApplicationDetail';
 import { ToDo } from './ToDo';
 import { AwardDetail } from './AwardDetail';
+import { OrganizationDetail } from './OrganizationDetail';
 import { Shell } from './Shell';
 import {
   loadPreference,
@@ -63,6 +64,7 @@ import {
 type Route =
   | { name: 'toDo' }
   | { name: 'award'; id: string }
+  | { name: 'organization'; id: string }
   | { name: 'home' }
   | { name: 'pipeline' }
   | { name: 'application'; id: string }
@@ -145,6 +147,11 @@ function parseRoute(pathname: string): Route | null {
    */
   if (parts.length === 2 && parts[0] === 'awards' && parts[1]) {
     return { name: 'award', id: parts[1] };
+  }
+  // The nonprofit's own page: their grants, their applications, and whether
+  // anybody there can sign in.
+  if (parts.length === 2 && parts[0] === 'organizations' && parts[1]) {
+    return { name: 'organization', id: parts[1] };
   }
   if (parts.length === 2 && parts[0] === 'forms' && parts[1]) return { name: 'form', id: parts[1] };
   // The public front door. Checked BEFORE /apply/:id, because "start" is not
@@ -384,6 +391,7 @@ export function App(): ReactElement {
            */
           route?.name === 'toDo' ||
           route?.name === 'award' ||
+          route?.name === 'organization' ||
           route?.name === 'home' ||
           route?.name === 'pipeline' ||
           route?.name === 'application' ||
@@ -891,6 +899,10 @@ export function App(): ReactElement {
 
   if (route.name === 'award') {
     return shell(<AwardDetail awardId={route.id} onNavigate={navigate} />);
+  }
+
+  if (route.name === 'organization') {
+    return shell(<OrganizationDetail organizationId={route.id} onNavigate={navigate} />);
   }
 
   if (route.name === 'reporting') {

@@ -53,7 +53,8 @@
     "e2e:pastgrantee": "node scripts/e2e-pastgrantee.mjs",
     "e2e:claims": "node scripts/e2e-claims-ui.mjs",
     "e2e:todo": "node scripts/e2e-todo.mjs",
-    "e2e:award": "node scripts/e2e-award.mjs"
+    "e2e:award": "node scripts/e2e-award.mjs",
+    "e2e:organization": "node scripts/e2e-organization.mjs"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.12.21",

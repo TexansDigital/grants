@@ -174,6 +174,33 @@ the server refuses it, so the screen does not offer it.
 Check it: `npm run e2e:award`, which writes `/tmp/award-light.png` and
 `/tmp/award-dark.png`.
 
+### The organization page
+
+Every nonprofit now has a page at `/organizations/<id>`: their grants, their
+applications, the people recorded against them, and — at the top, as a banner
+— whether anybody there can sign in. Reach it from "All their grants" on any
+grant page.
+
+**Can anybody sign in** is the operational question this month. Reminders only
+reach grantees who already have an account, so a nonprofit that has never
+claimed their grant is invisible to every automated nudge in the system. The
+failure is silent: the report goes overdue, the nightly job finds nobody to
+email, and the compliance desk shows a red row nobody caused. The page says so
+in words, as something a person has to do.
+
+This could not reuse the existing history endpoint. `organizationHistoryForStaff`
+gates on the organization having at least one application — right for its job,
+and fatal here, because imported grants have none. All thirteen 2025 grantees
+answer 404 from it today, **to an admin**. A test pins that, so if the gap is
+ever closed elsewhere we find out.
+
+Check it: `npm run e2e:organization`, which writes `/tmp/organization-light.png`
+and `/tmp/organization-dark.png`.
+
+**Known gap:** there is no organization *list* or search yet, so the page is
+reached from a grant or by typing the address. The list belongs with the
+Organizations tab.
+
 ### Bugs found and fixed during this work
 
 Recorded because all four were invisible to a green test suite, and three were
@@ -189,6 +216,11 @@ found by reading real output rather than by testing:
   failure if any var is added to the default and not to production.
 - **`docs/SECRETS.md` claimed preview could not email real people.** It can,
   and has since deliverability testing.
+- **`.rowlink` had no styling but a cursor**, so every clickable cell in a
+  table rendered with the browser's default button chrome. On the already-live
+  compliance desk that meant "Bayou Harbor Trust" and "$35,000" as two grey
+  boxes in one row. `.linklike` had existed for exactly this since the start.
+  Fixed in one rule; three screens improved.
 - **A new route would have made the award picker unreachable.** `GET
   /api/awards/:id` was declared above `GET /api/awards/search`, and the router
   takes the first path that matches with no preference for a literal segment

@@ -128,6 +128,18 @@ export function AwardDetail({ awardId, onNavigate }: Props): ReactElement {
 
         <div className="panel-head">
           <h2>{data.organizationName}</h2>
+          {/*
+            The grantee's own page, from the grant. The question a grant most
+            often raises is "what else have we done with these people", and
+            before this there was nowhere to go and ask it.
+          */}
+          <button
+            type="button"
+            className="linklike"
+            onClick={() => onNavigate(`/organizations/${data.organizationId}`)}
+          >
+            All their grants
+          </button>
           <span className={`badge badge-${data.status}`}>{data.status}</span>
           {data.isMultiYear ? <span className="badge">Multi-year</span> : null}
           {data.isPublic ? <span className="badge badge-published">Listed publicly</span> : null}

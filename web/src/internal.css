@@ -440,8 +440,32 @@ th.num {
   margin-top: var(--space-4);
 }
 
+/* The clickable cell in a table row.
+ *
+ * It only ever set `cursor: pointer`, which left it with the browser's
+ * default button chrome -- so "Bayou Harbor Trust" and "$35,000" rendered as
+ * two grey boxes in one row of the compliance desk, on a screen that has
+ * shipped. `.linklike` directly above exists for exactly this ("a button that
+ * reads as a link"); this is its table-cell form, with the weight left to the
+ * cell so a date does not shout. */
 .rowlink {
+  font: inherit;
+  color: var(--blue-ink);
+  background: none;
+  border: 0;
+  padding: 0;
   cursor: pointer;
+  text-align: left;
+}
+.rowlink:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* A note under the value in a table cell, not jammed against it. Inline, it
+   produced "Yeslast in 2026-09-28" and "Bayou Harbor TrustInspire Change". */
+td > .meta {
+  display: block;
 }
 
 /* ---- detail --------------------------------------------------------------- */

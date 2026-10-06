@@ -170,6 +170,57 @@ export interface AwardOverview {
   whyNoReports: 'has_reports' | 'no_term_dates' | 'not_requested';
 }
 
+/** Mirrors the types in src/lib/organizationPage.ts. */
+export interface OrganizationAward {
+  id: string;
+  programName: string;
+  awardedAmountCents: number;
+  awardedAt: string;
+  status: string;
+  termStart: string | null;
+  termEnd: string | null;
+  reportsTotal: number;
+  reportsAccepted: number;
+  reportsOverdue: number;
+  reportsOutstanding: number;
+}
+
+export interface OrganizationApplicationRow {
+  id: string;
+  status: string;
+  submittedAt: string | null;
+  requestedAmountCents: number | null;
+  projectTitle: string | null;
+  cycleName: string | null;
+}
+
+export interface OrganizationContact {
+  name: string;
+  email: string;
+  jobTitle: string | null;
+  isPrimary: boolean;
+  hasAccount: boolean;
+  lastLoginAt: string | null;
+}
+
+export interface OrganizationOverview {
+  id: string;
+  legalName: string;
+  ein: string | null;
+  einVerifiedAt: string | null;
+  website: string | null;
+  mission: string | null;
+  annualOperatingBudgetCents: number | null;
+  status: string;
+  mergedIntoId: string | null;
+  mergedIntoName: string | null;
+  awards: OrganizationAward[];
+  applications: OrganizationApplicationRow[];
+  contacts: OrganizationContact[];
+  totalAwardedCents: number;
+  canSignIn: boolean;
+}
+
 export interface RubricRow {
   id: string;
   program_id: string;
@@ -897,6 +948,8 @@ export const api = {
   todo: (signal?: AbortSignal) => get<TodoScreen>('/api/todo', signal),
   award: (id: string, signal?: AbortSignal) =>
     get<AwardOverview>(`/api/awards/${encodeURIComponent(id)}`, signal),
+  organization: (id: string, signal?: AbortSignal) =>
+    get<OrganizationOverview>(`/api/organizations/${encodeURIComponent(id)}`, signal),
   /*
    * The public-listing flag. The endpoint has existed since the public grants
    * page shipped and nothing has ever called it, so an award could be made
