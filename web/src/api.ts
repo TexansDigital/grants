@@ -113,6 +113,24 @@ export interface RetentionScreen {
   purged: Record<string, unknown>[];
 }
 
+/** One outstanding obligation. Mirrors TodoItem in src/lib/todo.ts. */
+export interface TodoItem {
+  id: string;
+  kind: 'claim' | 'report_filed' | 'report_overdue' | 'report_due' | 'files_due';
+  title: string;
+  detail: string;
+  href: string | null;
+  dueAt: string | null;
+  urgency: 'now' | 'soon' | 'watch';
+}
+
+export interface TodoScreen {
+  items: TodoItem[];
+  generatedAt: string;
+  /** False when the report portfolio was longer than one page. */
+  complete: boolean;
+}
+
 export interface RubricRow {
   id: string;
   program_id: string;
@@ -837,6 +855,7 @@ export const api = {
       { method: 'POST', body: { rubricId } },
     ),
   retention: (signal?: AbortSignal) => get<RetentionScreen>('/api/retention', signal),
+  todo: (signal?: AbortSignal) => get<TodoScreen>('/api/todo', signal),
   holdAttachment: (attachmentId: string, until: string, reason: string) =>
     request<{ attachmentId: string; holdUntil: string }>(
       `/api/attachments/${encodeURIComponent(attachmentId)}/retention-hold`,

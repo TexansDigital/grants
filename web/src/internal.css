@@ -1173,3 +1173,116 @@ th.num {
   padding: var(--space-1) var(--space-2);
   text-align: left;
 }
+
+/* ---- to do ---------------------------------------------------------------- */
+
+/* One row per obligation. A list rather than a table: there is no column to
+   sort by that means anything -- the order IS the information. */
+.todo-group + .todo-group {
+  margin-top: var(--space-6);
+}
+
+.todo-list {
+  list-style: none;
+  margin: var(--space-4) 0 0;
+  padding: 0;
+  display: grid;
+  gap: var(--space-2);
+}
+
+.todo-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  /* The left edge carries the urgency, so the group heading is not the only
+     thing distinguishing a row that is late from a row that is merely next.
+     A reader who has scrolled past the heading still sees it. */
+  border-left: 3px solid var(--line-2);
+}
+
+/* A fixed column, so the organization names line up down the list instead of
+   stepping in and out with the width of each badge. Five rows whose titles
+   start at five different x positions read as five unrelated boxes. */
+.todo-item .badge {
+  flex: none;
+  width: 72px;
+  text-align: center;
+}
+.todo-item[data-urgency='now'] {
+  border-left-color: var(--red);
+}
+.todo-item[data-urgency='soon'] {
+  border-left-color: var(--blue);
+}
+
+/* Takes the slack so the button sits hard right on every row. Min-width zero
+   or a long filename pushes the button off the panel instead of wrapping. */
+.todo-text {
+  flex: 1;
+  min-width: 0;
+}
+
+/* `break-word`, NOT `anywhere`. `anywhere` lets the browser break a word to
+   make the text block narrower, which at phone width turned "Bayou Harbor
+   Trust" into "Bayo / u / Harbo / r / Trust" in a forty-pixel column -- no
+   horizontal scrollbar, and unreadable. `break-word` breaks a word only when
+   it genuinely cannot fit on a line of its own, which is what a long filename
+   needs and a legal name never triggers. */
+.todo-who {
+  margin: 0;
+  font-weight: 600;
+  overflow-wrap: break-word;
+}
+
+.todo-what {
+  margin: 2px 0 0;
+  color: var(--ink-2);
+  font-size: var(--step--1);
+  overflow-wrap: break-word;
+}
+
+/* The load failure. Red because an empty-looking to-do list that is actually
+   a broken one is the most consequential wrong impression this app can give. */
+.todo-failed {
+  margin: 0 0 var(--space-3);
+  padding: var(--space-4);
+  border: 1px solid var(--red);
+  border-radius: var(--radius);
+  color: var(--danger-ink);
+}
+
+/* Phone width: the button drops below the text rather than squeezing it.
+   `flex-basis: 100%` is what actually moves it -- wrapping alone left the text
+   as a flex item sharing the row with the button, so it shrank to a column a
+   few words wide instead of taking the line. */
+@media (max-width: 36rem) {
+  .todo-item {
+    flex-wrap: wrap;
+    gap: var(--space-3);
+  }
+  .todo-text {
+    flex: 1 1 100%;
+    order: 2;
+  }
+  .todo-item .badge {
+    order: 1;
+  }
+  .todo-item .btn.small {
+    order: 3;
+    margin-left: auto;
+  }
+}
+
+/* Said out loud rather than left to a short list. The screen's value is the
+   promise that an empty list means nothing is outstanding; a truncated list
+   that does not admit it breaks that promise silently. */
+.todo-partial {
+  margin: 0 0 var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border-left: 3px solid var(--warn-ink);
+  color: var(--ink-2);
+  font-size: var(--step--1);
+}

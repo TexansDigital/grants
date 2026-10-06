@@ -132,6 +132,25 @@ Finished and verified, so neither of us re-opens it:
   rows, $469,000, parses with no problems.
 - **The report form**, published as version 3 in preview.
 
+### The To Do screen
+
+Opening the platform now lands on **To do**: one list of everything
+outstanding, in the order it should be done — unanswered past-grantee claims,
+reports filed and unread, reports overdue, reports due soon, and files near
+their destruction date. Before it, each of those lived on its own tab and
+raised no hand, and the landing page was the pipeline, which outside an open
+cycle is a table of nothing.
+
+Its one promise is that **an empty list means nothing is outstanding**, so
+three things are deliberate: a failed load reads as a failure rather than as
+nothing-to-do; a truncated list says it is truncated; and a report period that
+is still `scheduled` — generated from an award's terms, never requested from
+the grantee — counts as outstanding, because that is the case where the
+Foundation has not done its part.
+
+Check it: `npm run e2e:todo` drives it in a real browser, both themes and at
+phone width, and writes `/tmp/todo-light.png` and `/tmp/todo-dark.png`.
+
 ### Bugs found and fixed during this work
 
 Recorded because all four were invisible to a green test suite, and three were
@@ -147,6 +166,11 @@ found by reading real output rather than by testing:
   failure if any var is added to the default and not to production.
 - **`docs/SECRETS.md` claimed preview could not email real people.** It can,
   and has since deliverability testing.
+- **The To Do screen hung on "Loading…" forever on its first write**, because
+  `App.tsx` keeps a list of the staff routes that need the shell's data and the
+  new one was not on it. Fifteen green unit tests behind a landing page that
+  never rendered; the browser harness caught it on its first run. The comment
+  in that file predicts this exact mistake, and it is now the third time.
 
 ---
 

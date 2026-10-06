@@ -81,6 +81,7 @@ import {
   reportPortfolio, readReportForStaff, acceptReport, requestReportRevisions, waiveReport,
 } from './lib/reportAdmin';
 import { buildReportForm, publishReportForm } from './lib/reportForm';
+import { todo } from './lib/todo';
 import { findDuplicateCandidates, planMerge, applyMerge } from './lib/merge';
 import {
   junkOrganization, restoreOrganization, junkApplication, listRemovedOrganizations,
@@ -589,6 +590,9 @@ const routes: readonly Route[] = [
       // worked, so the gap was invisible until somebody typed one.
       '/reporting',
       '/past-grantees',
+      // The landing page. The most-typed address in the whole set, and so the
+      // one it would be most embarrassing to leave out of this list.
+      '/to-do',
     ] as const
   ).map(
     (path) =>
@@ -614,6 +618,20 @@ const routes: readonly Route[] = [
     roles: STAFF_READ,
     handler: async ({ ctx, session }) =>
       json({ user: { email: session.email, role: session.role } }, ctx),
+  },
+
+  // ---- what needs a person --------------------------------------------------
+  {
+    /*
+     * STAFF_READ, not ADMIN_ONLY, and the role gating happens inside todo()
+     * instead -- see the long note there. A reviewer gets a real list; it just
+     * holds only what a reviewer may see.
+     */
+    method: 'GET',
+    path: '/api/todo',
+    roles: STAFF_READ,
+    handler: async ({ env, ctx, session }) =>
+      json(await todo(env.DB, session, nowIso()), ctx),
   },
 
   // ---- grantee reporting, from the staff side -------------------------------

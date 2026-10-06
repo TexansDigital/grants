@@ -48,6 +48,7 @@ import { ReviewCoverage } from './ReviewCoverage';
 import { Dashboard } from './Dashboard';
 import { AwardOffer } from './AwardOffer';
 import { ApplicationDetail } from './ApplicationDetail';
+import { ToDo } from './ToDo';
 import { Shell } from './Shell';
 import {
   loadPreference,
@@ -59,6 +60,7 @@ import {
 } from './theme';
 
 type Route =
+  | { name: 'toDo' }
   | { name: 'home' }
   | { name: 'pipeline' }
   | { name: 'application'; id: string }
@@ -89,12 +91,21 @@ function parseRoute(pathname: string): Route | null {
   // the Worker redirects '/' to '/sign-in' on the applicant hostname, because
   // this router cannot see which host served it and mapping '/' to the staff
   // app on apply.<domain> produced a sign-in loop with no way out.
-  if (parts.length === 0) return { name: 'pipeline' };
+  /*
+   * '/' IS THE TO-DO LIST, not the pipeline. It used to be the pipeline, which
+   * for most of the year is an empty table: the platform opened on a screen
+   * that said nothing was happening while a nonprofit sat unanswered in the
+   * claims queue two tabs away.
+   */
+  if (parts.length === 0) return { name: 'toDo' };
   // The external front door. Served on BOTH hostnames -- the sign-in email
   // links here, and which address a grantee arrives at is not their problem.
   if (parts.length === 1 && parts[0] === 'sign-in') return { name: 'signIn' };
   if (parts.length === 1 && parts[0] === 'configuration') return { name: 'home' };
   if (parts.length === 1 && parts[0] === 'pipeline') return { name: 'pipeline' };
+  // Also reachable at its own address, so it can be linked and bookmarked
+  // rather than only arrived at by opening the app.
+  if (parts.length === 1 && parts[0] === 'to-do') return { name: 'toDo' };
   // The staff compliance desk. NOT /reports, which is the grantee portal --
   // two different audiences must never share a path.
   if (parts.length === 1 && parts[0] === 'reporting') return { name: 'reporting' };
@@ -354,6 +365,14 @@ export function App(): ReactElement {
     (async () => {
       try {
         if (
+          /*
+           * FIRST, because it is the landing page -- and it was left out of
+           * this list on its first write, exactly as the note below predicts.
+           * The symptom was the worst possible one for this particular screen:
+           * opening the app sat on "Loading…" forever, with fourteen green
+           * unit tests behind it.
+           */
+          route?.name === 'toDo' ||
           route?.name === 'home' ||
           route?.name === 'pipeline' ||
           route?.name === 'application' ||
@@ -853,6 +872,10 @@ export function App(): ReactElement {
 
   if (route.name === 'granteeClaims') {
     return shell(<GranteeClaims isAdmin={home.user.role === 'admin'} />);
+  }
+
+  if (route.name === 'toDo') {
+    return shell(<ToDo onNavigate={navigate} />);
   }
 
   if (route.name === 'reporting') {

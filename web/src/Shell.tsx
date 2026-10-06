@@ -21,6 +21,9 @@ interface Props {
 }
 
 const NAV: { path: string; label: string; route: string; adminOnly?: boolean }[] = [
+  // FIRST, and the landing page. Everything else in this nav is a place to go
+  // looking; this is the only one that tells you whether you needed to.
+  { path: '/to-do', label: 'To do', route: 'toDo' },
   { path: '/pipeline', label: 'Pipeline', route: 'pipeline' },
   // Shown to everyone with a staff session, admins included: an admin who
   // is also assigned as a reviewer needs somewhere to do that work.
