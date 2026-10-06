@@ -1,6 +1,13 @@
 # Local-only values. Copy to .dev.vars, which is gitignored.
 #
 # Everything here is INVENTED. Never copy a real secret into a local file.
+#
+# `npm test` DOES NOT NEED THIS FILE. Everything the suite requires is
+# declared in vitest.config.ts, in version control. That was not always true:
+# miniflare reads .dev.vars through wrangler.toml, so the suite used to pass on
+# a machine that had one and fail 56 tests on a clean checkout of the same
+# commit -- three files at once, every failure the same 403, looking exactly
+# like a code regression. It is needed for `wrangler dev` and the e2e scripts.
 
 # Signs an upload URL pointing at a hostname that does not exist. The browser
 # harnesses intercept the PUT rather than sending it anywhere.
