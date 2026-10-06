@@ -23,6 +23,7 @@ interface Props {
   isAdmin: boolean;
   query: string;
   onQueryChange: (next: string) => void;
+  onNavigate: (path: string) => void;
 }
 
 const STATUSES = [
@@ -43,7 +44,7 @@ const STATUS_LABEL: Record<string, string> = {
   waived: 'Waived',
 };
 
-export function Reports({ programs, isAdmin, query, onQueryChange }: Props): ReactElement {
+export function Reports({ programs, isAdmin, query, onQueryChange, onNavigate }: Props): ReactElement {
   const params = useMemo(() => new URLSearchParams(query), [query]);
   const [rows, setRows] = useState<PortfolioRow[]>([]);
   const [total, setTotal] = useState(0);
@@ -209,7 +210,24 @@ export function Reports({ programs, isAdmin, query, onQueryChange }: Props): Rea
                       </>
                     )}
                   </td>
-                  <td className="num">{formatCents(r.awardedAmountCents)}</td>
+                  <td className="num">
+                    {/*
+                      THE AMOUNT IS THE WAY TO THE GRANT. The award page is
+                      where the paperwork, the payment schedule and the
+                      amendment form live, and until it existed there was no
+                      route to any of them for an imported grant. The row
+                      already names the amount; making it the link costs a
+                      column nothing.
+                    */}
+                    <button
+                      type="button"
+                      className="rowlink"
+                      aria-label={`Open the grant for ${r.organizationName}`}
+                      onClick={() => onNavigate(`/awards/${r.awardId}`)}
+                    >
+                      {formatCents(r.awardedAmountCents)}
+                    </button>
+                  </td>
                   <td className="num">
                     {r.fundsSpentCents === null ? '—' : formatCents(r.fundsSpentCents)}
                   </td>

@@ -82,6 +82,7 @@ import {
 } from './lib/reportAdmin';
 import { buildReportForm, publishReportForm } from './lib/reportForm';
 import { todo } from './lib/todo';
+import { awardOverview } from './lib/awardPage';
 import { findDuplicateCandidates, planMerge, applyMerge } from './lib/merge';
 import {
   junkOrganization, restoreOrganization, junkApplication, listRemovedOrganizations,
@@ -573,6 +574,9 @@ const routes: readonly Route[] = [
       '/data-health',
       '/retention',
       '/applications/:id',
+      // The grant's own page. Typed and pasted far more often than most --
+      // it is what an admin sends a colleague when asking about a grant.
+      '/awards/:id',
       '/programs/:id/rubrics',
       // A reviewer's own queue and one scoring sheet. Separate from /pipeline
       // on purpose: "everything" and "mine" are different questions and must
@@ -812,6 +816,29 @@ const routes: readonly Route[] = [
         { awards: await searchAwards(env.DB, session, url.searchParams.get('q') ?? '') },
         ctx,
       ),
+  },
+  // ---- one grant, on one page ----------------------------------------------
+  {
+    /*
+     * The award's own page.
+     *
+     * DECLARED AFTER /api/awards/search, AND THAT IS LOAD-BEARING. The router
+     * takes the first path that matches and gives a literal segment no
+     * preference over a parameter, so this route sitting above the picker
+     * would hand the award page the literal string "search" as an id, answer
+     * 404, and leave the Connect button on the claims queue permanently
+     * greyed out with no reason shown. test/routeShadowing.test.ts fails if
+     * anything is ever reordered past it.
+     *
+     * ADMIN_ONLY to match the paperwork and payment endpoints it sits beside;
+     * the module refuses with notFound rather than forbidden, so changing an
+     * id in the address bar reveals nothing about which awards exist.
+     */
+    method: 'GET',
+    path: '/api/awards/:id',
+    roles: ADMIN_ONLY,
+    handler: async ({ env, ctx, params, session }) =>
+      json(await awardOverview(env.DB, session, params.id!), ctx),
   },
   {
     method: 'POST',

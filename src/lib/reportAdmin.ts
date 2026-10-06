@@ -76,6 +76,13 @@ export interface PortfolioFilters {
   programId?: string | null;
   status?: string | null;
   organizationId?: string | null;
+  /*
+   * One grant's obligations. Added for the award page, which asks the same
+   * question the compliance desk asks and must not answer it with its own
+   * copy of this SQL -- two definitions of "overdue" is how a screen ends up
+   * showing a grant as fine while the desk shows it as late.
+   */
+  awardId?: string | null;
   /** Only what is late. */
   overdueOnly?: boolean;
   limit?: number;
@@ -116,6 +123,10 @@ export async function reportPortfolio(
   if (filters.organizationId) {
     where.push('a.organization_id = ?');
     binds.push(filters.organizationId);
+  }
+  if (filters.awardId) {
+    where.push('rp.award_id = ?');
+    binds.push(filters.awardId);
   }
   if (filters.status) {
     where.push('rp.status = ?');

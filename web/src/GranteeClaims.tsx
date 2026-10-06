@@ -35,6 +35,7 @@ import { formatCents } from '../../src/lib/money';
 
 interface Props {
   isAdmin: boolean;
+  onNavigate: (path: string) => void;
 }
 
 const STATE: Record<string, { label: string; tone: string }> = {
@@ -52,7 +53,7 @@ const EIN_EXPLAINER = (
   </>
 );
 
-export function GranteeClaims({ isAdmin }: Props): ReactElement {
+export function GranteeClaims({ isAdmin, onNavigate }: Props): ReactElement {
   const [claims, setClaims] = useState<GranteeClaimRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -458,7 +459,21 @@ export function GranteeClaims({ isAdmin }: Props): ReactElement {
                       <td>
                         {c.grantedOrganizationName ? (
                           <>
-                            {c.grantedOrganizationName}
+                            {/*
+                              THE GRANT, not just its name. Connecting a
+                              claimant is the moment somebody most wants to
+                              check the grant they just connected them to --
+                              and until the award page existed there was
+                              nowhere to check.
+                            */}
+                            <button
+                              type="button"
+                              className="rowlink"
+                              aria-label={`Open the grant connected to ${c.organizationName}`}
+                              onClick={() => onNavigate(`/awards/${c.grantedAwardId}`)}
+                            >
+                              {c.grantedOrganizationName}
+                            </button>
                             <br />
                             <span className="meta">{c.grantedAwardLabel}</span>
                           </>

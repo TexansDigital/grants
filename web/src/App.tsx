@@ -49,6 +49,7 @@ import { Dashboard } from './Dashboard';
 import { AwardOffer } from './AwardOffer';
 import { ApplicationDetail } from './ApplicationDetail';
 import { ToDo } from './ToDo';
+import { AwardDetail } from './AwardDetail';
 import { Shell } from './Shell';
 import {
   loadPreference,
@@ -61,6 +62,7 @@ import {
 
 type Route =
   | { name: 'toDo' }
+  | { name: 'award'; id: string }
   | { name: 'home' }
   | { name: 'pipeline' }
   | { name: 'application'; id: string }
@@ -135,6 +137,14 @@ function parseRoute(pathname: string): Route | null {
   }
   if (parts.length === 2 && parts[0] === 'applications' && parts[1]) {
     return { name: 'application', id: parts[1] };
+  }
+  /*
+   * The grant's own page. Separate from /applications/:id because an imported
+   * grant has no application, which is true of every grant the Foundation
+   * currently holds.
+   */
+  if (parts.length === 2 && parts[0] === 'awards' && parts[1]) {
+    return { name: 'award', id: parts[1] };
   }
   if (parts.length === 2 && parts[0] === 'forms' && parts[1]) return { name: 'form', id: parts[1] };
   // The public front door. Checked BEFORE /apply/:id, because "start" is not
@@ -373,6 +383,7 @@ export function App(): ReactElement {
            * unit tests behind it.
            */
           route?.name === 'toDo' ||
+          route?.name === 'award' ||
           route?.name === 'home' ||
           route?.name === 'pipeline' ||
           route?.name === 'application' ||
@@ -871,11 +882,15 @@ export function App(): ReactElement {
   }
 
   if (route.name === 'granteeClaims') {
-    return shell(<GranteeClaims isAdmin={home.user.role === 'admin'} />);
+    return shell(<GranteeClaims isAdmin={home.user.role === 'admin'} onNavigate={navigate} />);
   }
 
   if (route.name === 'toDo') {
     return shell(<ToDo onNavigate={navigate} />);
+  }
+
+  if (route.name === 'award') {
+    return shell(<AwardDetail awardId={route.id} onNavigate={navigate} />);
   }
 
   if (route.name === 'reporting') {
@@ -885,6 +900,7 @@ export function App(): ReactElement {
         isAdmin={home.user.role === 'admin'}
         query={search}
         onQueryChange={setPipelineQuery}
+        onNavigate={navigate}
       />,
     );
   }

@@ -1286,3 +1286,42 @@ th.num {
   color: var(--ink-2);
   font-size: var(--step--1);
 }
+
+/* ---- award page ----------------------------------------------------------- */
+
+/* A section that is empty and says why. The border is blue rather than red:
+   a grant nobody has asked for an update is a state to act on, not a fault,
+   and red is reserved for alerts. */
+.empty-reason {
+  margin: 0 0 var(--space-4);
+  padding: var(--space-4);
+  border-left: 3px solid var(--blue);
+  background: var(--surface-2);
+  color: var(--ink-2);
+}
+
+/* The failure of an action on a page that is already rendered -- shown
+   alongside the content rather than instead of it, and never in the same grey
+   box as a success. */
+.action-error {
+  margin: 0 0 var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--red);
+  border-radius: var(--radius);
+  color: var(--danger-ink);
+}
+
+/* A heading that follows the facts list rather than opening the panel.
+   `.panel h3:first-of-type` zeroes the top margin so a panel that STARTS with
+   a heading does not open with a gap -- correct there, and wrong here, where
+   it put "Public listing" hard against the last definition in the list above
+   it. Specific enough to win, scoped so it changes nothing else. */
+.panel h3.after-facts {
+  margin-top: var(--space-6);
+  padding-top: var(--space-5);
+  border-top: 1px solid var(--line);
+}
+
+.nowrap {
+  white-space: nowrap;
+}

@@ -151,6 +151,29 @@ Foundation has not done its part.
 Check it: `npm run e2e:todo` drives it in a real browser, both themes and at
 phone width, and writes `/tmp/todo-light.png` and `/tmp/todo-dark.png`.
 
+### The award page
+
+Every grant now has its own page at `/awards/<id>`, carrying its facts, its
+report obligations, its paperwork, its payment schedule and its amendment
+history. Reach it from the amount column on Reporting, or from the "Connected
+to" column on Past grantees.
+
+**This was a hole, not a nicety.** All of those screens were mounted inside
+the application detail view, and imported grants have no application — so the
+thirteen 2025 Inspire Change grants had no page at all. Their W-9 status,
+payments and report periods were in the database, served by working endpoints,
+and could not be looked at by anybody.
+
+Two things on it are deliberate. A blank Reporting section says **which** blank
+it is: without grant period dates, generation is impossible and the fix is to
+amend the award; with them, nobody has simply asked yet, and the button to ask
+is right there. And an imported grant is not offered the public-listing
+control, because publishing checks a record that lives on the application —
+the server refuses it, so the screen does not offer it.
+
+Check it: `npm run e2e:award`, which writes `/tmp/award-light.png` and
+`/tmp/award-dark.png`.
+
 ### Bugs found and fixed during this work
 
 Recorded because all four were invisible to a green test suite, and three were
@@ -166,6 +189,14 @@ found by reading real output rather than by testing:
   failure if any var is added to the default and not to production.
 - **`docs/SECRETS.md` claimed preview could not email real people.** It can,
   and has since deliverability testing.
+- **A new route would have made the award picker unreachable.** `GET
+  /api/awards/:id` was declared above `GET /api/awards/search`, and the router
+  takes the first path that matches with no preference for a literal segment
+  over a parameter. The award page would have received the string "search" as
+  an id, answered 404, and left the Connect button on the claims queue
+  permanently greyed out with no reason shown — the only route by which any of
+  the thirteen reaches their report. `test/routeShadowing.test.ts` now walks
+  the whole table and fails on any route another route hides.
 - **The To Do screen hung on "Loading…" forever on its first write**, because
   `App.tsx` keeps a list of the staff routes that need the shell's data and the
   new one was not on it. Fifteen green unit tests behind a landing page that

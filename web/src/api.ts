@@ -131,6 +131,45 @@ export interface TodoScreen {
   complete: boolean;
 }
 
+/** A linked award, named as little as the award page needs for the link. */
+export interface RelatedAward {
+  id: string;
+  awardedAmountCents: number;
+  awardedAt: string;
+  status: string;
+  termStart: string | null;
+  termEnd: string | null;
+}
+
+/** Mirrors AwardOverview in src/lib/awardPage.ts. */
+export interface AwardOverview {
+  awardId: string;
+  organizationId: string;
+  organizationName: string;
+  programId: string;
+  programName: string;
+  cycleId: string | null;
+  cycleName: string | null;
+  applicationId: string | null;
+  projectTitle: string | null;
+  awardedAmountCents: number;
+  awardedAt: string;
+  announcementDate: string | null;
+  termStart: string | null;
+  termEnd: string | null;
+  status: string;
+  isMultiYear: boolean;
+  isPublic: boolean;
+  sourceSystem: string | null;
+  sourceReference: string | null;
+  acceptedAt: string | null;
+  declinedByGranteeAt: string | null;
+  parent: RelatedAward | null;
+  renewals: RelatedAward[];
+  reports: PortfolioRow[];
+  whyNoReports: 'has_reports' | 'no_term_dates' | 'not_requested';
+}
+
 export interface RubricRow {
   id: string;
   program_id: string;
@@ -856,6 +895,23 @@ export const api = {
     ),
   retention: (signal?: AbortSignal) => get<RetentionScreen>('/api/retention', signal),
   todo: (signal?: AbortSignal) => get<TodoScreen>('/api/todo', signal),
+  award: (id: string, signal?: AbortSignal) =>
+    get<AwardOverview>(`/api/awards/${encodeURIComponent(id)}`, signal),
+  /*
+   * The public-listing flag. The endpoint has existed since the public grants
+   * page shipped and nothing has ever called it, so an award could be made
+   * public only by editing the database.
+   */
+  setAwardPublic: (id: string, isPublic: boolean) =>
+    request<{ awardId: string; isPublic: boolean }>(
+      `/api/awards/${encodeURIComponent(id)}/public`,
+      { method: 'POST', body: { isPublic } },
+    ),
+  generateAwardReportPeriods: (id: string) =>
+    request<{ created: number; skipped: string[] }>(
+      `/api/awards/${encodeURIComponent(id)}/report-periods`,
+      { method: 'POST', body: {} },
+    ),
   holdAttachment: (attachmentId: string, until: string, reason: string) =>
     request<{ attachmentId: string; holdUntil: string }>(
       `/api/attachments/${encodeURIComponent(attachmentId)}/retention-hold`,
