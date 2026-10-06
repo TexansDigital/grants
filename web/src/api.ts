@@ -221,6 +221,36 @@ export interface OrganizationOverview {
   canSignIn: boolean;
 }
 
+export interface AwardListRow {
+  id: string;
+  organizationId: string;
+  organizationName: string;
+  programName: string;
+  awardedAmountCents: number;
+  awardedAt: string;
+  status: string;
+  termStart: string | null;
+  termEnd: string | null;
+  reportsTotal: number;
+  reportsOverdue: number;
+  reportsOutstanding: number;
+  granteeCanSignIn: boolean;
+}
+
+export interface OrganizationListRow {
+  id: string;
+  legalName: string;
+  ein: string | null;
+  einVerifiedAt: string | null;
+  status: string;
+  grants: number;
+  totalAwardedCents: number;
+  lastAwardedAt: string | null;
+  applications: number;
+  reportsOverdue: number;
+  canSignIn: boolean;
+}
+
 export interface RubricRow {
   id: string;
   program_id: string;
@@ -948,6 +978,16 @@ export const api = {
   todo: (signal?: AbortSignal) => get<TodoScreen>('/api/todo', signal),
   award: (id: string, signal?: AbortSignal) =>
     get<AwardOverview>(`/api/awards/${encodeURIComponent(id)}`, signal),
+  awards: (query: string, signal?: AbortSignal) =>
+    get<{ rows: AwardListRow[]; total: number }>(
+      `/api/awards${query ? `?${query}` : ''}`,
+      signal,
+    ),
+  organizations: (query: string, signal?: AbortSignal) =>
+    get<{ rows: OrganizationListRow[]; total: number }>(
+      `/api/organizations${query ? `?${query}` : ''}`,
+      signal,
+    ),
   organization: (id: string, signal?: AbortSignal) =>
     get<OrganizationOverview>(`/api/organizations/${encodeURIComponent(id)}`, signal),
   /*

@@ -205,3 +205,158 @@ export async function awardOverview(
           : 'not_requested',
   };
 }
+
+// ---------------------------------------------------------------------------
+// The list
+// ---------------------------------------------------------------------------
+
+/**
+ * Every grant, which the system has never had a screen for.
+ *
+ * Awards could be reached only through the application that produced them, or
+ * -- since the award page -- one at a time by id. There has been no answer to
+ * "show me the grants", which is the first thing anybody asks of a
+ * grantmaking system and the entire content of a Grants tab.
+ *
+ * REPORTING STATE TRAVELS WITH THE ROW, because the question is never just
+ * "what have we funded". It is "what have we funded and who still owes us
+ * something", and a list that cannot answer the second half sends the reader
+ * to the compliance desk to cross-reference by hand.
+ */
+export interface AwardListRow {
+  id: string;
+  organizationId: string;
+  organizationName: string;
+  programName: string;
+  awardedAmountCents: number;
+  awardedAt: string;
+  status: string;
+  termStart: string | null;
+  termEnd: string | null;
+  reportsTotal: number;
+  reportsOverdue: number;
+  reportsOutstanding: number;
+  /*
+   * Whether anybody at the grantee can sign in. On the row because a grant
+   * whose grantee has no account cannot be chased by anything automated, and
+   * that is invisible everywhere else in a list.
+   */
+  granteeCanSignIn: boolean;
+}
+
+export interface AwardListFilters {
+  programId?: string | null;
+  status?: string | null;
+  /** Organization name, EIN, or the import reference. */
+  q?: string | null;
+  /** Only grants with something outstanding. */
+  outstandingOnly?: boolean;
+  limit?: number;
+  offset?: number;
+}
+
+export async function listAwards(
+  db: D1Database,
+  session: Session,
+  filters: AwardListFilters = {},
+): Promise<{ rows: AwardListRow[]; total: number }> {
+  // Award amounts, so admin only -- the same boundary as the award page.
+  if (session.role !== 'admin') throw notFound('awards');
+
+  const where: string[] = ['w.deleted_at IS NULL', 'o.deleted_at IS NULL'];
+  const binds: unknown[] = [];
+
+  if (filters.programId) {
+    where.push('w.program_id = ?');
+    binds.push(filters.programId);
+  }
+  if (filters.status) {
+    where.push('w.status = ?');
+    binds.push(filters.status);
+  }
+  const q = (filters.q ?? '').trim();
+  if (q !== '') {
+    /*
+     * An EIN typed with or without its dash is the same EIN, so the digits
+     * are matched separately -- the same reason organizations deduplicate on
+     * them, and the same rule searchAwards already follows. A reader should
+     * not have to guess which way it was stored.
+     */
+    const digits = q.replace(/\D/g, '');
+    where.push(`(LOWER(o.legal_name) LIKE ?
+                 OR (? <> '' AND o.ein = ?)
+                 OR LOWER(COALESCE(w.source_reference, '')) LIKE ?)`);
+    const like = `%${q.toLowerCase()}%`;
+    binds.push(like, digits, digits, like);
+  }
+
+  const limit = Math.min(Math.max(filters.limit ?? 100, 1), 500);
+  const offset = Math.max(filters.offset ?? 0, 0);
+  const now = new Date().toISOString();
+
+  const sql = `
+    SELECT w.id, w.organization_id AS organizationId,
+           w.awarded_amount_cents AS awardedAmountCents, w.awarded_at AS awardedAt,
+           w.status, w.term_start AS termStart, w.term_end AS termEnd,
+           o.legal_name AS organizationName, p.name AS programName,
+           (SELECT COUNT(*) FROM report_periods rp
+             WHERE rp.award_id = w.id AND rp.deleted_at IS NULL) AS reportsTotal,
+           (SELECT COUNT(*) FROM report_periods rp
+             WHERE rp.award_id = w.id AND rp.deleted_at IS NULL
+               AND rp.status IN ('scheduled','open','revisions_requested')
+               AND rp.due_date < ?) AS reportsOverdue,
+           (SELECT COUNT(*) FROM report_periods rp
+             WHERE rp.award_id = w.id AND rp.deleted_at IS NULL
+               AND rp.status IN ('scheduled','open','submitted',
+                                 'revisions_requested')) AS reportsOutstanding,
+           (SELECT COUNT(*) FROM users u
+             WHERE u.organization_id = w.organization_id AND u.is_active = 1
+               AND u.deleted_at IS NULL
+               AND u.role IN ('applicant','grantee')) AS granteeAccounts
+      FROM awards w
+      JOIN organizations o ON o.id = w.organization_id
+      JOIN programs p ON p.id = w.program_id
+     WHERE ${where.join(' AND ')}
+     ORDER BY w.awarded_at DESC, o.legal_name`;
+
+  const { results } = await db
+    .prepare(`${sql} LIMIT ? OFFSET ?`)
+    .bind(now, ...binds, limit, offset)
+    .all<Record<string, unknown>>();
+
+  const counted = await db
+    .prepare(
+      `SELECT COUNT(*) AS n FROM awards w
+         JOIN organizations o ON o.id = w.organization_id
+        WHERE ${where.join(' AND ')}`,
+    )
+    .bind(...binds)
+    .first<{ n: number }>();
+
+  let rows: AwardListRow[] = (results ?? []).map((r) => ({
+    id: r.id as string,
+    organizationId: r.organizationId as string,
+    organizationName: r.organizationName as string,
+    programName: r.programName as string,
+    awardedAmountCents: r.awardedAmountCents as number,
+    awardedAt: r.awardedAt as string,
+    status: r.status as string,
+    termStart: (r.termStart as string | null) ?? null,
+    termEnd: (r.termEnd as string | null) ?? null,
+    reportsTotal: r.reportsTotal as number,
+    reportsOverdue: r.reportsOverdue as number,
+    reportsOutstanding: r.reportsOutstanding as number,
+    granteeCanSignIn: (r.granteeAccounts as number) > 0,
+  }));
+
+  /*
+   * Filtered in code, after the page, exactly as the compliance desk filters
+   * "overdue" -- and with the same consequence, stated rather than hidden:
+   * `total` counts before this filter. The caller gets the filtered rows and
+   * the unfiltered total under different names, instead of one number that
+   * means neither.
+   */
+  if (filters.outstandingOnly) rows = rows.filter((r) => r.reportsOutstanding > 0);
+
+  return { rows, total: counted?.n ?? rows.length };
+}

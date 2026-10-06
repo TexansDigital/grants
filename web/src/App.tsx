@@ -51,6 +51,8 @@ import { ApplicationDetail } from './ApplicationDetail';
 import { ToDo } from './ToDo';
 import { AwardDetail } from './AwardDetail';
 import { OrganizationDetail } from './OrganizationDetail';
+import { AwardsList } from './AwardsList';
+import { OrganizationsList } from './OrganizationsList';
 import { Shell } from './Shell';
 import {
   loadPreference,
@@ -65,6 +67,8 @@ type Route =
   | { name: 'toDo' }
   | { name: 'award'; id: string }
   | { name: 'organization'; id: string }
+  | { name: 'awardsList' }
+  | { name: 'organizationsList' }
   | { name: 'home' }
   | { name: 'pipeline' }
   | { name: 'application'; id: string }
@@ -145,8 +149,17 @@ function parseRoute(pathname: string): Route | null {
    * grant has no application, which is true of every grant the Foundation
    * currently holds.
    */
+  /*
+   * The staff list of grants. NOT /grants, which is the PUBLIC page listing
+   * who was funded -- two different audiences must never share a path, and
+   * the route-shadowing test caught this one being written that way.
+   */
+  if (parts.length === 1 && parts[0] === 'awards') return { name: 'awardsList' };
   if (parts.length === 2 && parts[0] === 'awards' && parts[1]) {
     return { name: 'award', id: parts[1] };
+  }
+  if (parts.length === 1 && parts[0] === 'organizations') {
+    return { name: 'organizationsList' };
   }
   // The nonprofit's own page: their grants, their applications, and whether
   // anybody there can sign in.
@@ -392,6 +405,8 @@ export function App(): ReactElement {
           route?.name === 'toDo' ||
           route?.name === 'award' ||
           route?.name === 'organization' ||
+          route?.name === 'awardsList' ||
+          route?.name === 'organizationsList' ||
           route?.name === 'home' ||
           route?.name === 'pipeline' ||
           route?.name === 'application' ||
@@ -903,6 +918,23 @@ export function App(): ReactElement {
 
   if (route.name === 'organization') {
     return shell(<OrganizationDetail organizationId={route.id} onNavigate={navigate} />);
+  }
+
+  if (route.name === 'awardsList') {
+    return shell(
+      <AwardsList
+        programs={home.programs}
+        query={search}
+        onQueryChange={setPipelineQuery}
+        onNavigate={navigate}
+      />,
+    );
+  }
+
+  if (route.name === 'organizationsList') {
+    return shell(
+      <OrganizationsList query={search} onQueryChange={setPipelineQuery} onNavigate={navigate} />,
+    );
   }
 
   if (route.name === 'reporting') {

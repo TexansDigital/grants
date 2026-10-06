@@ -24,6 +24,10 @@ const NAV: { path: string; label: string; route: string; adminOnly?: boolean }[]
   // FIRST, and the landing page. Everything else in this nav is a place to go
   // looking; this is the only one that tells you whether you needed to.
   { path: '/to-do', label: 'To do', route: 'toDo' },
+  // Grants and Organizations: the two nouns this Foundation actually works
+  // in. Both admin-only, because both lists carry award amounts.
+  { path: '/awards', label: 'Grants', route: 'awardsList', adminOnly: true },
+  { path: '/organizations', label: 'Organizations', route: 'organizationsList', adminOnly: true },
   { path: '/pipeline', label: 'Pipeline', route: 'pipeline' },
   // Shown to everyone with a staff session, admins included: an admin who
   // is also assigned as a reviewer needs somewhere to do that work.

@@ -256,3 +256,134 @@ export async function organizationOverview(
     canSignIn: (signIn?.n ?? 0) > 0,
   };
 }
+
+// ---------------------------------------------------------------------------
+// The list
+// ---------------------------------------------------------------------------
+
+/**
+ * Every nonprofit the Foundation has a record of.
+ *
+ * THE COLUMN THAT MATTERS IS "CAN SIGN IN". A list of organizations is of
+ * mild interest; a list that answers "which of our grantees cannot be reached
+ * by anything this system sends" is the one somebody needs this month, and it
+ * is a question nothing in the platform has ever been able to answer in one
+ * place. The detail page says it for one nonprofit at a time, which is no use
+ * for finding the ones nobody has thought about.
+ */
+export interface OrganizationListRow {
+  id: string;
+  legalName: string;
+  ein: string | null;
+  einVerifiedAt: string | null;
+  status: string;
+  grants: number;
+  totalAwardedCents: number;
+  lastAwardedAt: string | null;
+  applications: number;
+  reportsOverdue: number;
+  canSignIn: boolean;
+}
+
+export interface OrganizationListFilters {
+  /** Legal name or EIN. */
+  q?: string | null;
+  /** Only nonprofits that have been funded. */
+  fundedOnly?: boolean;
+  /** Only funded nonprofits that nothing automated can reach. */
+  unreachableOnly?: boolean;
+  limit?: number;
+  offset?: number;
+}
+
+export async function listOrganizations(
+  db: D1Database,
+  session: Session,
+  filters: OrganizationListFilters = {},
+): Promise<{ rows: OrganizationListRow[]; total: number }> {
+  // Carries award totals, so admin only -- the same boundary as the detail.
+  if (session.role !== 'admin') throw notFound('organizations');
+
+  const where: string[] = ['o.deleted_at IS NULL'];
+  const binds: unknown[] = [];
+
+  const q = (filters.q ?? '').trim();
+  if (q !== '') {
+    const digits = q.replace(/\D/g, '');
+    where.push(`(LOWER(o.legal_name) LIKE ? OR (? <> '' AND o.ein = ?))`);
+    binds.push(`%${q.toLowerCase()}%`, digits, digits);
+  }
+
+  const limit = Math.min(Math.max(filters.limit ?? 100, 1), 500);
+  const offset = Math.max(filters.offset ?? 0, 0);
+  const now = new Date().toISOString();
+
+  /*
+   * Correlated subqueries rather than GROUP BY across three joins. Joining
+   * awards, applications and report_periods to one organization row and then
+   * grouping multiplies the rows against each other, which is how a nonprofit
+   * with two grants and three applications acquires six grants -- a wrong
+   * number on a money column, arrived at silently. Subqueries each count
+   * their own thing and cannot interfere.
+   */
+  const sql = `
+    SELECT o.id, o.legal_name AS legalName, o.ein,
+           o.ein_verified_at AS einVerifiedAt, o.status,
+           (SELECT COUNT(*) FROM awards w
+             WHERE w.organization_id = o.id AND w.deleted_at IS NULL) AS grants,
+           (SELECT COALESCE(SUM(w.awarded_amount_cents), 0) FROM awards w
+             WHERE w.organization_id = o.id AND w.deleted_at IS NULL)
+             AS totalAwardedCents,
+           (SELECT MAX(w.awarded_at) FROM awards w
+             WHERE w.organization_id = o.id AND w.deleted_at IS NULL) AS lastAwardedAt,
+           (SELECT COUNT(*) FROM applications a
+             WHERE a.organization_id = o.id AND a.deleted_at IS NULL) AS applications,
+           (SELECT COUNT(*) FROM report_periods rp
+              JOIN awards w2 ON w2.id = rp.award_id
+             WHERE w2.organization_id = o.id AND w2.deleted_at IS NULL
+               AND rp.deleted_at IS NULL
+               AND rp.status IN ('scheduled','open','revisions_requested')
+               AND rp.due_date < ?) AS reportsOverdue,
+           (SELECT COUNT(*) FROM users u
+             WHERE u.organization_id = o.id AND u.is_active = 1 AND u.deleted_at IS NULL
+               AND u.role IN ('applicant','grantee')) AS accounts
+      FROM organizations o
+     WHERE ${where.join(' AND ')}
+     ORDER BY o.legal_name`;
+
+  const { results } = await db
+    .prepare(`${sql} LIMIT ? OFFSET ?`)
+    .bind(now, ...binds, limit, offset)
+    .all<Record<string, unknown>>();
+
+  const counted = await db
+    .prepare(`SELECT COUNT(*) AS n FROM organizations o WHERE ${where.join(' AND ')}`)
+    .bind(...binds)
+    .first<{ n: number }>();
+
+  let rows: OrganizationListRow[] = (results ?? []).map((r) => ({
+    id: r.id as string,
+    legalName: r.legalName as string,
+    ein: (r.ein as string | null) ?? null,
+    einVerifiedAt: (r.einVerifiedAt as string | null) ?? null,
+    status: r.status as string,
+    grants: r.grants as number,
+    totalAwardedCents: r.totalAwardedCents as number,
+    lastAwardedAt: (r.lastAwardedAt as string | null) ?? null,
+    applications: r.applications as number,
+    reportsOverdue: r.reportsOverdue as number,
+    canSignIn: (r.accounts as number) > 0,
+  }));
+
+  // Both filters run after the page, so `total` is the unfiltered count --
+  // named separately rather than conflated, as the compliance desk does.
+  if (filters.fundedOnly) rows = rows.filter((r) => r.grants > 0);
+  /*
+   * "Unreachable" means FUNDED and with nobody who can sign in. An
+   * organization that has only ever applied and cannot sign in is not a
+   * problem; a grantee who cannot is one nobody will otherwise notice.
+   */
+  if (filters.unreachableOnly) rows = rows.filter((r) => r.grants > 0 && !r.canSignIn);
+
+  return { rows, total: counted?.n ?? rows.length };
+}

@@ -1349,3 +1349,29 @@ td > .meta {
 .nowrap {
   white-space: nowrap;
 }
+
+/* The one filter that is a question rather than a field. Given its own line
+   above the filter row, because it finds a problem nobody would think to look
+   for rather than narrowing a list somebody is already reading. */
+.filter-lead {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+  margin: 0 0 var(--space-4);
+}
+/* OFF is the outline, ON is the fill.
+ *
+ * It was written the other way round -- a rule making the pressed state blue
+ * -- which changed nothing, because `.btn` is already blue-filled. The toggle
+ * looked identical in both states, so the one control on this screen that
+ * exists to be switched gave no sign of whether it was on. Only visible
+ * rendered; no unit test could have seen it. */
+.filter-lead .btn[aria-pressed='false'] {
+  background: transparent;
+  color: var(--blue-ink);
+  border-color: var(--line);
+}
+.filter-lead .btn[aria-pressed='false']:hover {
+  border-color: var(--blue);
+}

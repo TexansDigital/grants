@@ -3,7 +3,7 @@ import { db, ctxFor, adminSession, reviewerSession, applicantSession, appErrorFr
 import { seedProgram } from '../src/seed/seedProgram';
 import { INSPIRE_CHANGE } from '../src/seed/inspireChange';
 import { generateReportPeriods } from '../src/lib/reportPeriods';
-import { awardOverview } from '../src/lib/awardPage';
+import { awardOverview, listAwards } from '../src/lib/awardPage';
 import { newId } from '../src/lib/ids';
 import { nowIso } from '../src/lib/time';
 
@@ -287,5 +287,95 @@ describe('the award page', () => {
     // award is the portal, which is a different payload entirely.
     const grantee = { userId: newId(), email: 'g@example.org', role: 'grantee' as const, organizationId: orgId };
     expect((await appErrorFrom(awardOverview(db, grantee, awardId))).code).toBe('NOT_FOUND');
+  });
+});
+
+describe('the grants list', () => {
+  it('lists grants newest first, with their reporting state', async () => {
+    const admin = adminSession();
+    const programId = await program();
+    const orgId = await org('Bayou Harbor Trust');
+    const a1 = await importedAward({ programId, orgId });
+    await generateReportPeriods(db, ctxFor(admin), a1);
+
+    const out = await listAwards(db, admin, { q: 'Bayou Harbor Trust' });
+    const row = out.rows.find((r) => r.id === a1);
+    expect(row).toBeDefined();
+    expect(row!.organizationName).toContain('Bayou Harbor Trust');
+    expect(row!.reportsTotal).toBeGreaterThan(0);
+    expect(row!.reportsOutstanding).toBeGreaterThan(0);
+  });
+
+  it('says on every row whether the grantee can be reached at all', async () => {
+    const admin = adminSession();
+    const programId = await program();
+    const orgId = await org('Unreachable Trust');
+    const awardId = await importedAward({ programId, orgId });
+
+    /*
+     * A grant whose grantee has no account cannot be chased by anything
+     * automated, and before this column that was invisible in any list -- you
+     * could only learn it one nonprofit at a time.
+     */
+    const before = await listAwards(db, admin, { q: 'Unreachable Trust' });
+    expect(before.rows.find((r) => r.id === awardId)!.granteeCanSignIn).toBe(false);
+
+    await db
+      .prepare(
+        `INSERT INTO users (id, email, role, organization_id, is_active, created_at, updated_at)
+         VALUES (?,?, 'grantee', ?, 1, ?, ?)`,
+      )
+      .bind(newId(), `reach-${seq}@example.org`, orgId, nowIso(), nowIso())
+      .run();
+
+    const after = await listAwards(db, admin, { q: 'Unreachable Trust' });
+    expect(after.rows.find((r) => r.id === awardId)!.granteeCanSignIn).toBe(true);
+  });
+
+  it('finds a grant by EIN typed with or without its dash', async () => {
+    const admin = adminSession();
+    const programId = await program();
+    const orgId = await org('Dashed');
+    const awardId = await importedAward({ programId, orgId });
+    const ein = await db
+      .prepare(`SELECT ein FROM organizations WHERE id = ?`)
+      .bind(orgId)
+      .first<{ ein: string }>();
+
+    const dashed = `${ein!.ein.slice(0, 2)}-${ein!.ein.slice(2)}`;
+    for (const typed of [ein!.ein, dashed]) {
+      const out = await listAwards(db, admin, { q: typed });
+      expect(out.rows.map((r) => r.id)).toContain(awardId);
+    }
+  });
+
+  it('can show only grants with something outstanding', async () => {
+    const admin = adminSession();
+    const programId = await program();
+    const owing = await importedAward({ programId, orgId: await org('Owing') });
+    const clear = await importedAward({ programId, orgId: await org('Clear') });
+    await generateReportPeriods(db, ctxFor(admin), owing);
+
+    const out = await listAwards(db, admin, { outstandingOnly: true, limit: 500 });
+    const ids = out.rows.map((r) => r.id);
+    expect(ids).toContain(owing);
+    expect(ids).not.toContain(clear);
+  });
+
+  it('leaves out soft-deleted grants', async () => {
+    const admin = adminSession();
+    const programId = await program();
+    const orgId = await org('Tidy List');
+    const gone = await importedAward({ programId, orgId });
+    await db.prepare(`UPDATE awards SET deleted_at = ? WHERE id = ?`).bind(nowIso(), gone).run();
+
+    const out = await listAwards(db, admin, { q: 'Tidy List' });
+    expect(out.rows.map((r) => r.id)).not.toContain(gone);
+  });
+
+  it('is refused to everyone but an admin', async () => {
+    for (const s of [reviewerSession(), applicantSession(newId())]) {
+      expect((await appErrorFrom(listAwards(db, s, {}))).code).toBe('NOT_FOUND');
+    }
   });
 });

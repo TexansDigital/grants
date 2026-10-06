@@ -201,6 +201,28 @@ and `/tmp/organization-dark.png`.
 reached from a grant or by typing the address. The list belongs with the
 Organizations tab.
 
+### The Grants and Organizations lists
+
+Two new screens, at `/awards` and `/organizations`, and two new tabs.
+
+**Grants** is the first answer this system has ever had to "show me the
+grants" — awards were reachable only through the application that produced
+them, or one at a time by id. Each row carries its reporting state and whether
+the grantee can sign in, because the question is never just what was funded.
+
+**Organizations** exists mostly for one button: *Which grantees can we not
+reach?* Funded nonprofits where nobody has an account. No reminder from
+Steward reaches them whatever goes overdue, and until now that could only be
+asked one nonprofit at a time — useless for finding the ones nobody has
+thought about.
+
+Filter state is in the address on both, so a filtered list is a link somebody
+can send. Check them: `npm run e2e:lists`.
+
+**The navigation now wraps to two lines at 1280px**, with eleven items. That
+is the rename-and-move phase, which is next: To do · Grants · Organizations ·
+Applications · Results · Impact · Programs, with Reporting folded into Grants.
+
 ### Bugs found and fixed during this work
 
 Recorded because all four were invisible to a green test suite, and three were
@@ -216,6 +238,13 @@ found by reading real output rather than by testing:
   failure if any var is added to the default and not to production.
 - **`docs/SECRETS.md` claimed preview could not email real people.** It can,
   and has since deliverability testing.
+- **The unreachable-grantees toggle looked identical on and off.** The rule
+  styled the pressed state blue; `.btn` is already blue-filled, so it changed
+  nothing. The one control on that screen that exists to be switched gave no
+  sign of whether it was on. Only visible rendered.
+- **`/grants` was nearly used for the staff list.** It is the *public* page
+  listing who was funded, served on both hostnames. Caught by the
+  route-shadowing test; the staff list is at `/awards`.
 - **`.rowlink` had no styling but a cursor**, so every clickable cell in a
   table rendered with the browser's default button chrome. On the already-live
   compliance desk that meant "Bayou Harbor Trust" and "$35,000" as two grey

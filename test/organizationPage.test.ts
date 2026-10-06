@@ -3,7 +3,7 @@ import { db, ctxFor, adminSession, reviewerSession, applicantSession, appErrorFr
 import { seedProgram } from '../src/seed/seedProgram';
 import { INSPIRE_CHANGE } from '../src/seed/inspireChange';
 import { generateReportPeriods } from '../src/lib/reportPeriods';
-import { organizationOverview } from '../src/lib/organizationPage';
+import { organizationOverview, listOrganizations } from '../src/lib/organizationPage';
 import { organizationHistoryForStaff } from '../src/lib/scope';
 import { newId } from '../src/lib/ids';
 import { nowIso } from '../src/lib/time';
@@ -278,5 +278,92 @@ describe('the organization page', () => {
 
     const grantee = { userId: newId(), email: 'g@example.org', role: 'grantee' as const, organizationId: orgId };
     expect((await appErrorFrom(organizationOverview(db, grantee, orgId))).code).toBe('NOT_FOUND');
+  });
+});
+
+describe('the organizations list', () => {
+  it('counts grants and applications without multiplying them together', async () => {
+    const admin = adminSession();
+    const programId = await program();
+    const orgId = await org('Counted Trust');
+    await award({ programId, orgId, cents: 1_000_000 });
+    await award({ programId, orgId, cents: 2_000_000 });
+
+    /*
+     * THE BUG THIS GUARDS. Joining awards and applications to one
+     * organization row and grouping multiplies them against each other, so a
+     * nonprofit with two grants and three applications acquires six grants
+     * and a tripled total -- a wrong number on a money column, arrived at
+     * silently. The counts are correlated subqueries for this reason.
+     */
+    const out = await listOrganizations(db, admin, { q: 'Counted Trust' });
+    const row = out.rows.find((r) => r.id === orgId)!;
+    expect(row.grants).toBe(2);
+    expect(row.totalAwardedCents).toBe(3_000_000);
+  });
+
+  it('finds the funded nonprofits nothing automated can reach', async () => {
+    const admin = adminSession();
+    const programId = await program();
+
+    const stranded = await org('Stranded Trust');
+    await award({ programId, orgId: stranded });
+
+    const reachable = await org('Reachable Trust');
+    await award({ programId, orgId: reachable });
+    await granteeUser(reachable, `reach-${seq}@example.org`);
+
+    // Never funded and no account: not a problem, and must not appear.
+    const applicantOnly = await org('Applicant Only');
+
+    const out = await listOrganizations(db, admin, { unreachableOnly: true, limit: 500 });
+    const ids = out.rows.map((r) => r.id);
+    expect(ids).toContain(stranded);
+    expect(ids).not.toContain(reachable);
+    expect(ids).not.toContain(applicantOnly);
+  });
+
+  it('reports zero rather than null for a nonprofit with no grants', async () => {
+    const admin = adminSession();
+    const orgId = await org('Never Funded');
+
+    // COALESCE on the sum, because SUM over no rows is NULL and a null total
+    // renders as a blank cell in a money column, which reads as missing data
+    // rather than as nothing.
+    const out = await listOrganizations(db, admin, { q: 'Never Funded' });
+    const row = out.rows.find((r) => r.id === orgId)!;
+    expect(row.grants).toBe(0);
+    expect(row.totalAwardedCents).toBe(0);
+    expect(row.lastAwardedAt).toBeNull();
+  });
+
+  it('finds a nonprofit by EIN typed either way', async () => {
+    const admin = adminSession();
+    const orgId = await org('Dashed Org');
+    const ein = await db
+      .prepare(`SELECT ein FROM organizations WHERE id = ?`)
+      .bind(orgId)
+      .first<{ ein: string }>();
+
+    for (const typed of [ein!.ein, `${ein!.ein.slice(0, 2)}-${ein!.ein.slice(2)}`]) {
+      const out = await listOrganizations(db, admin, { q: typed });
+      expect(out.rows.map((r) => r.id)).toContain(orgId);
+    }
+  });
+
+  it('leaves out soft-deleted organizations', async () => {
+    const admin = adminSession();
+    const orgId = await org('Deleted Org');
+    await db.prepare(`UPDATE organizations SET deleted_at = ? WHERE id = ?`)
+      .bind(nowIso(), orgId).run();
+
+    const out = await listOrganizations(db, admin, { q: 'Deleted Org' });
+    expect(out.rows.map((r) => r.id)).not.toContain(orgId);
+  });
+
+  it('is refused to everyone but an admin', async () => {
+    for (const s of [reviewerSession(), applicantSession(newId())]) {
+      expect((await appErrorFrom(listOrganizations(db, s, {}))).code).toBe('NOT_FOUND');
+    }
   });
 });

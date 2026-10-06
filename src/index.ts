@@ -82,8 +82,8 @@ import {
 } from './lib/reportAdmin';
 import { buildReportForm, publishReportForm } from './lib/reportForm';
 import { todo } from './lib/todo';
-import { awardOverview } from './lib/awardPage';
-import { organizationOverview } from './lib/organizationPage';
+import { awardOverview, listAwards } from './lib/awardPage';
+import { organizationOverview, listOrganizations } from './lib/organizationPage';
 import { findDuplicateCandidates, planMerge, applyMerge } from './lib/merge';
 import {
   junkOrganization, restoreOrganization, junkApplication, listRemovedOrganizations,
@@ -577,8 +577,15 @@ const routes: readonly Route[] = [
       '/applications/:id',
       // The grant's own page. Typed and pasted far more often than most --
       // it is what an admin sends a colleague when asking about a grant.
+      /*
+       * The staff list of grants lives at /awards, NOT /grants: /grants is
+       * the PUBLIC page listing who was funded, served on both hostnames, and
+       * the two must never share a path. It also matches /awards/:id below.
+       */
+      '/awards',
       '/awards/:id',
       // The nonprofit's own page.
+      '/organizations',
       '/organizations/:id',
       '/programs/:id/rubrics',
       // A reviewer's own queue and one scoring sheet. Separate from /pipeline
@@ -820,6 +827,51 @@ const routes: readonly Route[] = [
         ctx,
       ),
   },
+  // ---- the lists -----------------------------------------------------------
+  {
+    /*
+     * Every grant. The system has never had this: awards were reachable only
+     * through the application that produced them, or one at a time by id, so
+     * "show me the grants" -- the first question anybody asks of a
+     * grantmaking system -- had no answer.
+     */
+    method: 'GET',
+    path: '/api/awards',
+    roles: ADMIN_ONLY,
+    handler: async ({ env, ctx, url, session }) => {
+      const p = url.searchParams;
+      return json(
+        await listAwards(env.DB, session, {
+          programId: p.get('program_id'),
+          status: p.get('status'),
+          q: p.get('q'),
+          outstandingOnly: p.get('outstanding') === 'true',
+          limit: Number(p.get('limit') ?? '100'),
+          offset: Number(p.get('offset') ?? '0'),
+        }),
+        ctx,
+      );
+    },
+  },
+  {
+    method: 'GET',
+    path: '/api/organizations',
+    roles: ADMIN_ONLY,
+    handler: async ({ env, ctx, url, session }) => {
+      const p = url.searchParams;
+      return json(
+        await listOrganizations(env.DB, session, {
+          q: p.get('q'),
+          fundedOnly: p.get('funded') === 'true',
+          unreachableOnly: p.get('unreachable') === 'true',
+          limit: Number(p.get('limit') ?? '100'),
+          offset: Number(p.get('offset') ?? '0'),
+        }),
+        ctx,
+      );
+    },
+  },
+
   // ---- one grant, on one page ----------------------------------------------
   {
     /*
