@@ -36,7 +36,13 @@ export type HealthKind =
   | 'organization'
   | 'application'
   | 'report_period'
-  | 'attachment';
+  | 'attachment'
+  /*
+   * Something the system recorded about itself, pointing at no record. Its id
+   * is an error code rather than a row id, so the UI must not offer to open it
+   * or print a truncated id in place of a link.
+   */
+  | 'system';
 
 export type Severity = 'blocking' | 'attention' | 'informational';
 
@@ -108,6 +114,18 @@ function assertAdmin(session: Session): void {
  * Flagging it buries the ones that matter. Only organizations that actually
  * submitted something or hold a grant are in scope.
  */
+/**
+ * How far back the recorded-errors check looks.
+ *
+ * A week, because this check answers "is something failing now" rather than
+ * "what has ever gone wrong". A month of history would bury a job that started
+ * failing on Tuesday under everything that failed in September.
+ */
+export const ERROR_WINDOW_DAYS = 7;
+
+const ERROR_WINDOW_START = (): string =>
+  new Date(Date.now() - ERROR_WINDOW_DAYS * 86_400_000).toISOString();
+
 const ORG_IN_PLAY = `(
   EXISTS (SELECT 1 FROM applications ap
            WHERE ap.organization_id = o.id
@@ -248,6 +266,67 @@ function specs(now: string): CheckSpec[] {
           `${str(r.to_email)} — ${str(r.error_code) || 'refused'}, ` +
           `last tried ${str(r.created_at).slice(0, 10)}`,
         // Not about an amount.
+        amountCents: null,
+      }),
+    },
+    {
+      /*
+       * WHAT THE SYSTEM WROTE DOWN ABOUT ITSELF AND NOBODY READ.
+       *
+       * `error_log` has twelve write sites and, until this check, zero reads.
+       * Nothing queried it: no screen, no job, no export. So every diagnosis
+       * it holds -- a cron job that died, a reminder a provider refused, a
+       * file that could not be destroyed on its retention date -- was written
+       * carefully and seen by nobody.
+       *
+       * The cron handler's own comment gives the game away: it rethrows at the
+       * end of a run so Cloudflare marks it failed "rather than only in a log
+       * table somebody has to think to read". That was true of this table, and
+       * it was written by somebody who then kept logging to it.
+       *
+       * ATTENTION rather than blocking. A single INTERNAL from one request is
+       * not a reason to hold a launch; a pattern of them is a reason to look.
+       * The conditions that genuinely stop a grantee being reached have their
+       * own blocking checks above.
+       *
+       * `warn` is left out on purpose. REPORT_REMINDER_NO_CONTACT is a warn
+       * and is already a visible state on the organization page -- repeating
+       * it here would make this list long enough to stop being read, which is
+       * how a check becomes decoration.
+       */
+      key: 'recorded_errors',
+      label: 'Errors the system recorded in the last week',
+      guidance:
+        'Grouped by code, newest first. These are diagnoses nothing else surfaces; ' +
+        'a code repeating every night is a job that is failing every night.',
+      severity: 'attention',
+      kind: 'system',
+      sql: `
+        SELECT e.code AS id,
+               e.code AS code,
+               COUNT(*) AS times,
+               MAX(e.created_at) AS latest,
+               /* The newest message for this code, which is the one to read. */
+               (SELECT m.message FROM error_log m
+                 WHERE m.code = e.code AND m.severity IN ('error', 'fatal')
+                 ORDER BY m.created_at DESC LIMIT 1) AS message,
+               COUNT(*) OVER () AS match_count
+          FROM error_log e
+         WHERE e.severity IN ('error', 'fatal')
+           AND e.created_at >= ?
+         GROUP BY e.code
+         ORDER BY MAX(e.created_at) DESC
+         LIMIT ?`,
+      binds: [ERROR_WINDOW_START(), ROWS_PER_CHECK],
+      row: (r) => ({
+        id: str(r.id),
+        title: str(r.code),
+        detail:
+          `${num(r.times) ?? 0} time${num(r.times) === 1 ? '' : 's'}, ` +
+          `last ${str(r.latest).slice(0, 16).replace('T', ' ')} — ` +
+          // Capped: a stack-adjacent message can run to a paragraph, and this
+          // is a list to scan rather than a place to debug.
+          `${str(r.message).slice(0, 160)}`,
         amountCents: null,
       }),
     },

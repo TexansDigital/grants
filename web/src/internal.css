@@ -1042,6 +1042,23 @@ tbody tr.band:hover {
   border-top: 1px solid var(--line-2);
   flex-wrap: wrap;
 }
+/*
+ * BOTH WRAP INSIDE THE ROW. A finding's subject is usually an organization
+ * name, which breaks at spaces -- and then `recorded_errors` arrived, whose
+ * subject is a code like REPORT_REMINDER_NOT_DELIVERED: twenty-nine
+ * characters with nowhere to break. At 320px that pushed the whole Data
+ * health screen sideways, masthead and all. Caught by the harness's
+ * no-sideways-scroll check, which is the only thing that would have.
+ *
+ * `anywhere` rather than `break-word`, matching the table cells: these are
+ * identifiers rather than prose, and a code broken mid-token is still
+ * readable where a horizontally scrolling page is not.
+ */
+.findings .who,
+.findings .what {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
 .findings .who { font-weight: 600; }
 .findings .what { color: var(--ink-2); font-size: var(--step--1); }
 .findings .amount {

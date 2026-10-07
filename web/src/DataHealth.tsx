@@ -205,6 +205,13 @@ function Reference({
   row: HealthRow;
   onNavigate: (path: string) => void;
 }): ReactElement {
+  /*
+   * A `system` row points at no record -- its id is an error code, not a row
+   * id. Falling through to the short-id branch below would print "REPORT_R"
+   * and offer it as though it were something to look up.
+   */
+  if (row.kind === 'system') return <span className="meta">&mdash;</span>;
+
   const href =
     row.kind === 'application'
       ? `/applications/${encodeURIComponent(row.id)}`

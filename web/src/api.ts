@@ -731,7 +731,13 @@ export type Severity = 'blocking' | 'attention' | 'informational';
 
 export interface HealthRow {
   id: string;
-  kind: 'award' | 'organization' | 'application' | 'report_period' | 'attachment';
+  /*
+   * `system` points at no record: its id is an error code. Mirrors HealthKind
+   * in src/lib/dataHealth.ts -- two copies of one union, which the UI's
+   * exhaustive branch would not have caught, because an unknown kind simply
+   * fell through to printing a truncated id.
+   */
+  kind: 'award' | 'organization' | 'application' | 'report_period' | 'attachment' | 'system';
   title: string;
   detail: string;
   /** Integer cents, formatted at the display edge. Null when not about money. */

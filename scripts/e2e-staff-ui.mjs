@@ -177,6 +177,28 @@ const HEALTH = {
       truncated: false,
       rows: [],
     },
+    {
+      /*
+       * A `system` row points at no record -- its id is an error code. The UI
+       * prints a truncated id for any kind it cannot open, which would have
+       * rendered "REPORT_R" and offered it as something to look up.
+       */
+      key: 'recorded_errors',
+      label: 'Errors the system recorded in the last week',
+      guidance: 'Grouped by code, newest first.',
+      severity: 'attention',
+      count: 1,
+      truncated: false,
+      rows: [
+        {
+          id: 'REPORT_REMINDER_NOT_DELIVERED',
+          kind: 'system',
+          title: 'REPORT_REMINDER_NOT_DELIVERED',
+          detail: '2 times, last 2026-10-07 07:00 — the provider refused a reminder',
+          amountCents: null,
+        },
+      ],
+    },
   ],
 };
 
@@ -779,7 +801,7 @@ async function main() {
     if (process.env.STEWARD_SHOT_HEALTH) {
       await page.screenshot({ path: process.env.STEWARD_SHOT_HEALTH, fullPage: true });
     }
-    check('every check is on screen, including the clean one', await checks.count(), 5);
+    check('every check is on screen, including the clean one', await checks.count(), 6);
     check(
       'in the order the server sorted them, blocking first',
       await checks.locator('.check-head h3').allInnerTexts(),
@@ -789,6 +811,8 @@ async function main() {
         'Active grants with no signed agreement',
         'EINs never checked against the IRS file',
         'Possible duplicate organizations',
+        // Attention, so it sorts after every blocking check.
+        'Errors the system recorded in the last week',
       ],
     );
 
@@ -838,6 +862,26 @@ async function main() {
     // Back, and the merge panel is embedded in its check rather than beside it.
     await goTo(page, 'Data health');
     await page.locator('.health-summary').waitFor();
+
+    /*
+     * AN ERROR CODE IS NOT A ROW ID. Every kind the UI cannot open falls
+     * through to printing the first eight characters of the id, which for
+     * REPORT_REMINDER_NOT_DELIVERED is "REPORT_R" -- offered in the reference
+     * column as though it were something to go and look up.
+     */
+    {
+      const errs = page.locator('article.check', { hasText: 'Errors the system recorded' });
+      await errs.first().waitFor({ timeout: 10_000 });
+      const text = await errs.first().innerText();
+      truthy('a recorded error names its code in full', /REPORT_REMINDER_NOT_DELIVERED/.test(text));
+      truthy('and says how many times and when', /2 times/.test(text));
+      check(
+        'and offers no truncated id as though it were a record',
+        /REPORT_R\b(?!EMINDER)/.test(text),
+        false,
+      );
+    }
+
     const dupCheck = page.locator('article.check', { hasText: 'Possible duplicate organizations' });
     await dupCheck.locator('article.review-section').first().waitFor();
     check(

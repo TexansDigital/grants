@@ -797,3 +797,89 @@ describe('grantees we could not reach', () => {
     expect(c.label).toContain('could not reach');
   });
 });
+
+// ---------------------------------------------------------------------------
+/**
+ * What the system wrote down about itself.
+ *
+ * `error_log` had twelve write sites and zero reads. Nothing queried it — not
+ * a screen, not a job, not an export — so every diagnosis in it was written
+ * carefully and seen by nobody: a cron job that died, a reminder a provider
+ * refused, a financial statement that could not be destroyed on its retention
+ * date.
+ *
+ * The sharpest case was self-inflicted. A fix landed earlier the same day
+ * logged REPORT_REMINDER_NOT_DELIVERED so a bounced reminder would stop being
+ * invisible — into this table. It moved the problem from "not recorded" to
+ * "recorded where nobody looks", and was reported as fixed.
+ */
+describe('errors the system recorded', () => {
+  async function logged(opts: {
+    code: string;
+    severity?: 'warn' | 'error' | 'fatal';
+    message?: string;
+    agoDays?: number;
+  }): Promise<void> {
+    const at = new Date(Date.now() - (opts.agoDays ?? 0) * 86_400_000).toISOString();
+    await db
+      .prepare(
+        `INSERT INTO error_log (id, severity, code, message, created_at)
+         VALUES (?,?,?,?,?)`,
+      )
+      .bind(newId(), opts.severity ?? 'error', opts.code, opts.message ?? 'something broke', at)
+      .run();
+  }
+
+  it('names a code, how many times, and the newest message', async () => {
+    await logged({ code: 'CRON_FAILED', message: 'older', agoDays: 2 });
+    await logged({ code: 'CRON_FAILED', message: 'the most recent one' });
+
+    const c = check(await dataHealth(db, admin), 'recorded_errors');
+    expect(c.rows).toHaveLength(1);
+    expect(c.rows[0]?.title).toBe('CRON_FAILED');
+    expect(c.rows[0]?.detail).toContain('2 times');
+    // The newest message, not whichever the grouping happened to pick.
+    expect(c.rows[0]?.detail).toContain('the most recent one');
+  });
+
+  it('points at no record, because an error code is not a row', async () => {
+    await logged({ code: 'RETENTION_PURGE_FAILED' });
+    const c = check(await dataHealth(db, admin), 'recorded_errors');
+    // `system` is what stops the UI printing "RETENTI" as though it were an id
+    // somebody could look up.
+    expect(c.rows[0]?.kind).toBe('system');
+  });
+
+  /*
+   * A warn is left out deliberately. REPORT_REMINDER_NO_CONTACT is a warn and
+   * is already a visible state on the organization page; repeating it here
+   * would make the list long enough to stop being read.
+   */
+  it('leaves out a warning that is already visible elsewhere', async () => {
+    await logged({ code: 'REPORT_REMINDER_NO_CONTACT', severity: 'warn' });
+    expect(check(await dataHealth(db, admin), 'recorded_errors').rows).toHaveLength(0);
+  });
+
+  it('asks whether something is failing now, not what ever went wrong', async () => {
+    await logged({ code: 'ANCIENT_FAILURE', agoDays: 30 });
+    expect(check(await dataHealth(db, admin), 'recorded_errors').rows).toHaveLength(0);
+  });
+
+  it('surfaces the two that were written to it and never read', async () => {
+    // Both of these existed and reached nobody: one logged by the reminder job
+    // when a provider refuses a message, one by the retention pass when a file
+    // past its date cannot be destroyed.
+    await logged({ code: 'REPORT_REMINDER_NOT_DELIVERED' });
+    await logged({ code: 'RETENTION_PURGE_FAILED' });
+
+    const codes = check(await dataHealth(db, admin), 'recorded_errors').rows.map((r) => r.title);
+    expect(codes).toContain('REPORT_REMINDER_NOT_DELIVERED');
+    expect(codes).toContain('RETENTION_PURGE_FAILED');
+  });
+
+  it('reads as clean rather than missing when nothing has failed', async () => {
+    const c = check(await dataHealth(db, admin), 'recorded_errors');
+    expect(c.rows).toHaveLength(0);
+    expect(c.severity).toBe('attention');
+  });
+});
