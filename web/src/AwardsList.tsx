@@ -248,7 +248,17 @@ export function AwardsList({ programs, query, onQueryChange, onNavigate }: Props
                     >
                       {r.organizationName}
                     </button>
-                    <span className="meta">{r.programName}</span>
+                    {/*
+                      The program, and what the grant was for. A blank here is
+                      not decoration -- it is the thirteen imported grants,
+                      none of which carries any record of its subject matter,
+                      and this is the only place you can see across them all
+                      at once rather than opening each in turn.
+                    */}
+                    <span className="meta">
+                      {r.programName}
+                      {r.focusArea ? ` \u00b7 ${r.focusArea}` : ''}
+                    </span>
                   </td>
                   <td>
                     {day(r.awardedAt)}

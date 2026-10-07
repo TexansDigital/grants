@@ -60,6 +60,29 @@ export interface AwardOverview {
    */
   applicationId: string | null;
   projectTitle: string | null;
+  /*
+   * WHAT THE GRANT WAS FOR. Null is the ordinary state for anything imported
+   * -- the award importer accepts identity and dates and nothing describing
+   * the work -- so every surface renders the absence without a dangling
+   * label, and the award page offers to fill it in.
+   */
+  /*
+   * The award's OWN subject matter, kept apart from `projectTitle` above.
+   *
+   * `projectTitle` is a COALESCE: the award's title if it has one, otherwise
+   * the application's. That is right for display, and wrong for an edit form
+   * -- pre-filling from the coalesced value and then saving it would copy the
+   * application's title onto the award as though somebody had decided it.
+   * What a screen edits has to be what it read.
+   */
+  subject: {
+    projectTitle: string | null;
+    purpose: string | null;
+    focusArea: string | null;
+    countiesServed: string[];
+  };
+  /** For the optimistic lock on a save. See describeAward. */
+  updatedAt: string;
   awardedAmountCents: number;
   awardedAt: string;
   announcementDate: string | null;
@@ -92,6 +115,25 @@ export interface AwardOverview {
 const RELATED = `id, awarded_amount_cents AS awardedAmountCents, awarded_at AS awardedAt,
                  status, term_start AS termStart, term_end AS termEnd`;
 
+/**
+ * The counties column to a list.
+ *
+ * Malformed JSON reads as "none recorded" rather than throwing: a column that
+ * somehow holds junk must not take down the page that would let an admin fix
+ * it. The schema CHECK makes this close to unreachable; "close to" is why the
+ * try is here.
+ */
+function parseCounties(raw: string | null): string[] {
+  if (!raw) return [];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((x): x is string => typeof x === 'string' && x.trim() !== '');
+  } catch {
+    return [];
+  }
+}
+
 export async function awardOverview(
   db: D1Database,
   session: Session,
@@ -121,7 +163,21 @@ export async function awardOverview(
               o.legal_name AS organizationName,
               p.name AS programName,
               c.name AS cycleName,
-              app.project_title AS projectTitle
+              /*
+               * THE AWARD'S OWN TITLE WINS. 0028 gives an award its own
+               * subject matter, because what was asked for and what was
+               * funded are different facts and a grant made at half the
+               * request is usually a narrower piece of work. The application's
+               * title is the fallback, and for every imported grant there is
+               * no application at all.
+               */
+              COALESCE(w.project_title, app.project_title) AS projectTitle,
+              -- The award's own, unmixed, for the form that edits it.
+              w.project_title AS awardProjectTitle,
+              w.purpose, w.focus_area AS focusArea,
+              w.counties_served_json AS countiesJson,
+              -- Handed to the screen so its save can take the optimistic lock.
+              w.updated_at AS updatedAt
          FROM awards w
          JOIN organizations o ON o.id = w.organization_id
          JOIN programs p ON p.id = w.program_id
@@ -168,6 +224,13 @@ export async function awardOverview(
     cycleName: (row.cycleName as string | null) ?? null,
     applicationId: (row.applicationId as string | null) ?? null,
     projectTitle: (row.projectTitle as string | null) ?? null,
+    subject: {
+      projectTitle: (row.awardProjectTitle as string | null) ?? null,
+      purpose: (row.purpose as string | null) ?? null,
+      focusArea: (row.focusArea as string | null) ?? null,
+      countiesServed: parseCounties(row.countiesJson as string | null),
+    },
+    updatedAt: String(row.updatedAt ?? ''),
     awardedAmountCents: row.awardedAmountCents as number,
     awardedAt: row.awardedAt as string,
     announcementDate: (row.announcementDate as string | null) ?? null,
@@ -237,6 +300,14 @@ export interface AwardListRow {
   reportsTotal: number;
   reportsOverdue: number;
   reportsOutstanding: number;
+  /**
+   * What the grant was for, or null where nobody has recorded it.
+   *
+   * On the row because the thirteen imported grants all start blank, and
+   * without it there is no way to see across the portfolio which ones have
+   * been catalogued -- you would have to open each grant in turn to find out.
+   */
+  focusArea: string | null;
   /**
    * When anybody at the grantee last completed a sign-in, or null if nobody
    * ever has.
@@ -312,6 +383,9 @@ export async function listAwards(
            w.awarded_amount_cents AS awardedAmountCents, w.awarded_at AS awardedAt,
            w.status, w.term_start AS termStart, w.term_end AS termEnd,
            o.legal_name AS organizationName, p.name AS programName,
+           -- What the grant was for, so the list shows which grants have been
+           -- catalogued and which have not. A blank here is the work to do.
+           w.focus_area AS focusArea,
            (SELECT COUNT(*) FROM report_periods rp
              WHERE rp.award_id = w.id AND rp.deleted_at IS NULL) AS reportsTotal,
            /*
@@ -384,6 +458,7 @@ export async function listAwards(
     reportsTotal: r.reportsTotal as number,
     reportsOverdue: r.reportsOverdue as number,
     reportsOutstanding: r.reportsOutstanding as number,
+    focusArea: (r.focusArea as string | null) ?? null,
     granteeLastSignInAt: (r.granteeLastSignInAt as string | null) ?? null,
   }));
 

@@ -106,6 +106,14 @@ export type AuditAction =
   // awards and payments
   | 'award.created'
   | 'award.amended'
+  /*
+   * Recording what a grant was FOR, which is not an amendment. `award.amended`
+   * means a term moved -- the amount, the dates -- and carries a written
+   * reason and an `award_amendments` row. This one means somebody wrote down
+   * the subject matter of a grant already made. Keeping them apart means "what
+   * changed about this grant's terms" stays an answerable query.
+   */
+  | 'award.described'
   | 'award.accepted'
   | 'payment.scheduled'
   | 'payment.recorded'

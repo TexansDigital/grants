@@ -271,6 +271,18 @@ export function AwardDetail({ awardId, onNavigate }: Props): ReactElement {
           </p>
         ) : null}
 
+        {/*
+          WHAT THIS GRANT FUNDED.
+          Until 0028 this had nowhere to live. The system could say the
+          Foundation gave an organization $50,000 in 2025 and nothing could say
+          what for: the importer takes identity and dates, an imported award
+          has no application, and the search index that carries counties and
+          focus area indexes applications. So the funding history was a ledger
+          of amounts with no subject matter in it at all.
+        */}
+        <h3 className="after-facts">What this grant funded</h3>
+        <Subject award={data} busy={busy} onSaved={act} />
+
         <h3 className="after-facts">Public listing</h3>
         {canPublish ? (
           <p>
@@ -406,5 +418,178 @@ export function AwardDetail({ awardId, onNavigate }: Props): ReactElement {
       <AwardPaperwork awardId={awardId} />
       <PaymentLedger awardId={awardId} />
     </>
+  );
+}
+
+
+/**
+ * The subject-matter block: read it, or fill it in.
+ *
+ * NOT AN AMENDMENT FORM, and the difference shows on screen. Amending an award
+ * demands a written reason because a term is moving. Writing down that a 2025
+ * grant paid for literacy coaching changes nothing anybody was promised, and
+ * asking "say why this award is being changed" thirteen times to fill in
+ * blanks that were never filled in would teach whoever does it to type
+ * anything. The save still takes the same optimistic lock, because two admins
+ * cataloguing from the same spreadsheet is the scenario that lock exists for.
+ */
+function Subject({
+  award,
+  busy,
+  onSaved,
+}: {
+  award: AwardOverview;
+  busy: boolean;
+  onSaved: (what: string, run: () => Promise<string>) => Promise<void>;
+}): ReactElement {
+  const subject = award.subject;
+  const [editing, setEditing] = useState(false);
+  const [title, setTitle] = useState(subject.projectTitle ?? '');
+  const [purpose, setPurpose] = useState(subject.purpose ?? '');
+  const [focus, setFocus] = useState(subject.focusArea ?? '');
+  const [counties, setCounties] = useState(subject.countiesServed.join(', '));
+
+  const nothingRecorded =
+    !subject.projectTitle && !subject.purpose && !subject.focusArea && subject.countiesServed.length === 0;
+
+  function open(): void {
+    // Reopen from what is on the record, not from whatever was half-typed and
+    // abandoned the last time this was opened.
+    setTitle(subject.projectTitle ?? '');
+    setPurpose(subject.purpose ?? '');
+    setFocus(subject.focusArea ?? '');
+    setCounties(subject.countiesServed.join(', '));
+    setEditing(true);
+  }
+
+  if (!editing) {
+    return (
+      <>
+        {nothingRecorded ? (
+          <p className="empty-reason subject-empty">
+            Nothing has been recorded about what this grant was for. Until it is, this grant
+            cannot be found by what it funded — only by the organization&rsquo;s name, its EIN
+            and the amount.
+          </p>
+        ) : (
+          <dl className="facts">
+            {subject.projectTitle ? (
+              <div>
+                <dt>Title</dt>
+                <dd>{subject.projectTitle}</dd>
+              </div>
+            ) : null}
+            {subject.focusArea ? (
+              <div>
+                <dt>Focus area</dt>
+                <dd>{subject.focusArea}</dd>
+              </div>
+            ) : null}
+            {subject.countiesServed.length > 0 ? (
+              <div>
+                <dt>Counties served</dt>
+                <dd>{subject.countiesServed.join(', ')}</dd>
+              </div>
+            ) : null}
+          </dl>
+        )}
+        {/* The description is prose, so it sits under the facts rather than
+            inside a tile beside them. */}
+        {subject.purpose ? <p className="award-purpose">{subject.purpose}</p> : null}
+        <p>
+          <button type="button" className="btn small" disabled={busy} onClick={open}>
+            {nothingRecorded ? 'Record what this grant funded' : 'Edit what this grant funded'}
+          </button>
+        </p>
+      </>
+    );
+  }
+
+  return (
+    <div className="form-grid subject-form">
+      <div className="filter">
+        <label htmlFor="subject-title">Title</label>
+        <input
+          id="subject-title"
+          value={title}
+          maxLength={200}
+          onChange={(e) => setTitle(e.target.value)}
+          placeholder="Campus literacy coaches"
+        />
+      </div>
+      <div className="filter">
+        <label htmlFor="subject-focus">Focus area</label>
+        <input
+          id="subject-focus"
+          value={focus}
+          maxLength={120}
+          onChange={(e) => setFocus(e.target.value)}
+          placeholder="Education"
+        />
+      </div>
+      <div className="filter">
+        <label htmlFor="subject-counties">Counties served</label>
+        <input
+          id="subject-counties"
+          value={counties}
+          onChange={(e) => setCounties(e.target.value)}
+          placeholder="Harris, Fort Bend"
+        />
+        {/* Said once, here, rather than left for somebody to discover by
+            typing a semicolon and losing the lot into one county name. */}
+        <span className="meta">Separate them with commas.</span>
+      </div>
+      <div className="filter wide">
+        <label htmlFor="subject-purpose">What the money paid for</label>
+        <textarea
+          id="subject-purpose"
+          rows={4}
+          value={purpose}
+          maxLength={4000}
+          onChange={(e) => setPurpose(e.target.value)}
+          placeholder="Two full-time campus coordinators at Alief Taylor and Alief Elsik."
+        />
+      </div>
+      <div className="actions">
+        <button
+          type="button"
+          className="btn"
+          disabled={busy}
+          onClick={() =>
+            void onSaved('Recording what this grant funded', async () => {
+              await api.describeAward(award.awardId, {
+                projectTitle: title.trim() === '' ? null : title,
+                purpose: purpose.trim() === '' ? null : purpose,
+                focusArea: focus.trim() === '' ? null : focus,
+                /*
+                 * Split, trimmed, blanks dropped. "Harris, , Fort Bend," is
+                 * what a person actually types, and the server would refuse
+                 * nothing here -- it drops blanks too -- but sending them
+                 * would make the audit row's before/after noisier than the
+                 * change it records.
+                 */
+                countiesServed: counties
+                  .split(',')
+                  .map((c) => c.trim())
+                  .filter((c) => c !== ''),
+                expectedUpdatedAt: award.updatedAt,
+              });
+              setEditing(false);
+              return 'Recorded what this grant funded.';
+            })
+          }
+        >
+          Save
+        </button>
+        <button
+          type="button"
+          className="btn secondary"
+          disabled={busy}
+          onClick={() => setEditing(false)}
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
   );
 }

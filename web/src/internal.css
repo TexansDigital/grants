@@ -733,6 +733,35 @@ tbody tr.band:hover {
   background: transparent;
 }
 
+/* ---- what a grant funded -------------------------------------------------
+ *
+ * Reuses `.form-grid` and `.filter`, which is what every other control on an
+ * internal screen is built from. Only two things are specific to it.
+ */
+
+/* The description is prose and wants the whole row, not a 14rem column beside
+   three one-line fields. The buttons too, so Save is never stranded in a
+   narrow column with its Cancel on the next line. */
+.subject-form .filter.wide,
+.subject-form .actions {
+  grid-column: 1 / -1;
+}
+.subject-form .actions {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+  display: flex;
+  gap: var(--space-3);
+}
+
+/* A paragraph under the facts, with a measure. The same reasoning as the
+   report panel: across a full-width panel a paragraph runs past 150
+   characters a line. */
+.award-purpose {
+  max-width: 68ch;
+  margin: var(--space-3) 0 0;
+}
+
 /* ---- the report panel -----------------------------------------------------
  *
  * The panel reads in three parts -- the facts, what the grantee said, what you

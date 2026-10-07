@@ -152,6 +152,19 @@ export interface AwardOverview {
   cycleName: string | null;
   applicationId: string | null;
   projectTitle: string | null;
+  /*
+   * WHAT THE GRANT WAS FOR. Null on everything imported: the award importer
+   * accepts identity and dates and nothing describing the work, so for the
+   * thirteen 2025 grants these start empty and the page offers to fill them.
+   */
+  subject: {
+    projectTitle: string | null;
+    purpose: string | null;
+    focusArea: string | null;
+    countiesServed: string[];
+  };
+  /** The token a save carries, so two admins cannot overwrite each other. */
+  updatedAt: string;
   awardedAmountCents: number;
   awardedAt: string;
   announcementDate: string | null;
@@ -235,6 +248,8 @@ export interface AwardListRow {
   reportsTotal: number;
   reportsOverdue: number;
   reportsOutstanding: number;
+  /** What the grant was for; null where nobody has recorded it yet. */
+  focusArea: string | null;
   /** Null when nobody at the grantee has ever completed a sign-in. */
   granteeLastSignInAt: string | null;
 }
@@ -939,6 +954,26 @@ export const api = {
   ) =>
     request<{ awardId: string; changed: string[]; updatedAt: string }>(
       `/api/awards/${encodeURIComponent(awardId)}`,
+      { method: 'PATCH', body },
+    ),
+  /*
+   * Recording what a grant was for. A different endpoint from amendAward
+   * above, and deliberately so: an amendment moves a term and demands a
+   * written reason; this writes down the subject matter of a grant already
+   * made. Omitted fields are left alone, an explicit null clears one.
+   */
+  describeAward: (
+    awardId: string,
+    body: {
+      projectTitle?: string | null;
+      purpose?: string | null;
+      focusArea?: string | null;
+      countiesServed?: string[] | null;
+      expectedUpdatedAt?: string;
+    },
+  ) =>
+    request<{ awardId: string; changed: string[]; updatedAt: string }>(
+      `/api/awards/${encodeURIComponent(awardId)}/subject`,
       { method: 'PATCH', body },
     ),
   awardPaperwork: (awardId: string, signal?: AbortSignal) =>

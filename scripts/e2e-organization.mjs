@@ -373,6 +373,10 @@ async function main() {
             awardId: AWARD_ID, organizationId: ORG_ID, organizationName: 'Bayou Harbor Trust',
             programId: 'p1', programName: 'Inspire Change', cycleId: null, cycleName: null,
             applicationId: null, projectTitle: null, awardedAmountCents: 3_500_000,
+            // 0028: an award's own subject matter, blank as the importer
+            // leaves it. Absent, the award page cannot render at all.
+            subject: { projectTitle: null, purpose: null, focusArea: null, countiesServed: [] },
+            updatedAt: '2026-10-01T00:00:00.000Z',
             awardedAt: '2025-10-01T00:00:00.000Z', announcementDate: null,
             termStart: null, termEnd: null, status: 'active', isMultiYear: false,
             isPublic: false, sourceSystem: 'spreadsheet', sourceReference: 'IC-2025-004',

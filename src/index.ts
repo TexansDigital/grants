@@ -51,6 +51,7 @@ import {
   createAwardFromDecision, budgetByProgram, amendAward, amendmentHistory,
   type AmendmentInput,
 } from './lib/awards';
+import { describeAward, type AwardSubjectInput } from './lib/awardSubject';
 import { publicGrants, publishableAwards, setAwardPublic } from './lib/publicGrants';
 import {
   awardsAwaitingResponse, acceptAward, declineAward, recordAwardDocument, awardPaperwork,
@@ -1462,6 +1463,36 @@ const routes: readonly Route[] = [
         input.expectedUpdatedAt = body.expectedUpdatedAt;
       }
       return json(await amendAward(env.DB, ctx, session, params.id!, input), ctx);
+    },
+  },
+  {
+    /*
+     * What a grant was for.
+     *
+     * A SEPARATE ROUTE FROM THE AMENDMENT above, and the separation is the
+     * point: an amendment moves a term and demands a written reason, while
+     * this records subject matter about a grant already made. Folding them
+     * together would mean either demanding a reason to fill in a blank, or
+     * letting an amount move without one.
+     */
+    method: 'PATCH',
+    path: '/api/awards/:id/subject',
+    roles: ADMIN_ONLY,
+    handler: async ({ request, env, ctx, params, session }) => {
+      const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+      const input: AwardSubjectInput = {};
+      // Present-or-absent, as on the amendment above: an omitted field is
+      // "leave it alone" and an explicit null is "clear it".
+      if (body.projectTitle !== undefined) input.projectTitle = body.projectTitle as string | null;
+      if (body.purpose !== undefined) input.purpose = body.purpose as string | null;
+      if (body.focusArea !== undefined) input.focusArea = body.focusArea as string | null;
+      if (body.countiesServed !== undefined) {
+        input.countiesServed = body.countiesServed as string[] | null;
+      }
+      if (typeof body.expectedUpdatedAt === 'string') {
+        input.expectedUpdatedAt = body.expectedUpdatedAt;
+      }
+      return json(await describeAward(env.DB, ctx, session, params.id!, input), ctx);
     },
   },
   {

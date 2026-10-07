@@ -118,6 +118,13 @@ const IMPORTED = {
   cycleName: null,
   applicationId: null,
   projectTitle: null,
+  /*
+   * AND NOTHING SAYING WHAT IT WAS FOR. The importer accepts identity and
+   * dates; 0028 gave an award its own subject matter precisely because this
+   * is what an imported grant looks like.
+   */
+  subject: { projectTitle: null, purpose: null, focusArea: null, countiesServed: [] },
+  updatedAt: '2026-10-01T00:00:00.000Z',
   awardedAmountCents: 3_500_000,
   awardedAt: '2025-10-01T00:00:00.000Z',
   announcementDate: null,
@@ -224,6 +231,9 @@ const LEDGER = {
 
 const calls = [];
 
+let lastSubject = null;
+const STALE_TOKEN = 'stale-token';
+
 async function stubApi(page, { role, award }) {
   await page.route('**/api/**', async (route) => {
     const p = new URL(route.request().url()).pathname;
@@ -238,6 +248,38 @@ async function stubApi(page, { role, award }) {
     if (p === `/api/awards/${AWARD_ID}/payments`) return json(route, LEDGER);
     if (p === `/api/awards/${AWARD_ID}/report-periods`) return json(route, { created: 1, skipped: [] });
     if (p === `/api/awards/${AWARD_ID}/public`) return json(route, { awardId: AWARD_ID, isPublic: true });
+    /*
+     * Recording what a grant was for. Echoes the body back as the award so a
+     * save is visible on the page afterwards, which is the only way to tell a
+     * save that worked from a button that merely stopped being disabled.
+     */
+    if (p === `/api/awards/${AWARD_ID}/subject`) {
+      const body = JSON.parse(route.request().postData() ?? '{}');
+      lastSubject = body;
+      if (body.expectedUpdatedAt === STALE_TOKEN) {
+        return route.fulfill({
+          status: 409,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            error: {
+              code: 'CONFLICT',
+              message:
+                'Somebody else changed this award while you were working on it. Reload and look at it again.',
+            },
+          }),
+        });
+      }
+      award.subject = {
+        projectTitle: body.projectTitle ?? null,
+        purpose: body.purpose ?? null,
+        focusArea: body.focusArea ?? null,
+        countiesServed: body.countiesServed ?? [],
+      };
+      // The displayed title coalesces the award's own over the application's,
+      // as the server does.
+      award.projectTitle = body.projectTitle ?? award.projectTitle ?? null;
+      return json(route, { awardId: AWARD_ID, changed: ['purpose'], updatedAt: 'u2' });
+    }
     if (p.startsWith('/api/awards/')) return json(route, award);
 
     if (p === '/api/programs') return json(route, { programs: [] });
@@ -279,7 +321,14 @@ async function main() {
         timeout: 10_000,
       });
 
-      const text = await page.locator('.facts').innerText();
+      /*
+       * THE AWARD'S OWN FACTS, named rather than taken by position. The page
+       * grew a second `.facts` when awards gained subject matter, and an
+       * unscoped selector matched both -- which is also how the harness caught
+       * the real bug: the application's title was appearing in the edit form
+       * for the award's own.
+       */
+      const text = await page.locator('.facts').first().innerText();
       // The system formats whole dollars without cents, everywhere. This
       // assertion originally demanded "$35,000.00" and the page was right.
       truthy('the amount is shown in dollars', /\$35,000\b/.test(text));
@@ -337,7 +386,16 @@ async function main() {
     // ---- 2. a blank Reporting section says which blank it is --------------
     {
       const page = await open(browser, IMPORTED, { base });
-      const reason = await page.locator('.empty-reason').innerText();
+      /*
+       * SCOPED TO THE REPORTING PANEL. The page grew a second blank-section
+       * explanation when awards gained their own subject matter, and an
+       * unscoped `.empty-reason` then matched both -- a check that had been
+       * right for months started failing on a change it was not about.
+       */
+      const reporting = page
+        .locator('section.panel')
+        .filter({ has: page.getByRole('heading', { name: 'Reporting' }) });
+      const reason = await reporting.locator('.empty-reason').innerText();
       truthy(
         'without term dates, the screen says generation is impossible',
         /start and end date/i.test(reason),
@@ -352,7 +410,12 @@ async function main() {
 
     {
       const page = await open(browser, WITH_TERMS, { base });
-      const reason = await page.locator('.empty-reason').innerText();
+      // Scoped, for the same reason as above.
+      const reason = await page
+        .locator('section.panel')
+        .filter({ has: page.getByRole('heading', { name: 'Reporting' }) })
+        .locator('.empty-reason')
+        .innerText();
       truthy(
         'with term dates, the screen says nobody has asked',
         /never been asked/i.test(reason),
@@ -399,7 +462,14 @@ async function main() {
     // ---- 4. a grant made in Steward shows everything ----------------------
     {
       const page = await open(browser, FULL, { base });
-      const text = await page.locator('.facts').innerText();
+      /*
+       * THE AWARD'S OWN FACTS, named rather than taken by position. The page
+       * grew a second `.facts` when awards gained subject matter, and an
+       * unscoped selector matched both -- which is also how the harness caught
+       * the real bug: the application's title was appearing in the edit form
+       * for the award's own.
+       */
+      const text = await page.locator('.facts').first().innerText();
       truthy('the cycle is named', /2026 Spring/.test(text));
       truthy('and the application is offered as a link', /After-school reading/.test(text));
       truthy(
@@ -461,6 +531,90 @@ async function main() {
       await page.screenshot({ path: `/tmp/award-${scheme}.png`, fullPage: true });
       await ctx.close();
     }
+    // ---- what the grant was for -------------------------------------------
+    /*
+     * THE GAP THIS CLOSES. Before 0028 the system could say the Foundation
+     * gave Bayou Harbor Trust $35,000 in 2025 and nothing in it could say what
+     * for. The importer takes identity and dates; an imported award has no
+     * application; and `application_fts` -- the index carrying counties and
+     * focus area, whose header quotes "have we ever funded youth mental health
+     * in Fort Bend County" -- indexes applications, of which these grants have
+     * none. So the funding history was amounts with no subject in it.
+     */
+    {
+      const award = { ...WITH_TERMS };
+      const page = await open(browser, award, { base });
+
+      truthy(
+        'a grant nobody has catalogued says so, and says what it costs',
+        /only by the organization.s name, its EIN and the amount/i.test(
+          await page.locator('.subject-empty').innerText(),
+        ),
+      );
+
+      calls.length = 0;
+      await page.getByRole('button', { name: 'Record what this grant funded' }).click();
+      await page.locator('#subject-purpose').fill('Two campus coordinators at Alief Taylor.');
+      await page.locator('#subject-title').fill('Campus literacy coaches');
+      await page.locator('#subject-focus').fill('Education');
+      // What a person actually types, blanks and all.
+      await page.locator('#subject-counties').fill('Harris, , Fort Bend,');
+      await page.getByRole('button', { name: 'Save', exact: true }).click();
+      await page.getByRole('status').first().waitFor({ timeout: 10_000 });
+
+      check(
+        'saving asks the subject endpoint, not the amendment one',
+        calls.filter((c) => c.startsWith('PATCH')),
+        [`PATCH /api/awards/${AWARD_ID}/subject`],
+      );
+      check(
+        'the counties go up as a clean list',
+        lastSubject.countiesServed,
+        ['Harris', 'Fort Bend'],
+      );
+      /*
+       * THE LOCK TRAVELS WITH THE SAVE. Two admins cataloguing the same grant
+       * from the same spreadsheet is the scenario it exists for, and a save
+       * that forgot to carry it would silently win every race.
+       */
+      truthy('and the save carries the lock', Boolean(lastSubject.expectedUpdatedAt));
+      // No reason field anywhere: this is not an amendment.
+      check('nothing asked for an amendment reason', lastSubject.reason, undefined);
+
+      truthy(
+        'and the page then shows what was recorded',
+        /Campus literacy coaches/.test(await page.locator('main').innerText()),
+      );
+      truthy(
+        'including the counties, read back as a list',
+        /Harris, Fort Bend/.test(await page.locator('main').innerText()),
+      );
+
+      await page.close();
+    }
+
+    // ---- two admins on one grant -------------------------------------------
+    {
+      const award = { ...WITH_TERMS, updatedAt: STALE_TOKEN };
+      const page = await open(browser, award, { base });
+      await page.getByRole('button', { name: 'Record what this grant funded' }).click();
+      await page.locator('#subject-focus').fill('Education');
+      await page.getByRole('button', { name: 'Save', exact: true }).click();
+      /*
+       * A REFUSAL MUST READ AS A REFUSAL. The page has a polite status line
+       * and a loud error line, and a lost race arriving in the polite one
+       * would tell somebody their work was saved when it was discarded.
+       * CLAUDE.md: no false green lights.
+       */
+      await page.locator('.action-error').waitFor({ timeout: 10_000 });
+      truthy(
+        'a save built on a stale read says so, in the error line',
+        /somebody else changed this award/i.test(await page.locator('.action-error').innerText()),
+      );
+      check('and nothing was announced as done', await page.getByRole('status').count(), 0);
+      await page.close();
+    }
+
   } finally {
     await browser.close();
     server.close();
