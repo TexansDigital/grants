@@ -183,12 +183,37 @@ const DETAIL = {
       submittedBy: 'maria@example.org',
       acceptedAt: null,
       adminFeedback: null,
-      metrics: [{ metricKey: 'served', label: 'People served', metricType: 'integer', display: '1,240' }],
-      answers: [
-        { fieldKey: 'narrative', label: 'What the grant paid for', display: 'Two campus coordinators.' },
-        { fieldKey: 'metric_served', label: 'People served', display: '1,240' },
+      metrics: [
+        { metricKey: 'served', label: 'Individuals served', metricType: 'integer', display: '1,240' },
+        { metricKey: 'hours', label: 'Volunteer hours', metricType: 'integer', display: '860' },
+        /* A prose metric, which falls through to the answer list rather than
+           being typeset as a headline figure. */
+        {
+          metricKey: 'pops',
+          label: 'Populations served',
+          metricType: 'text',
+          display: 'Students in grades 6\u201312 across four Alief campuses.',
+        },
       ],
-      attachments: [{ id: 'f1', filename: 'cis-final-budget.pdf', sizeBytes: 184320 }],
+      answers: [
+        {
+          fieldKey: 'narrative',
+          label: 'What the grant paid for',
+          display:
+            'Two full-time campus coordinators at Alief Taylor and Alief Elsik, plus the attendance-tracking software the district would not fund, and a part-time data clerk for the first two terms.',
+        },
+        { fieldKey: 'metric_served', label: 'Individuals served', display: '1,240' },
+        {
+          fieldKey: 'metric_pops',
+          label: 'Populations served',
+          display: 'Students in grades 6\u201312 across four Alief campuses.',
+        },
+        /* The one a grantee skipped. It comes back as '', not null. */
+        { fieldKey: 'next', label: 'What you would do differently', display: '' },
+      ],
+      attachments: [
+        { id: 'f1', filename: 'cis-houston-final-budget-reconciliation-2025.pdf', sizeBytes: 184320 },
+      ],
     },
   ],
 };
@@ -418,6 +443,143 @@ async function main() {
         'rp7',
       );
       check('with the report gone from the address', new URL(page.url()).search, '');
+
+      await page.close();
+    }
+
+    // ---- the panel itself -------------------------------------------------
+    /*
+     * The panel reads in three parts -- the facts, what the grantee said, what
+     * you do about it -- and it used to read as one column with the parts
+     * running into each other. Every check here was a measurement first.
+     */
+    {
+      const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+      await stubApi(page);
+      await page.goto(`${origin}/reporting?report=rp2`);
+      await page.locator('#report-detail-heading').waitFor({ timeout: 10_000 });
+
+      /*
+       * THE FIGURES AND THE PROSE WERE TOUCHING. Measured at zero pixels
+       * apart: the bottom of the "1,240" tile and the top of the first answer
+       * were at the same y, so a 34px number and a 13px label sat in one
+       * block with nothing to say which belonged to which.
+       */
+      const gap = await page.evaluate(() => {
+        const tile = document.querySelector('.bignum');
+        const answer = document.querySelector('.report-answer');
+        if (!tile || !answer) return null;
+        return Math.round(answer.getBoundingClientRect().top - tile.getBoundingClientRect().bottom);
+      });
+      console.log(`        figures to prose: ${gap}px`);
+      truthy('the figures do not run into the answers below them', gap !== null && gap >= 24);
+
+      /*
+       * AND THE LABEL SITS ABOVE ITS ANSWER. It was 405px to the left: a
+       * thirteen-character label holding open a third of the panel while the
+       * prose began a third of the way across it.
+       */
+      const layout = await page.evaluate(() => {
+        const dt = document.querySelector('.report-answer dt');
+        const dd = document.querySelector('.report-answer dd');
+        if (!dt || !dd) return null;
+        const a = dt.getBoundingClientRect();
+        const b = dd.getBoundingClientRect();
+        return { offsetX: Math.round(b.left - a.left), below: b.top > a.top, measure: Math.round(b.width) };
+      });
+      check('the label is directly above its answer', layout && layout.offsetX, 0);
+      truthy('and the answer is under it, not beside it', layout && layout.below);
+      /*
+       * Prose wants a measure. Across a 1280px panel a paragraph runs past 150
+       * characters a line, which is read by losing your place and starting
+       * again.
+       */
+      console.log(`        prose measure: ${layout && layout.measure}px`);
+      truthy('and the prose has a measure rather than the panel width', layout && layout.measure <= 720);
+
+      /*
+       * A FIELD THE GRANTEE SKIPPED SAYS SO. `??` catches null and an unasked
+       * field comes back as '', so the label rendered with nothing under it
+       * and the box below slid up to meet it. CLAUDE.md: no dangling labels.
+       */
+      const skipped = page.locator('.report-answer').filter({ hasText: 'What you would do differently' });
+      check('an unanswered field says so rather than leaving its label bare',
+        (await skipped.locator('dd').innerText()).trim(), 'Not answered');
+
+      /* The three regions are actually divided. */
+      for (const [what, sel] of [
+        ['the figures from the prose', '.report-metrics'],
+        ['the prose from the files', '.report-files'],
+        ['and the waive control from the decision above it', '.danger-row'],
+      ]) {
+        const w = await page.locator(sel).evaluate((el) => {
+          const s = getComputedStyle(el);
+          return parseFloat(s.borderTopWidth) + parseFloat(s.borderBottomWidth);
+        });
+        truthy(`a rule separates ${what}`, w >= 1);
+      }
+      truthy(
+        'and the files say whose they are',
+        (await page.locator('.report-files h5').innerText()).trim().length > 0,
+      );
+
+      /*
+       * WHO FILED IT SITS BESIDE WHEN. Giving the submission heading `flex: 1`
+       * -- copied from the h3 rule -- pushed the address to the far right edge
+       * of the panel, 1,100px from the date it belongs to.
+       */
+      const apart = await page.evaluate(() => {
+        const h = document.querySelector('.review-head h4');
+        const who = document.querySelector('.review-head .meta');
+        if (!h || !who) return null;
+        /*
+         * MEASURE THE TEXT, NOT THE BOX. Measuring to the heading's right edge
+         * reported the same small gap either way: `flex: 1` stretches the BOX
+         * across the panel, so the address stays just after its right edge
+         * while sitting 1,100px from the words a reader sees. A Range over the
+         * text node gives where the writing actually stops.
+         */
+        const r = document.createRange();
+        r.selectNodeContents(h);
+        return Math.round(who.getBoundingClientRect().left - r.getBoundingClientRect().right);
+      });
+      console.log(`        filer sits ${apart}px from the date`);
+      truthy('the address stays next to the date it belongs to', apart !== null && apart < 120);
+
+      // ---- the panel's own type census -------------------------------------
+      const panelSizes = await page.evaluate(() => {
+        const panel = document.querySelectorAll('section.panel');
+        const el = panel[panel.length - 1];
+        const seen = new Set();
+        for (const n of el.querySelectorAll('*')) {
+          if (n.tagName === 'OPTION') continue;
+          const text = [...n.childNodes].filter((x) => x.nodeType === 3).map((x) => x.textContent.trim()).join('').trim();
+          if (!text) continue;
+          seen.add(getComputedStyle(n).fontSize);
+        }
+        return [...seen].sort((a, b) => parseFloat(b) - parseFloat(a));
+      });
+      console.log(`        panel sizes: ${panelSizes.join(', ')}`);
+      /*
+       * THREE, not the list's four: the reported figure (36px), the submission
+       * heading and the controls (16px), and everything else (13px -- body,
+       * and the small caps labelling it). The panel has no badge, which is
+       * why it needs one level fewer than the list does.
+       *
+       * Asserted exactly rather than as a ceiling. A fourth size is not
+       * automatically wrong, but it means a role has been added, and whoever
+       * adds it should have to say what the role is.
+       */
+      check('the panel holds to three type sizes', panelSizes, ['36px', '16px', '13px']);
+
+      /* The decision is reachable without a mouse. */
+      await page.locator('#report-feedback').focus();
+      await page.keyboard.press('Tab');
+      check(
+        'and Tab from the notes box reaches the decision',
+        await page.evaluate(() => document.activeElement?.textContent?.trim()),
+        'Accept this report',
+      );
 
       await page.close();
     }

@@ -608,7 +608,16 @@ function ReportDetail({
             * belongs.
             */}
           {s.metrics.some((m) => m.metricType !== 'text') && (
-            <dl className="facts">
+            /*
+              ITS OWN BAND, with a rule under it.
+              The tiles and the answer list ran into each other: measured in a
+              browser, the bottom of "1,240" and the top of the first answer
+              were at the same y -- zero pixels apart -- so a 34px figure and a
+              13px label sat in one block with nothing to say which belonged to
+              which. The reader had to work out that "What the grant paid for"
+              was not a caption for the number above it.
+            */
+            <dl className="facts report-metrics">
               {s.metrics
                 .filter((m) => m.metricType !== 'text')
                 .map((m) => (
@@ -630,7 +639,19 @@ function ReportDetail({
             * is how a field that came from a metric is told apart from one
             * somebody wrote into the form.
             */}
-          <dl className="review-list">
+          {/*
+            THE LABEL SITS ABOVE ITS ANSWER, not 405px to the left of it.
+
+            `.review-list` lays label and value in a 1fr/2fr pair, which is
+            right on the applicant's review-before-submit screen where most
+            answers are a word or a figure. Here every answer is a paragraph,
+            so a thirteen-character label held a 405px column open beside it
+            and the prose began a third of the way across the panel. Measured,
+            not guessed. A separate class rather than a change to
+            `.review-list`, because the applicant screen is a different
+            surface and this is not an improvement there.
+          */}
+          <dl className="report-answers">
             {s.answers
               .filter((a) => {
                 if (!a.fieldKey.startsWith('metric_')) return true;
@@ -640,15 +661,36 @@ function ReportDetail({
                 return !metric || metric.metricType === 'text';
               })
               .map((a) => (
-              <div className="review-row" key={a.fieldKey}>
-                <dt>{a.label}</dt>
-                <dd>{a.display ?? <span className="meta">Not answered</span>}</dd>
-              </div>
-            ))}
+                <div className="report-answer" key={a.fieldKey}>
+                  <dt>{a.label}</dt>
+                  <dd>
+                    {/*
+                      EMPTY STRING IS NOT ANSWERED EITHER. `??` only catches
+                      null, and a field a grantee skipped comes back as '' --
+                      so the label rendered with nothing under it at all. The
+                      attachment box below then slid up against it and the
+                      label read as though it belonged to the PDF. CLAUDE.md:
+                      "No dangling labels, no orphan bullets."
+                    */}
+                    {a.display === null || a.display === '' ? (
+                      <span className="meta">Not answered</span>
+                    ) : (
+                      a.display
+                    )}
+                  </dd>
+                </div>
+              ))}
           </dl>
 
           {s.attachments.length > 0 && (
-            <>
+            <div className="report-files">
+              {/*
+                A rule and a name. The file boxes butted straight onto the last
+                answer, so the label above them read as their caption -- which
+                it was not -- and there was nothing to say these came from the
+                grantee rather than from us.
+              */}
+              <h5>What they attached</h5>
               <ul className="upload-list">
                 {s.attachments.map((f) => (
                   <li key={f.id}>
@@ -670,7 +712,7 @@ function ReportDetail({
                   {downloadError}
                 </p>
               )}
-            </>
+            </div>
           )}
         </article>
       ))}

@@ -733,6 +733,91 @@ tbody tr.band:hover {
   background: transparent;
 }
 
+/* ---- the report panel -----------------------------------------------------
+ *
+ * The panel reads in three parts -- the facts, what the grantee said, what you
+ * do about it -- and until these rules existed it read as one column of text
+ * with the parts running into each other.
+ */
+
+/*
+ * The figures, kept apart from the prose.
+ *
+ * Measured in a browser: the bottom of the "1,240" tile and the top of the
+ * first answer row were at the SAME y. The `.bignum` margin lives inside its
+ * grid cell, so the list below started the moment the dl ended.
+ */
+.report-metrics {
+  padding-bottom: var(--space-5);
+  margin-bottom: var(--space-5);
+  border-bottom: 1px solid var(--line-2);
+}
+
+/*
+ * One answer: its label, then the answer under it.
+ *
+ * Deliberately NOT `.review-row`, which pairs label and value in a 1fr/2fr
+ * grid. That is right where answers are a word or a figure, as on the
+ * applicant's review screen; it is wrong here, where every answer is a
+ * paragraph and the label held a 405px column open beside thirteen characters
+ * of text.
+ */
+.report-answers {
+  margin: 0;
+  display: grid;
+  gap: var(--space-5);
+}
+.report-answer {
+  display: grid;
+  gap: var(--space-1);
+}
+.report-answer dt {
+  color: var(--ink-3);
+  font-size: var(--step--1);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.report-answer dd {
+  margin: 0;
+  /* Prose wants a measure. Across the full width of a 1280px panel a
+     paragraph runs past 150 characters a line, which is read by losing your
+     place and starting again. */
+  max-width: 68ch;
+  overflow-wrap: anywhere;
+}
+
+/* What the grantee attached, said to be theirs and ruled off from the prose. */
+.report-files {
+  margin-top: var(--space-5);
+  padding-top: var(--space-5);
+  border-top: 1px solid var(--line-2);
+}
+.report-files h5 {
+  margin: 0 0 var(--space-3);
+  font-size: var(--step--1);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ink-3);
+}
+
+/*
+ * The submission's own heading. `.review-head h3` styled a heading this panel
+ * does not use -- its h3 is the panel title, so each submission is an h4, and
+ * an h4 matched no rule and took the browser's default.
+ */
+.review-head h4 {
+  font-size: var(--step-0);
+  margin: 0;
+  /*
+   * NO `flex: 1`, unlike the h3 rule above. `.review-head` is a flex row, so
+   * stretching the heading pushed "maria@example.org" to the far right edge
+   * of the panel -- 1,180px from the date it belongs to, reading as though it
+   * had nothing to do with it. Who filed a report sits next to when.
+   */
+}
+
 /* ---- badge weight on a work queue -----------------------------------------
  *
  * The rule above this block -- outline blue in flight, filled blue for the

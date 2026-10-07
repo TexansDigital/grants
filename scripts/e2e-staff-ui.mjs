@@ -564,7 +564,19 @@ async function goTo(page, label) {
     await bar.first().click();
     return;
   }
+  /*
+   * The section nav is rendered by the screen you have just navigated TO, so
+   * asking for it the instant after a click finds nothing and falls through to
+   * the More menu, where it waits thirty seconds for an entry that is not
+   * there. Give it a moment to appear before concluding it does not exist.
+   * This passed run after run and failed under load, which is the worst way
+   * for a harness to be wrong.
+   */
   const view = page.locator('.sectionnav button').filter({ hasText: exact });
+  await view
+    .first()
+    .waitFor({ state: 'attached', timeout: 3_000 })
+    .catch(() => undefined);
   if (await view.count()) {
     await view.first().click();
     return;

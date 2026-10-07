@@ -732,7 +732,10 @@
 .danger-row {
   margin-top: var(--space-5);
   padding-top: var(--space-3);
-  border-top: 1px solid var(--rule);
+  /* `--rule` is defined nowhere in this project, so the whole shorthand was
+     dropped as invalid and this row has never had a border -- here or on the
+     applicant form, which uses the same class. */
+  border-top: 1px solid var(--line);
   display: flex;
   justify-content: flex-end;
 }
