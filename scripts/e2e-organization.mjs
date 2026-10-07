@@ -323,7 +323,7 @@ async function main() {
       );
 
       // The grant row reaches the grant.
-      await page.getByRole('button', { name: /Open the grant awarded 2025-10-01/ }).click();
+      await page.getByRole('button', { name: /Open the grant awarded October 1, 2025/ }).click();
       await page.waitForURL(`${base}/awards/${AWARD_ID}`, { timeout: 10_000 });
       check('a grant row reaches the grant', new URL(page.url()).pathname, `/awards/${AWARD_ID}`);
       await page.close();

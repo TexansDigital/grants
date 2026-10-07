@@ -57,7 +57,8 @@
     "e2e:organization": "node scripts/e2e-organization.mjs",
     "e2e:lists": "node scripts/e2e-lists.mjs",
     "e2e:impact": "node scripts/e2e-impact.mjs",
-    "e2e:nav": "node scripts/e2e-nav.mjs"
+    "e2e:nav": "node scripts/e2e-nav.mjs",
+    "e2e:reports": "node scripts/e2e-reports.mjs"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.12.21",

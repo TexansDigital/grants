@@ -414,7 +414,11 @@ th.num {
   margin-bottom: var(--space-1);
 }
 .filter select,
-.filter input {
+.filter input,
+/* The send-back box on the compliance desk is a control on the same screen as
+   these, and it was taking the browser's default: a thinner border, a
+   different corner and a different type size from every select beside it. */
+.filter textarea {
   font: inherit;
   /* 16px, not 13px. Below 16 iOS Safari zooms on focus, which is the project's
      own stated rule -- the applicant form obeys it everywhere and the internal
@@ -428,6 +432,10 @@ th.num {
   border-radius: var(--radius);
   background: var(--surface);
   color: var(--ink);
+}
+.filter textarea {
+  width: 100%;
+  resize: vertical;
 }
 
 .hits {
@@ -667,6 +675,90 @@ td > .meta {
   color: var(--danger);
   font-weight: 700;
   display: block;
+}
+
+/*
+ * A table cell is 13px, so an exception inside one is 13px too.
+ *
+ * `.meta.strong` is deliberately 16px where it lives on a detail panel, among
+ * facts that are the point of the screen. In a dense row it was the loudest
+ * thing on the page: "8 days late" and "Not yet" set larger and heavier than
+ * the date, the organization and the amount they annotate. The exception was
+ * outshouting the data.
+ */
+td .meta.strong {
+  font-size: var(--step--1);
+}
+
+/* ---- the bands ------------------------------------------------------------
+ *
+ * One table, one set of column headings, a heading row opening each band. The
+ * alternative -- four tables -- repeats seven column headings four times and
+ * lets each one choose its own column widths, so the bands stop reading as
+ * parts of one list.
+ */
+tr.band th {
+  padding-top: var(--space-6);
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+  /* Undo the thead treatment: these are sentence-case headings, not column
+     labels, and uppercase 13px here would compete with the real ones. */
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--ink);
+  white-space: normal;
+}
+/* The first band sits directly under the column headings and needs no gap. */
+tbody:first-of-type tr.band th {
+  padding-top: var(--space-3);
+}
+.band-name {
+  font-size: var(--step-0);
+  font-weight: 600;
+}
+tr.band .count {
+  margin-left: var(--space-2);
+  font-size: var(--step--1);
+}
+.band-blurb {
+  display: block;
+  font-size: var(--step--1);
+  font-weight: 400;
+  color: var(--ink-3);
+  margin-top: var(--space-1);
+}
+/* A heading is not a row you can click, so it does not light up like one. */
+tbody tr.band:hover {
+  background: transparent;
+}
+
+/* ---- badge weight on a work queue -----------------------------------------
+ *
+ * The rule above this block -- outline blue in flight, filled blue for the
+ * affirmative end state -- is right for an application, where "awarded" is the
+ * news. On a compliance desk it put the heaviest badge on the screen against
+ * ACCEPTED, the one row that needs nothing, while FILED, AWAITING US -- the
+ * only row where the Foundation is the hold-up -- was a quiet outline. The
+ * loudest mark was on the finished work.
+ *
+ * So weight tracks what needs doing. Scoped with `badge-report` rather than
+ * rewritten in place because these status values are shared: an application
+ * and a report period are both `submitted`, and the two screens want opposite
+ * emphasis from the same word.
+ */
+.badge-report.badge-submitted {
+  border-color: var(--blue-fill);
+  background: var(--blue-fill);
+  color: var(--white);
+}
+.badge-report.badge-accepted,
+.badge-report.badge-scheduled,
+.badge-report.badge-waived,
+.badge-report.badge-open {
+  border-color: var(--line);
+  background: transparent;
+  color: var(--ink-3);
 }
 
 /* The decision block sits below everything it is a decision about. A pair of

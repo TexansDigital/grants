@@ -416,6 +416,19 @@ async function stubApi(page, { role }) {
       });
     }
     if (p === '/api/reports') return json(route, PORTFOLIO);
+    /*
+     * The screens added with the Grants/Organizations restructure. This stub
+     * answered neither, so walking into the Grants section fetched a 404 and
+     * the console-error check -- the one assertion here that catches things
+     * nobody thought to assert -- went red for a reason that had nothing to
+     * do with what the test was about.
+     */
+    if (p === '/api/awards') return json(route, { rows: [], total: 0 });
+    if (p === '/api/organizations') return json(route, { rows: [], total: 0 });
+    if (p === '/api/todo') return json(route, { items: [], generatedAt: 'x', complete: true });
+    if (p === '/api/impact') {
+      return json(route, { generatedAt: 'x', year: null, years: [], programs: [] });
+    }
     if (p === '/api/report-periods/generate') {
       generateCalls.push(1);
       return json(route, generateResult);
@@ -530,6 +543,36 @@ async function harborRadiosChecked(page) {
 }
 
 // ---------------------------------------------------------------------------
+
+/**
+ * Open a section by name, wherever the navigation currently keeps it.
+ *
+ * The bar reached twelve items and was split: six stay, four moved behind a
+ * "More" menu, and two were renamed ("Configuration" became "Programs",
+ * "Reporting" became a view inside Grants). This harness clicked the bar
+ * directly and went red the day that happened -- and stayed red, because
+ * nothing runs it but a person remembering to.
+ *
+ * Asking for a section by name, and letting this function work out whether it
+ * is a button, a menu entry or a view inside a section, is what makes the next
+ * reshuffle a non-event here.
+ */
+async function goTo(page, label) {
+  const exact = new RegExp(`^${label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`);
+  const bar = page.locator('.mainnav > button').filter({ hasText: exact });
+  if (await bar.count()) {
+    await bar.first().click();
+    return;
+  }
+  const view = page.locator('.sectionnav button').filter({ hasText: exact });
+  if (await view.count()) {
+    await view.first().click();
+    return;
+  }
+  await page.getByRole('button', { name: /^More/ }).click();
+  await page.locator('.navmore-menu').waitFor({ timeout: 10_000 });
+  await page.locator('.navmore-menu button').filter({ hasText: exact }).first().click();
+}
 
 async function main() {
   const { server, port } = await serveAssets('public');
@@ -781,7 +824,7 @@ async function main() {
     );
 
     // Back, and the merge panel is embedded in its check rather than beside it.
-    await page.getByRole('button', { name: 'Data health' }).click();
+    await goTo(page, 'Data health');
     await page.locator('.health-summary').waitFor();
     const dupCheck = page.locator('article.check', { hasText: 'Possible duplicate organizations' });
     await dupCheck.locator('article.review-section').first().waitFor();
@@ -797,7 +840,7 @@ async function main() {
     );
 
     // ---- importing a year of grants ---------------------------------------
-    await page.getByRole('button', { name: 'Configuration' }).click();
+    await goTo(page, 'Programs');
     const importPanel = page.locator('section.panel', { hasText: 'Import grants from a spreadsheet' });
     await importPanel.waitFor();
 
@@ -912,7 +955,8 @@ async function main() {
     // all": until this existed nothing in the running system could produce a
     // report period, so an imported grant was one nobody would ever be asked
     // about.
-    await page.getByRole('button', { name: 'Reporting' }).click();
+    await goTo(page, 'Grants');
+    await goTo(page, 'Reports');
     const generate = page.getByRole('button', { name: 'Create missing report obligations' });
     await generate.waitFor();
 
@@ -951,7 +995,7 @@ async function main() {
      * was at fault, and no assertion about the health screen would have caught
      * it. This one would have.
      */
-    await page.getByRole('button', { name: 'Data health' }).click();
+    await goTo(page, 'Data health');
     for (const width of [320, 390]) {
       await page.setViewportSize({ width, height: 900 });
       await page.locator('.health-summary').waitFor();
@@ -1205,14 +1249,14 @@ async function main() {
       0,
     );
 
-    await page2.getByRole('button', { name: 'Reporting' }).click();
+    await page2.goto(`${base}/reporting`);
     await page2.getByRole('heading', { name: 'Grant reports' }).waitFor();
     check(
       'a reviewer cannot create obligations against somebody else\u2019s grant',
       await page2.getByRole('button', { name: 'Create missing report obligations' }).count(),
       0,
     );
-    await page2.getByRole('button', { name: 'Configuration' }).click();
+    await goTo(page2, 'Programs');
 
     check(
       'a reviewer is not offered a door that answers FORBIDDEN',

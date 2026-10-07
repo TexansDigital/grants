@@ -345,7 +345,7 @@ async function main() {
       truthy('and names the step that fixes it', /Amend/i.test(reason));
       falsy(
         'and does not offer a button that cannot work',
-        await page.getByRole('button', { name: 'Create the report obligations' }).count(),
+        await page.getByRole('button', { name: 'Set the report due dates' }).count(),
       );
       await page.close();
     }
@@ -362,7 +362,7 @@ async function main() {
       truthy('and that nothing has been sent', /Nothing has been sent/i.test(reason));
 
       calls.length = 0;
-      await page.getByRole('button', { name: 'Create the report obligations' }).click();
+      await page.getByRole('button', { name: 'Set the report due dates' }).click();
       await page.getByRole('status').first().waitFor({ timeout: 10_000 });
       check(
         'the button writes the obligations',
@@ -390,7 +390,9 @@ async function main() {
       // The obligations render, with their due date and state.
       const reporting = await page.locator('.panel').nth(1).innerText();
       truthy('the obligation is listed', /2025 progress update/.test(reporting));
-      truthy('with its due date', /2026-12-03/.test(reporting));
+      /* Read as a person reads a date. The raw ISO string was what this
+         screen printed before formatDay reached it. */
+      truthy('with its due date', /December 3, 2026/.test(reporting));
       await page.close();
     }
 

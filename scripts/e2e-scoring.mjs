@@ -317,9 +317,20 @@ async function main() {
 
     await page.getByRole('button', { name: /^Score/ }).click();
     await page.getByRole('heading', { name: 'Scoring' }).waitFor();
+    /*
+     * WAIT FOR THE LINE, do not sample whatever is first.
+     *
+     * The heading renders before the rubric arrives, so reading `.meta` on the
+     * next tick got whichever muted line happened to be in the DOM at that
+     * instant. It passed most of the time and failed under load -- which is
+     * the worst kind of check, because a harness nobody trusts is a harness
+     * nobody reads.
+     */
+    const versionLine = page.locator('.meta').filter({ hasText: /version \d+/ }).first();
+    await versionLine.waitFor({ timeout: 10_000 });
     check(
       'the sheet names the rubric version it is scoring against',
-      (await page.locator('.meta').first().innerText()).includes('version 2'),
+      (await versionLine.innerText()).includes('version 2'),
       true,
     );
 

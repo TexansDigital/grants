@@ -106,6 +106,14 @@ const PARTIAL = {
       grantsNeverAsked: 0,
       grants: 13,
       totalAwardedCents: 46_900_000,
+      /*
+       * The money behind the updates that were actually accepted, which is a
+       * smaller number than the money awarded and must never be printed as if
+       * it were the same one. Added when the coverage sentence started
+       * carrying both; a fixture missing it took the screen down entirely,
+       * which is how this harness found it.
+       */
+      acceptedAwardedCents: 10_500_000,
       metrics: [
         {
           metricDefinitionId: 'm1',
@@ -163,6 +171,7 @@ const NOTHING_ASKED = {
       accepted: 0,
       grantsNeverAsked: 13,
       totalAwardedCents: 0,
+      acceptedAwardedCents: 0,
       metrics: PARTIAL.programs[0].metrics.map((m) => ({ ...m, total: null, answered: 0 })),
     },
   ],
@@ -208,7 +217,11 @@ async function main() {
 
       const cov = await page.locator('.coverage').innerText();
       truthy('the coverage names how many updates it rests on', /3 of 13 updates accepted/i.test(cov));
-      truthy('and the money behind them', /\$469,000/.test(cov));
+      /* BOTH figures: what the accepted updates cover, and what was awarded.
+         Asserting only the larger one is what let a sentence claim the whole
+         portfolio was accounted for by three updates. */
+      truthy('and the money those updates actually cover', /\$105,000/.test(cov));
+      truthy('next to the money awarded, so neither can pass for the other', /\$469,000/.test(cov));
 
       /*
        * ABOVE the numbers. Compared by position on the page, because "it is
@@ -224,7 +237,9 @@ async function main() {
 
       const body = await page.locator('main').innerText();
       truthy('an answered metric shows its figure', /4,200 people/.test(body));
-      truthy('with the number of updates behind it', /from 3 updates/.test(body));
+      /* The denominator is the point: "from 3 updates" reads as though three
+         were all there were, and there are thirteen. */
+      truthy('with the number of updates behind it', /from 3 of 13 updates/.test(body));
       truthy('currency is formatted as money', /\$120,000/.test(body));
 
       /*
