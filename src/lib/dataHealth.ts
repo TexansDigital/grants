@@ -123,6 +123,25 @@ function assertAdmin(session: Session): void {
  */
 export const ERROR_WINDOW_DAYS = 7;
 
+/**
+ * What a row created while testing in production looks like.
+ *
+ * Deliberately narrow. These match the label somebody chose for a test row,
+ * not any word that might turn up in a real charity's name: `'%demo%'` would
+ * flag "Democracy Now", so the pattern is the whole phrase the demo loader
+ * writes. A test row named like a real nonprofit is not findable by pattern
+ * and is not what the check claims to catch -- it claims to catch the rows we
+ * actually create, which have always been honestly labelled.
+ *
+ * Exported so the test pins the patterns rather than restating them.
+ */
+export const TEST_DATA_PATTERNS = {
+  /** `awards.source_reference`, which an import or a manual test row sets. */
+  reference: ['TEST-%', 'DEMO-%', '%-TEST', '%-DEMO'],
+  /** `organizations.legal_name`, lowercased before comparison. */
+  name: ['%not a real%', '%test org%', '%demo nonprofit%', '%sample nonprofit%'],
+} as const;
+
 const ERROR_WINDOW_START = (): string =>
   new Date(Date.now() - ERROR_WINDOW_DAYS * 86_400_000).toISOString();
 
@@ -193,6 +212,70 @@ function specs(now: string): CheckSpec[] {
 
   return [
     // ---- blocking ---------------------------------------------------------
+    {
+      /*
+       * ROWS THAT EXIST ONLY BECAUSE SOMEBODY TESTED IN PRODUCTION.
+       *
+       * Two awards were created by hand while walking the flow -- an
+       * end-to-end claim test and a demo CSV row -- and both sat in production
+       * for days. They were honestly labelled, which is the only reason they
+       * were findable at all, and they were still invisible, because nothing
+       * read for them.
+       *
+       * WHY THAT IS NOT COSMETIC. "Ask past grantees for an update" selects
+       * every award that is active or completed, has term dates, and has no
+       * report period. The demo row qualified. The count in the confirm dialog
+       * was the only thing between a fake row and a real nonprofit's inbox,
+       * and a count is read by a human in a hurry. The other test row carried
+       * a report period marked 'accepted', which Impact counts in its
+       * reporting-coverage figure -- a number that goes into a board paper.
+       *
+       * BLOCKING, because the failure modes are an email to a stranger and a
+       * wrong figure in a document, and because clearing it is one scoped
+       * script (scripts/sql/remove-test-data.sql).
+       */
+      key: 'test_data_present',
+      label: 'Test and demo rows still in the database',
+      guidance:
+        'These were created while testing the system, not by a nonprofit. Until they ' +
+        'are removed they are counted when grantees are asked for an update, and in ' +
+        'the reporting figures. Ask for them to be cleared before the next send.',
+      severity: 'blocking',
+      kind: 'award',
+      sql: `
+        SELECT a.id              AS id,
+               o.legal_name      AS legal_name,
+               a.awarded_amount_cents AS cents,
+               a.source_reference AS source_reference,
+               COUNT(*) OVER ()  AS match_count
+          FROM awards a
+          JOIN organizations o ON o.id = a.organization_id
+         WHERE a.deleted_at IS NULL
+           AND o.deleted_at IS NULL
+           AND (
+             ${TEST_DATA_PATTERNS.reference
+               .map(() => 'upper(COALESCE(a.source_reference, \'\')) LIKE ?')
+               .join(' OR ')}
+             OR ${TEST_DATA_PATTERNS.name
+               .map(() => 'lower(o.legal_name) LIKE ?')
+               .join(' OR ')}
+           )
+         ORDER BY a.created_at DESC
+         LIMIT ?`,
+      binds: [
+        ...TEST_DATA_PATTERNS.reference,
+        ...TEST_DATA_PATTERNS.name,
+        ROWS_PER_CHECK,
+      ],
+      row: (r) => ({
+        id: str(r.id),
+        title: str(r.legal_name),
+        detail: str(r.source_reference)
+          ? `reference ${str(r.source_reference)}`
+          : 'name looks like test data',
+        amountCents: num(r.cents),
+      }),
+    },
     {
       key: 'award_no_w9',
       label: 'Active grants with no W-9',

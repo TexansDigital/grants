@@ -12,22 +12,49 @@ is the assistant. Where it says **unknown**, neither of us has checked.
 
 ## Blocking right now
 
-**One thing, and it is a bookkeeping fault rather than a schema fault.**
-`npm run golive` reports `27 applied, 28 on disk`.
+**Two things. Neither is engineering.**
 
-Migration `0028_award_subject.sql` **has run** against production — four
-queries, 2026-10-07 — but it was applied with `wrangler d1 execute --file=`,
-which runs the SQL and writes no row to `d1_migrations`. So the columns exist
-and the ledger disagrees.
+### 1. Two test rows are still in production
 
-**Do not run `migrate:production` to fix it.** Wrangler would try 0028 again
-and SQLite refuses a duplicate column. The fix is to record the row that was
-never written; the command is below, once the naming convention in that table
-has been read back.
+The database holds **fifteen** awards, not thirteen. Thirteen are the real
+2025 grants (`IC-2025-001` .. `IC-2025-013`, $469,000 in total, imported
+2026-10-04). The other two were created by hand while testing:
 
-`npm run migrate:production` now exists, so the next one does not go this way.
-`docs/PRODUCTION-CUTOVER.md` has always carried the right command and it was
-not read.
+| Reference | Organization | Amount | Status |
+|---|---|---|---|
+| `TEST-2026-001` | Steward End To End Test Org | $100 | completed |
+| `DEMO-01` | Demo Nonprofit (not a real grantee) | $1 | active |
+
+**Why they cannot be left alone.** "Ask past grantees for an update" selects
+every award that is `active` or `completed`, has term dates, and has no report
+period. The demo row qualifies, so the dry run would say **fourteen** — and
+confirming that dialog emails whoever is on its contact record. The test row
+also carries a report period marked `accepted`, which Impact counts in its
+reporting-coverage figure.
+
+**Fix:** `scripts/sql/remove-test-data.sql`, applied with
+`npx wrangler d1 execute steward-production --remote --env production --file=scripts/sql/remove-test-data.sql`.
+Soft-delete only, scoped through `source_reference`, re-runnable, one audit row
+per award. Verified against a throwaway database built from all 28 migrations:
+real rows untouched, re-run a no-op. Expect **13 / 46900000 / 13 / 0** from the
+verification query the file ends with.
+
+A blocking Data health check, `test_data_present`, now looks for this, because
+nothing read for it before — the rows sat there for three days, honestly
+labelled and completely invisible.
+
+### 2. The due date for the 2025 update has not been chosen
+
+This gates the send, and it is a decision rather than a task. The due date
+**is** the send schedule: the nightly job mails at 14 days out, 3 days out, and
+on the day. **A date inside two weeks means all thirteen organizations are
+emailed tomorrow morning**, with no further warning.
+
+### Cleared since the last revision
+
+The migration-ledger fault is **fixed**. `npm run golive` reports 28 applied,
+28 on disk. `npm run migrate:production` now exists so the next migration does
+not go the same way.
 
 ---
 
@@ -54,7 +81,7 @@ the first thing this file warns about, in its own opening paragraph.
 
 | # | Condition | State | How to check |
 |---|---|---|---|
-| 1 | `steward-production` migrated clean from empty | **done 2026-10-04**, 28 migrations as of 2026-10-07 | the schema matches preview; the LEDGER does not — see *Blocking right now* |
+| 1 | `steward-production` migrated clean from empty | **done 2026-10-04**, 28 migrations as of 2026-10-07 | `npm run golive` reports 28 applied, 28 on disk; the ledger fault of 2026-10-07 is fixed |
 | 2 | R2 buckets and KV created and bound | **done** | `npm run check:config` |
 | 3 | Five production secrets set, new signing key | **done 2026-10-04** | `npx wrangler secret list --env production` lists all five |
 | 4 | Seeded config only; apps, awards, orgs all 0 | **done 2026-10-04** | 1 program, 2 stages, 2 forms, 2 admins, 5 metrics; apps/awards/orgs all 0 |
@@ -69,8 +96,8 @@ the first thing this file warns about, in its own opening paragraph.
 
 | # | Condition | State | How to check |
 |---|---|---|---|
-| 9 | Thirteen imported, with an audit row each | **needs re-checking** | *Checking the databases* — the Grants tab lists thirteen grants, so this may be done and unrecorded. Run the count query below before trusting either answer. |
-| 10 | Update request dry-run matched 13, then run | not done | Programs → Ask past grantees for an update. **Gated on a decision, not on engineering:** the due date for the 2025 update is also the send schedule, because the nightly job mails at 14 days, 3 days and on the day. A date inside two weeks means everybody is emailed tomorrow. |
+| 9 | Thirteen imported, with an audit row each | **done 2026-10-04**, confirmed 2026-10-07 | listed by hand: `IC-2025-001` .. `IC-2025-013`, `source_system = 'spreadsheet'`, summing to exactly $469,000. Two further test awards are present and are the first blocker above. |
+| 10 | Update request dry-run matched 13, then run | not done — **do not run until the dry run says 13** | Programs → Ask past grantees for an update. **Gated on a decision, not on engineering:** the due date for the 2025 update is also the send schedule, because the nightly job mails at 14 days, 3 days and on the day. A date inside two weeks means everybody is emailed tomorrow. |
 | 11 | A magic link clicked on a phone, from Outlook, with a photo attached | **done 2026-10-04** | link delivered to a shared M365 mailbox, opened on a phone; 3 files uploaded to steward-production-files after bucket CORS was set |
 | 12 | Restore drill run against production | **done 2026-10-05** | export `d1/2026-10-05/070101`, 573 rows across 33 tables, every table matching the manifest, 102 triggers off and back on, no dangling references; thirteen organizations and their amounts recognised by hand |
 | 13 | One grantee claim approved end to end | **done 2026-10-05** | connected, declined, and the new grantee signed in to exactly one award with no sign of the other thirteen |

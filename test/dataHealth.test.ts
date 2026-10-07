@@ -4,6 +4,7 @@ import { seedProgram } from '../src/seed/seedProgram';
 import { INSPIRE_CHANGE } from '../src/seed/inspireChange';
 import {
   dataHealth, ROWS_PER_CHECK, UNCLAIMED_AFTER_DAYS, storageUsage, STORAGE_WATCH_USD,
+  TEST_DATA_PATTERNS,
 } from '../src/lib/dataHealth';
 import { newId } from '../src/lib/ids';
 import { nowIso } from '../src/lib/time';
@@ -881,5 +882,120 @@ describe('errors the system recorded', () => {
     const c = check(await dataHealth(db, admin), 'recorded_errors');
     expect(c.rows).toHaveLength(0);
     expect(c.severity).toBe('attention');
+  });
+});
+
+// ---------------------------------------------------------------------------
+/*
+ * THE GUARD FOR TEST ROWS LEFT IN PRODUCTION.
+ *
+ * Two awards created by hand while walking the flow -- an end-to-end claim
+ * test and a demo CSV row -- sat in production for days. Nothing read for
+ * them, and "ask past grantees for an update" would have counted one of them
+ * as a nonprofit to email.
+ *
+ * These tests assert the specific count and the specific id, not just that
+ * something was flagged: a check that fires on everything is as useless as one
+ * that fires on nothing, and the false-positive case below is the half that
+ * matters. "Democracy Now" is a real charity name and must not be flagged.
+ */
+describe('test rows left in the database', () => {
+  /** An award with a chosen source_reference, which `award()` does not expose. */
+  async function referenced(organizationId: string, programId: string, reference: string) {
+    const id = newId();
+    const now = nowIso();
+    await db
+      .prepare(
+        `INSERT INTO awards
+           (id, organization_id, program_id, awarded_amount_cents, awarded_at,
+            status, source_system, source_reference, created_at, updated_at)
+         VALUES (?,?,?,?,?, 'completed', 'spreadsheet', ?, ?, ?)`,
+      )
+      .bind(id, organizationId, programId, 10_000, day('2026-03-04'), reference, now, now)
+      .run();
+    return id;
+  }
+
+  it('flags the reference the end-to-end test wrote', async () => {
+    const p = await program();
+    const o = await org({ name: 'Cypress Creek Literacy Council' });
+    const id = await referenced(o, p.programId, 'TEST-2026-001');
+
+    const c = check(await dataHealth(db, admin), 'test_data_present');
+    expect(c.count).toBe(1);
+    expect(c.rows.map((r) => r.id)).toEqual([id]);
+    expect(c.rows[0]!.detail).toBe('reference TEST-2026-001');
+    expect(c.severity).toBe('blocking');
+  });
+
+  it('flags the reference the demo loader wrote', async () => {
+    const p = await program();
+    const o = await org({ name: 'Bayou Reach Collective' });
+    const id = await referenced(o, p.programId, 'DEMO-01');
+
+    const c = check(await dataHealth(db, admin), 'test_data_present');
+    expect(c.rows.map((r) => r.id)).toEqual([id]);
+  });
+
+  it('flags an organization named as not real, whatever its reference', async () => {
+    const p = await program();
+    const o = await org({ name: 'Demo Nonprofit (not a real grantee)' });
+    const id = await referenced(o, p.programId, 'IC-2025-099');
+
+    const c = check(await dataHealth(db, admin), 'test_data_present');
+    expect(c.count).toBe(1);
+    expect(c.rows.map((r) => r.id)).toEqual([id]);
+    // The reference is real-looking, so the detail must say what actually matched.
+    expect(c.rows[0]!.detail).toBe('reference IC-2025-099');
+  });
+
+  it('leaves a real grant alone, including one whose name merely contains "demo"', async () => {
+    const p = await program();
+    const real = await org({ name: 'Democracy Now Houston' });
+    const latest = await org({ name: 'Attestation Testing Services of Texas' });
+    await referenced(real, p.programId, 'IC-2025-001');
+    await referenced(latest, p.programId, 'IC-2025-002');
+
+    const c = check(await dataHealth(db, admin), 'test_data_present');
+    expect(c.count).toBe(0);
+    expect(c.rows).toEqual([]);
+  });
+
+  it('stops flagging once the row is soft-deleted, which is how cleanup clears it', async () => {
+    const p = await program();
+    const o = await org({ name: 'Steward End To End Test Org' });
+    const id = await referenced(o, p.programId, 'TEST-2026-002');
+
+    expect(check(await dataHealth(db, admin), 'test_data_present').count).toBe(1);
+
+    await db
+      .prepare(`UPDATE awards SET deleted_at = ?, updated_at = ? WHERE id = ?`)
+      .bind(nowIso(), nowIso(), id)
+      .run();
+
+    const c = check(await dataHealth(db, admin), 'test_data_present');
+    expect(c.count).toBe(0);
+  });
+
+  it('matches the reference without regard to case', async () => {
+    const p = await program();
+    const o = await org({ name: 'Third Ward Futures' });
+    const id = await referenced(o, p.programId, 'test-2026-003');
+
+    const c = check(await dataHealth(db, admin), 'test_data_present');
+    expect(c.rows.map((r) => r.id)).toEqual([id]);
+  });
+
+  it('pins the patterns, so widening one is a deliberate edit', () => {
+    expect(TEST_DATA_PATTERNS.reference).toEqual(['TEST-%', 'DEMO-%', '%-TEST', '%-DEMO']);
+    expect(TEST_DATA_PATTERNS.name).toEqual([
+      '%not a real%',
+      '%test org%',
+      '%demo nonprofit%',
+      '%sample nonprofit%',
+    ]);
+    // '%demo%' would flag "Democracy Now". The narrowness is the point.
+    expect(TEST_DATA_PATTERNS.name).not.toContain('%demo%');
+    expect(TEST_DATA_PATTERNS.name).not.toContain('%test%');
   });
 });

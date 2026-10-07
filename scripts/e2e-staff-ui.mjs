@@ -116,9 +116,28 @@ const GROUPS = [
  */
 const HEALTH = {
   generatedAt: '2026-09-20T14:30:00.000Z',
-  blocking: 9,
+  blocking: 10,
   attention: 1,
   checks: [
+    {
+      /*
+       * A test row left in the database. Carried in this fixture so the
+       * blocking-count header and the 320px layout are both exercised against
+       * it: the row's title is the longest a test organization has actually
+       * had, and the detail is an identifier with no break points, which is
+       * the shape that pushed this screen sideways once before.
+       */
+      key: 'test_data_present',
+      label: 'Test and demo rows still in the database',
+      guidance: 'These were created while testing the system, not by a nonprofit.',
+      severity: 'blocking',
+      count: 1,
+      truncated: false,
+      rows: [
+        { id: 'award-test-1', kind: 'award', title: 'Demo Nonprofit (not a real grantee)',
+          detail: 'reference TEST-2026-001', amountCents: 10000 },
+      ],
+    },
     {
       key: 'award_no_w9',
       label: 'Active grants with no W-9',
@@ -789,7 +808,7 @@ async function main() {
     check(
       'the summary leads with what is blocking',
       (await summary.innerText()).replace(/\s+/g, ' ').trim(),
-      '9 things are blocking 1 needs attention',
+      '10 things are blocking 1 needs attention',
     );
     check(
       'it says when it was checked, in Central time',
@@ -801,11 +820,12 @@ async function main() {
     if (process.env.STEWARD_SHOT_HEALTH) {
       await page.screenshot({ path: process.env.STEWARD_SHOT_HEALTH, fullPage: true });
     }
-    check('every check is on screen, including the clean one', await checks.count(), 6);
+    check('every check is on screen, including the clean one', await checks.count(), 7);
     check(
       'in the order the server sorted them, blocking first',
       await checks.locator('.check-head h3').allInnerTexts(),
       [
+        'Test and demo rows still in the database',
         'Active grants with no W-9',
         'Grants that will never be asked to report',
         'Active grants with no signed agreement',
