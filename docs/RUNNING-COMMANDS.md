@@ -73,6 +73,46 @@ you were pointed at the wrong database.
 
 ---
 
+## Applying a .sql file to a remote database
+
+`wrangler d1 execute --file --remote` does not work with an OAuth login. It
+switches to D1's bulk IMPORT endpoint, which answers
+`Authentication error [code: 10000]` however much permission the token carries.
+
+**Against preview**, use the repo's own tool, which sends the same statements
+through the inline path in batches:
+
+```
+npm run sql:apply -- --file=seeds/community-futures-fund.sql --remote
+```
+
+It requires one statement per line, which is what `src/seed/emitSql.ts`
+produces, and it refuses a file that is shaped differently rather than
+guessing. It has **no production flag and will not get one** — CLAUDE.md's
+second non-negotiable is that production is never written to by a script.
+
+**Against production**, which is always a deliberate thing a human runs:
+
+```
+npx wrangler d1 execute steward-production --remote --env production --yes --command="$(cat scripts/sql/remove-test-data.sql)"
+```
+
+Two details, both learned by getting them wrong:
+
+- **`--command=`, with the equals sign.** Every .sql file here opens with a
+  `--` comment, and an unbound `--command "$(cat …)"` makes yargs read those
+  leading dashes as the next flag: it exits with *"You must provide either
+  --command or --file"*, which reads like the flag is missing.
+- **No transaction.** The statements run as a batch with no rollback across
+  them. A file applied this way has to be safe to re-run — soft-deletes
+  filtered on `deleted_at IS NULL`, inserts guarded by `NOT EXISTS` — because
+  the recovery from a half-applied run is to run it again.
+
+`npm run check:commands` fails on any invocation in this repository that
+combines `--remote` with `--file`, or that writes `--command` unbound. The rule
+above was documented in two places before that check existed and was still
+walked into, against production, on 2026-10-07.
+
 ## The self-test: proving an upload reaches R2
 
 **Why this exists.** Whether R2 accepts a presigned PUT cannot be proven from

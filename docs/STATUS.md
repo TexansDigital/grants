@@ -33,7 +33,20 @@ also carries a report period marked `accepted`, which Impact counts in its
 reporting-coverage figure.
 
 **Fix:** `scripts/sql/remove-test-data.sql`, applied with
-`npx wrangler d1 execute steward-production --remote --env production --file=scripts/sql/remove-test-data.sql`.
+
+```
+npx wrangler d1 execute steward-production --remote --env production --yes --command="$(cat scripts/sql/remove-test-data.sql)"
+```
+
+**Not `--file`.** That path switches to D1's bulk IMPORT endpoint, which
+refuses an OAuth login with `Authentication error [code: 10000]` — the failure
+`scripts/apply-sql.mjs` and `docs/RUNNING-COMMANDS.md` both already describe,
+and which this file told you to walk into on 2026-10-07. `--command=` with the
+equals sign, because the file opens with a `--` comment and yargs reads the
+leading dashes of an unbound value as the next flag.
+
+`npm run check:commands` now fails on any invocation in this repository that
+combines `--remote` with `--file`.
 Soft-delete only, scoped through `source_reference`, re-runnable, one audit row
 per award. Verified against a throwaway database built from all 28 migrations:
 real rows untouched, re-run a no-op. Expect **13 / 46900000 / 13 / 0** from the

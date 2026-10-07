@@ -1,5 +1,24 @@
 -- Remove the two test awards from production.
 --
+-- APPLY IT WITH --command=, NOT --file:
+--
+--   npx wrangler d1 execute steward-production --remote --env production --yes \
+--     --command="$(cat scripts/sql/remove-test-data.sql)"
+--
+-- `--file --remote` switches to D1's bulk IMPORT endpoint, which refuses an
+-- OAuth login with `Authentication error [code: 10000]`. That is the endpoint,
+-- not a missing permission -- the same login carries `d1 (write)`. The equals
+-- sign matters too: this file opens with a `--` comment, and an unbound
+-- `--command "$(cat …)"` makes yargs read those leading dashes as the next
+-- flag and exit with "You must provide either --command or --file".
+-- `npm run check:commands` fails on either mistake anywhere in this repo.
+--
+-- NO TRANSACTION. The statements run as a batch of separate statements, with
+-- no rollback across them (`scripts/apply-sql.mjs` says the same). That is
+-- safe here because every statement is a soft-delete already filtered on
+-- `deleted_at IS NULL`, and the audit INSERT is guarded by NOT EXISTS, so a
+-- half-applied run is fixed by running it again rather than by unpicking it.
+--
 -- WHY THIS FILE EXISTS. The 2025 import put thirteen real grants in
 -- (IC-2025-001 .. IC-2025-013, $469,000 in total). Two more rows were created
 -- by hand while testing: the end-to-end claim test and the demo CSV. Both are
