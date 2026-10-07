@@ -66,6 +66,15 @@ export function GranteeClaims({ isAdmin, onNavigate }: Props): ReactElement {
   const [query, setQuery] = useState('');
   const [found, setFound] = useState<AwardChoice[] | null>(null);
   const [searching, setSearching] = useState(false);
+  /*
+   * A FAILED SEARCH IS NOT AN EMPTY SEARCH. This used to catch the error and
+   * set an empty result, which rendered "Nothing matches. If this grant
+   * predates the system, it has to be imported before anyone can be connected
+   * to it." -- a confident, specific and wrong diagnosis that sends an admin
+   * off to import a grant that already exists. This is the only route by which
+   * a past grantee reaches their own award.
+   */
+  const [searchFailed, setSearchFailed] = useState(false);
 
   /*
    * Searched on a keystroke, debounced, and the LAST response wins.
@@ -88,10 +97,16 @@ export function GranteeClaims({ isAdmin, onNavigate }: Props): ReactElement {
       void api
         .searchAwards(q)
         .then((r) => {
-          if (mine === seq.current) setFound(r.awards);
+          if (mine === seq.current) {
+            setFound(r.awards);
+            setSearchFailed(false);
+          }
         })
         .catch(() => {
-          if (mine === seq.current) setFound([]);
+          if (mine === seq.current) {
+            setFound(null);
+            setSearchFailed(true);
+          }
         })
         .finally(() => {
           if (mine === seq.current) setSearching(false);
@@ -301,6 +316,12 @@ export function GranteeClaims({ isAdmin, onNavigate }: Props): ReactElement {
                     than the full legal name.
                   </p>
                   {searching && <p className="meta">Searching…</p>}
+                  {searchFailed && !searching && (
+                    <p className="banner danger" role="alert">
+                      The search could not be run, so this is not a statement about whether the
+                      grant exists. Try again.
+                    </p>
+                  )}
                   {found !== null && found.length === 0 && !searching && (
                     <p className="meta">
                       Nothing matches. If this grant predates the system, it has to be

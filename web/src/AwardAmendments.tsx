@@ -58,6 +58,11 @@ function showValue(row: AmendmentRow, value: string | null): string {
 
 export function AwardAmendments({ awardId, award, onAmended }: Props): ReactElement {
   const [history, setHistory] = useState<AmendmentRow[] | null>(null);
+  /*
+   * Distinct from `history === null`, which means "still loading". Without it
+   * a failed load reads as a load that never finished, forever.
+   */
+  const [loadFailed, setLoadFailed] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -73,9 +78,17 @@ export function AwardAmendments({ awardId, award, onAmended }: Props): ReactElem
     async (signal?: AbortSignal) => {
       try {
         setHistory((await api.amendments(awardId, signal)).amendments);
+        setLoadFailed(false);
       } catch (e) {
         if (e instanceof DOMException && e.name === 'AbortError') return;
-        setHistory([]);
+        /*
+         * NOT AN EMPTY HISTORY. Setting [] rendered a failed load as "this
+         * award has never been amended" -- on the page carrying the amount and
+         * the payment schedule, to somebody checking precisely that. An
+         * amendment trail that cannot be read must say so.
+         */
+        setHistory(null);
+        setLoadFailed(true);
       }
     },
     [awardId],
@@ -185,7 +198,12 @@ export function AwardAmendments({ awardId, award, onAmended }: Props): ReactElem
         </p>
       )}
 
-      {history === null ? (
+      {loadFailed ? (
+        <p className="banner danger" role="alert">
+          The amendment history could not be loaded. This is not a statement that the award is
+          unchanged — reload to try again.
+        </p>
+      ) : history === null ? (
         <p className="meta" aria-live="polite">
           Loading…
         </p>

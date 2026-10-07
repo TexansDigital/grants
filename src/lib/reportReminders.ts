@@ -84,10 +84,32 @@ export interface DueReport {
 export interface ReminderRun {
   /** Reports the grantee still owes and can act on today. */
   outstanding: number;
-  /** Grantees who reached a point on the ladder today. */
+  /**
+   * Grantees a provider ACCEPTED a message for. Nothing else.
+   *
+   * This used to count a `suppressed` outcome too -- the status written when
+   * there is no transport, meaning nothing left the building. That number
+   * stamps `reminder_last_sent_at` and `reminder_count` on the report period,
+   * and those render on the compliance desk as "2 · September 28": the
+   * Foundation believing it had chased a nonprofit twice when it had chased
+   * them never. The desk's whole job is to tell "they are ignoring us" from
+   * "nobody has asked them", and that is the fact it got backwards.
+   */
   granteesMailed: number;
-  /** Message ROWS written. A suppressed send is recorded, not sent. */
+  /** Message ROWS written, sent or not. Equals mailed + suppressed + failed. */
   messagesRecorded: number;
+  /**
+   * Recorded and not sent, because no provider is configured. The ordinary
+   * state in preview and in tests; in production it means the key is gone.
+   */
+  suppressed: number;
+  /**
+   * A provider REFUSED the message -- a bad address, a bounce, an outage.
+   * Counted and logged, where it used to fall through every branch silently:
+   * not counted, not stamped, nothing written to the error log. A hard bounce
+   * from a grantee's mail server was invisible to everybody.
+   */
+  failed: number;
   /** Report periods with nobody to write to. The reason to look at the desk. */
   withNoContact: number;
 }
@@ -197,6 +219,17 @@ export async function runReportReminders(
   env: Env,
   ctx: RequestContext,
   now: Date = new Date(),
+  /*
+   * The fetcher the provider transport uses, injectable for tests.
+   *
+   * Without this there was no way to exercise a SENT reminder at all: the
+   * suite has no RESEND_API_KEY, so `transportFor` returned null and every
+   * message was suppressed -- and the tests then asserted that a suppressed
+   * message counted as mailed and stamped the report period. They were green,
+   * and they were pinning the bug. The same reasoning as sendEmail's required
+   * `transport` argument, which exists so no production path is untestable.
+   */
+  fetcher: typeof fetch = fetch,
 ): Promise<ReminderRun> {
   const nowStr = now.toISOString();
   const owed = await reportsOwed(env.DB, nowStr);
@@ -207,6 +240,8 @@ export async function runReportReminders(
       outstanding: owed.length,
       granteesMailed: 0,
       messagesRecorded: 0,
+      suppressed: 0,
+      failed: 0,
       withNoContact: 0,
     };
   }
@@ -218,7 +253,7 @@ export async function runReportReminders(
   const day = nowStr.slice(0, 10);
   const portalUrl = `${(env.APPLICANT_BASE_URL ?? '').trim()}/reports`;
   const supportEmail = (env.EMAIL_REPLY_TO ?? '').trim() || 'grants@houstontexansfoundation.org';
-  const transport = transportFor(env);
+  const transport = transportFor(env, fetcher);
 
   // Group the reports by organization once, so each grantee's letter lists
   // everything their organization owes today rather than one report each.
@@ -231,10 +266,14 @@ export async function runReportReminders(
 
   let granteesMailed = 0;
   let messagesRecorded = 0;
+  let suppressed = 0;
+  let failed = 0;
   let withNoContact = 0;
   const remindedPeriods: string[] = [];
 
   for (const [organizationId, reports] of byOrgReports) {
+    /* What THIS organization achieved, as against the run's running total. */
+    let mailedHere = 0;
     const people = byOrg.get(organizationId) ?? [];
     if (people.length === 0) {
       /*
@@ -291,9 +330,32 @@ export async function runReportReminders(
           },
           transport,
         );
-        if (outcome.status === 'sent' || outcome.status === 'suppressed') {
-          messagesRecorded += 1;
+        messagesRecorded += 1;
+        if (outcome.status === 'sent') {
           granteesMailed += 1;
+          mailedHere += 1;
+        } else if (outcome.status === 'suppressed') {
+          suppressed += 1;
+        } else if (outcome.status === 'failed') {
+          failed += 1;
+          /*
+           * LOGGED, because nothing else will. sendEmail RETURNS a failure
+           * rather than throwing, so the catch below never fired for this and
+           * the grantee simply never heard from us. The report then goes
+           * overdue, tomorrow's reminder fails the same way, and the desk
+           * shows a red row nobody caused.
+           */
+          await logError(env, ctx, {
+            severity: 'error',
+            code: 'REPORT_REMINDER_NOT_DELIVERED',
+            message: 'the provider refused a reminder; this grantee was not reached',
+            context: {
+              organization_id: organizationId,
+              organization: reports[0]?.organizationName ?? null,
+              user_id: person.id,
+              report_periods: reports.length,
+            },
+          });
         }
       } catch (err) {
         await logError(env, ctx, {
@@ -306,15 +368,36 @@ export async function runReportReminders(
       }
     }
 
-    if (granteesMailed > 0) remindedPeriods.push(...reports.map((r) => r.reportPeriodId));
+    /*
+     * PER-ORGANIZATION, not a running total. `granteesMailed` accumulates
+     * across the whole run, so testing it here marked every later
+     * organization as reminded the moment any earlier one was -- including
+     * organizations whose own send was suppressed or refused. Counting what
+     * this organization achieved is the only thing that can gate its stamp.
+     */
+    if (mailedHere > 0) remindedPeriods.push(...reports.map((r) => r.reportPeriodId));
   }
 
+  /*
+   * STAMPED ONLY FOR MESSAGES THAT WERE ACTUALLY SENT, and the distinction is
+   * the point of this whole change. `reminder_last_sent_at` and
+   * `reminder_count` are a claim about the outside world, rendered to staff as
+   * "we chased them, on this date". A row written and not delivered is not
+   * that claim.
+   *
+   * Deliberately NOT the same rule as the retention notice in retention.ts,
+   * which does count a suppressed message: that one stamps `noticed_at` as its
+   * own bookkeeping -- "this file has been named in a notice that was due" --
+   * and nothing renders it as a statement about anybody having been told.
+   */
   if (remindedPeriods.length > 0) await stampReminded(env.DB, remindedPeriods, nowStr);
 
   return {
     outstanding: owed.length,
     granteesMailed,
     messagesRecorded,
+    suppressed,
+    failed,
     withNoContact,
   };
 }

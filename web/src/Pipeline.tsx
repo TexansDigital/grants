@@ -56,6 +56,8 @@ export function Pipeline({ programs, cycles, query, onQueryChange, onOpen }: Pro
 
   const [searchTerm, setSearchTerm] = useState('');
   const [hits, setHits] = useState<SearchHit[] | null>(null);
+  /* A failed search renders as a failure, never as nothing found. */
+  const [searchFailed, setSearchFailed] = useState(false);
   const [searching, setSearching] = useState(false);
 
   const liveRegion = useRef<HTMLParagraphElement>(null);
@@ -114,8 +116,17 @@ export function Pipeline({ programs, cycles, query, onQueryChange, onOpen }: Pro
       try {
         const { hits: found } = await api.search(q);
         setHits(found);
+        setSearchFailed(false);
       } catch {
-        setHits([]);
+        /*
+         * A FAILED SEARCH IS NOT "WE HAVE NEVER FUNDED THAT". Setting an empty
+         * result rendered a failure as a confident no, on the one query this
+         * system exists to answer -- "have we ever funded youth mental health
+         * in Fort Bend County" -- where a wrong no is indistinguishable from a
+         * right one.
+         */
+        setHits(null);
+        setSearchFailed(true);
       } finally {
         setSearching(false);
       }
@@ -174,7 +185,14 @@ export function Pipeline({ programs, cycles, query, onQueryChange, onOpen }: Pro
           <button type="submit" className="btn small" disabled={searching}>
             {searching ? 'Searching…' : 'Search'}
           </button>
-          {hits !== null && (
+          {searchFailed && (
+          <p className="banner danger" role="alert">
+            The search could not be run. This is not an answer about what has been funded — try
+            again.
+          </p>
+        )}
+
+        {hits !== null && (
             <button
               type="button"
               className="btn small secondary"

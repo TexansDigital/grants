@@ -191,6 +191,67 @@ function specs(now: string): CheckSpec[] {
       }),
     },
     {
+      /*
+       * A NONPROFIT WE TRIED TO EMAIL AND COULD NOT REACH.
+       *
+       * `email_messages` has recorded `failed` and `suppressed` since 0007,
+       * with the error code the provider gave, and until this check nothing in
+       * the system read that table. Not a screen, not a job, not a check. So a
+       * grantee whose magic link bounced was recorded correctly and surfaced
+       * nowhere: they are told "a link is on its way" (deliberately neutral,
+       * so nobody can probe which addresses exist), the report goes overdue,
+       * the nightly reminder bounces the same way, and the compliance desk
+       * shows a red row nobody caused.
+       *
+       * BLOCKING, because a grantee who cannot receive mail cannot sign in,
+       * and a grantee who cannot sign in cannot file anything. No amount of
+       * chasing inside this system reaches them.
+       *
+       * Only the LATEST attempt counts. A bounce followed by a successful send
+       * -- a corrected address, a mailbox emptied -- is a solved problem, and
+       * listing it would train somebody to ignore the check.
+       */
+      key: 'email_undeliverable',
+      label: 'Grantees we tried to email and could not reach',
+      guidance:
+        'The provider refused the message. Check the address on their contact record; ' +
+        'nothing automated in this system will reach them until it is fixed.',
+      severity: 'blocking',
+      kind: 'organization',
+      sql: `
+        SELECT o.id AS id,
+               o.legal_name AS legal_name,
+               m.to_email AS to_email,
+               m.error_code AS error_code,
+               m.created_at AS created_at,
+               COUNT(*) OVER () AS match_count
+          FROM email_messages m
+          JOIN users u ON u.email = m.to_email AND u.deleted_at IS NULL
+          JOIN organizations o ON o.id = u.organization_id AND o.deleted_at IS NULL
+         WHERE m.status = 'failed'
+           AND o.deleted_at IS NULL
+           AND ${ORG_IN_PLAY}
+           /* Nothing has got through to this address since. */
+           AND NOT EXISTS (
+                 SELECT 1 FROM email_messages later
+                  WHERE later.to_email = m.to_email
+                    AND later.status = 'sent'
+                    AND later.created_at > m.created_at)
+         GROUP BY o.id
+         ORDER BY MAX(m.created_at) DESC
+         LIMIT ?`,
+      binds: [ROWS_PER_CHECK],
+      row: (r) => ({
+        id: str(r.id),
+        title: str(r.legal_name),
+        detail:
+          `${str(r.to_email)} — ${str(r.error_code) || 'refused'}, ` +
+          `last tried ${str(r.created_at).slice(0, 10)}`,
+        // Not about an amount.
+        amountCents: null,
+      }),
+    },
+    {
       key: 'award_no_agreement',
       label: 'Active grants with no signed agreement',
       guidance: 'The grant is live and nothing is signed for it.',

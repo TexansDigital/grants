@@ -693,3 +693,107 @@ describe('what the storage figure actually counts', () => {
     expect(after.mediaFiles - before.mediaFiles).toBe(2);
   });
 });
+
+// ---------------------------------------------------------------------------
+/**
+ * A nonprofit we tried to email and could not reach.
+ *
+ * WHY THIS CHECK EXISTS. `email_messages` has recorded `failed` with the
+ * provider's error code since migration 0007, and until now NOTHING in this
+ * system read that table — not a screen, not a job, not a check. A grantee
+ * whose magic link bounced was recorded correctly and surfaced nowhere: they
+ * are told "a link is on its way", the report goes overdue, the nightly
+ * reminder bounces identically, and the compliance desk shows a red row
+ * nobody caused.
+ */
+describe('grantees we could not reach', () => {
+  /** A grantee account on an organization, and one message to it. */
+  async function mailTo(opts: {
+    organizationId: string;
+    status: 'sent' | 'failed' | 'suppressed';
+    createdAt: string;
+    email?: string;
+  }): Promise<string> {
+    const now = nowIso();
+    const email = opts.email ?? `grantee-${++seq}@example.org`;
+    const existing = await db
+      .prepare(`SELECT id FROM users WHERE email = ? AND deleted_at IS NULL`)
+      .bind(email)
+      .first<{ id: string }>();
+    if (!existing) {
+      await db
+        .prepare(
+          `INSERT INTO users (id, email, role, organization_id, is_active, created_at, updated_at)
+           VALUES (?,?,'grantee',?,1,?,?)`,
+        )
+        .bind(newId(), email, opts.organizationId, now, now)
+        .run();
+    }
+    await db
+      .prepare(
+        `INSERT INTO email_messages
+           (id, idempotency_key, template_key, to_email, subject, status,
+            error_code, sent_at, created_at, updated_at)
+         VALUES (?,?,'sign_in_link',?,'Your sign-in link',?,?,?,?,?)`,
+      )
+      .bind(
+        newId(), `k-${newId()}`, email, opts.status,
+        opts.status === 'failed' ? 'bounced' : null,
+        opts.status === 'sent' ? opts.createdAt : null,
+        opts.createdAt, now,
+      )
+      .run();
+    return email;
+  }
+
+  it('names an organization whose last message was refused', async () => {
+    const p = await program();
+    const o = await org({ name: 'Bayou Harbor Trust' });
+    await award(o, p.programId, {});
+    await mailTo({ organizationId: o, status: 'failed', createdAt: day('2026-10-01') });
+
+    const c = check(await dataHealth(db, admin), 'email_undeliverable');
+    expect(c.rows).toHaveLength(1);
+    expect(c.rows[0]?.title).toContain('Bayou Harbor Trust');
+    // The address and the provider's reason, so it can be acted on without
+    // opening anything.
+    expect(c.rows[0]?.detail).toContain('bounced');
+    expect(c.severity).toBe('blocking');
+  });
+
+  /*
+   * THE CASE THAT MUST NOT FIRE. A bounce followed by a successful send is a
+   * solved problem — a corrected address, a mailbox emptied. Listing it would
+   * teach somebody to ignore the check, which is worse than not having one.
+   */
+  it('says nothing once something has got through since', async () => {
+    const p = await program();
+    const o = await org({ name: 'Harrisburg Arts' });
+    await award(o, p.programId, {});
+    const email = await mailTo({
+      organizationId: o, status: 'failed', createdAt: day('2026-10-01'),
+    });
+    await mailTo({
+      organizationId: o, status: 'sent', createdAt: day('2026-10-02'), email,
+    });
+
+    expect(check(await dataHealth(db, admin), 'email_undeliverable').rows).toHaveLength(0);
+  });
+
+  it('is not triggered by a message that was never sent on purpose', async () => {
+    const p = await program();
+    const o = await org({ name: 'Clear Creek Fund' });
+    await award(o, p.programId, {});
+    // `suppressed` means no provider is configured — the ordinary state in
+    // preview. It is not evidence that anybody is unreachable.
+    await mailTo({ organizationId: o, status: 'suppressed', createdAt: day('2026-10-01') });
+
+    expect(check(await dataHealth(db, admin), 'email_undeliverable').rows).toHaveLength(0);
+  });
+
+  it('reads as clean rather than missing when nobody has bounced', async () => {
+    const c = check(await dataHealth(db, admin), 'email_undeliverable');
+    expect(c.rows).toHaveLength(0);
+    expect(c.label).toContain('could not reach');
+  });
+});

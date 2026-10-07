@@ -297,6 +297,43 @@ check('an award somebody already holds is offered, and flagged once chosen', awa
 void held;
 
 
+
+/*
+ * A FAILED SEARCH IS NOT AN EMPTY SEARCH.
+ *
+ * The catch set an empty result, which rendered "Nothing matches. If this
+ * grant predates the system, it has to be imported before anyone can be
+ * connected to it." -- a confident, specific and WRONG diagnosis for a server
+ * error, sending an admin off to import a grant that already exists. This is
+ * the only route by which a past grantee reaches their own award.
+ */
+/*
+ * Fresh page: an award was chosen above, which replaces the picker's opening
+ * button, and this check is about the picker rather than about that claim.
+ */
+await page.reload();
+await page.locator('[data-claim]').first().waitFor({ timeout: 10_000 });
+await page.getByRole('button', { name: 'Find the award' }).first().click();
+const finder = page.locator("input[id^='find-']").first();
+await finder.waitFor({ timeout: 10_000 });
+
+await page.route('**/api/awards/search**', (route) =>
+  route.fulfill({
+    status: 500,
+    contentType: 'application/json',
+    body: JSON.stringify({ error: { code: 'INTERNAL', message: 'nope' } }),
+  }),
+);
+await finder.fill('Invented Harbor Trust');
+await page.waitForTimeout(900);
+const failedText = await page.locator('[data-claim]').first().innerText();
+check('a search that errored says so', /could not be run/.test(failedText), true);
+check(
+  'and does not claim the grant is missing',
+  /Nothing matches/.test(failedText),
+  false,
+);
+
 // --- declining --------------------------------------------------------------
 page.on('dialog', (d) => void d.accept('No award in our records.'));
 await page.locator('[data-claim]', { hasText: 'Invented Bayou Alliance' })

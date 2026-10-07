@@ -38,6 +38,31 @@ import type { Env, Session } from '../src/types';
 const DAY = 86_400_000;
 const iso = (offsetMs: number) => new Date(Date.now() + offsetMs).toISOString();
 
+/**
+ * A provider that accepts, refuses, or is absent.
+ *
+ * WHY THIS HAD TO EXIST. The suite has no RESEND_API_KEY, so every message was
+ * `suppressed` -- nothing left the building -- and the tests asserted that a
+ * suppressed message counted as mailed and stamped the report period. Green,
+ * and pinning the bug. There was no way to write a test for a reminder that
+ * actually went, because there was no way to make one go.
+ */
+const accepts: typeof fetch = async () =>
+  new Response(JSON.stringify({ id: 'msg_test' }), {
+    status: 200,
+    headers: { 'content-type': 'application/json' },
+  });
+
+const refuses: typeof fetch = async () =>
+  new Response(JSON.stringify({ message: 'mailbox unavailable' }), {
+    status: 422,
+    headers: { 'content-type': 'application/json' },
+  });
+
+/** An env with a provider configured. The key is never used; `accepts` is. */
+const liveEnv = (over: Partial<Env> = {}): Env =>
+  mailEnv({ RESEND_API_KEY: 'test-key-not-a-real-one', ...over });
+
 const mailEnv = (over: Partial<Env> = {}): Env => ({
   ...(testEnv as unknown as Env),
   DISPLAY_TIMEZONE: 'America/Chicago',
@@ -216,8 +241,10 @@ describe('when a reminder goes out', () => {
 describe('who is chased, and who is not', () => {
   it('writes to the grantee when a report is due in three days', async () => {
     const g = await granteeOwing({ dueInDays: 3 });
-    const run = await runReportReminders(mailEnv(), ctx());
+    const run = await runReportReminders(liveEnv(), ctx(), new Date(), accepts);
     expect(run.granteesMailed).toBe(1);
+    expect(run.suppressed).toBe(0);
+    expect(run.failed).toBe(0);
     expect(await mailCount(g.granteeEmail!)).toBe(1);
 
     const row = await db
@@ -365,7 +392,7 @@ describe('what the letter is, and is not', () => {
       .bind(newId(), otherAward, iso(3 * DAY), iso(-DAY), formId, now, now)
       .run();
 
-    const run = await runReportReminders(mailEnv(), ctx());
+    const run = await runReportReminders(liveEnv(), ctx(), new Date(), accepts);
     expect(run.granteesMailed).toBe(1);
     expect(await mailCount(g.granteeEmail!)).toBe(1);
 
@@ -395,7 +422,7 @@ describe('running it twice', () => {
      * those call for opposite conversations.
      */
     const g = await granteeOwing({ dueInDays: 3 });
-    await runReportReminders(mailEnv(), ctx());
+    await runReportReminders(liveEnv(), ctx(), new Date(), accepts);
 
     const row = await db
       .prepare(
@@ -406,6 +433,96 @@ describe('running it twice', () => {
       .first<{ n: number; at: string | null }>();
     expect(row?.n).toBe(1);
     expect(row?.at).not.toBeNull();
+  });
+
+  /*
+   * THE BUG THIS FILE USED TO PIN. A `suppressed` outcome -- no provider
+   * configured, nothing sent -- counted as mailed and stamped the period, so
+   * the compliance desk read "1 · today" and the Foundation believed it had
+   * chased a nonprofit it had never contacted. The desk's entire job is to
+   * tell "they are ignoring us" from "nobody has asked them", and this is the
+   * fact it had backwards.
+   */
+  it('does not claim a chase for a message no provider ever took', async () => {
+    const g = await granteeOwing({ dueInDays: 3 });
+    const run = await runReportReminders(mailEnv(), ctx());
+
+    expect(run.granteesMailed).toBe(0);
+    expect(run.suppressed).toBe(1);
+    // The row is still written, so "why did nobody get an email" has an answer.
+    expect(run.messagesRecorded).toBe(1);
+
+    const row = await db
+      .prepare(
+        `SELECT reminder_count AS n, reminder_last_sent_at AS at
+           FROM report_periods WHERE id = ?`,
+      )
+      .bind(g.periodId)
+      .first<{ n: number; at: string | null }>();
+    expect(row?.n).toBe(0);
+    expect(row?.at).toBeNull();
+  });
+
+  /*
+   * A REFUSED MESSAGE WAS INVISIBLE TO EVERYBODY. `sendEmail` returns a
+   * failure rather than throwing, so it fell through every branch: not
+   * counted, not stamped, and not logged. A hard bounce from a grantee's mail
+   * server left no trace at all.
+   */
+  /*
+   * THE SECOND BUG IN THE SAME FUNCTION, found while fixing the first.
+   *
+   * The stamp was gated on `granteesMailed > 0` -- a RUNNING TOTAL across the
+   * whole run, tested inside the per-organization loop. So once any one
+   * organization was mailed, every organization after it had its report
+   * periods stamped as reminded, whether or not its own message went. Two
+   * grantees and one failure was enough to put a chase on the record for a
+   * nonprofit nobody reached.
+   */
+  it('does not stamp one nonprofit because a different one was reached', async () => {
+    const first = await granteeOwing({ dueInDays: 3 });
+    const second = await granteeOwing({ dueInDays: 3 });
+
+    // Accepts the first message, refuses the second.
+    let call = 0;
+    const flaky: typeof fetch = async (...args) => {
+      call += 1;
+      return call === 1 ? accepts(...args) : refuses(...args);
+    };
+
+    const run = await runReportReminders(liveEnv(), ctx(), new Date(), flaky);
+    expect(run.granteesMailed).toBe(1);
+    expect(run.failed).toBe(1);
+
+    const rows = await db
+      .prepare(
+        `SELECT id, reminder_count AS n FROM report_periods WHERE id IN (?,?) ORDER BY id`,
+      )
+      .bind(first.periodId, second.periodId)
+      .all<{ id: string; n: number }>();
+
+    const byId = new Map((rows.results ?? []).map((r) => [r.id, r.n]));
+    // Exactly one chase recorded, against exactly one nonprofit.
+    expect([...byId.values()].reduce((a, b) => a + b, 0)).toBe(1);
+  });
+
+  it('counts and logs a message the provider refused', async () => {
+    const g = await granteeOwing({ dueInDays: 3 });
+    const run = await runReportReminders(liveEnv(), ctx(), new Date(), refuses);
+
+    expect(run.granteesMailed).toBe(0);
+    expect(run.failed).toBe(1);
+
+    const row = await db
+      .prepare(`SELECT reminder_count AS n FROM report_periods WHERE id = ?`)
+      .bind(g.periodId)
+      .first<{ n: number }>();
+    expect(row?.n).toBe(0);
+
+    const logged = await db
+      .prepare(`SELECT COUNT(*) AS n FROM error_log WHERE code = 'REPORT_REMINDER_NOT_DELIVERED'`)
+      .first<{ n: number }>();
+    expect(logged?.n).toBe(1);
   });
 
   it('leaves the count alone on a night nobody is due', async () => {
