@@ -115,6 +115,27 @@ not, something was copied that should not have been.
 
 ---
 
+## Deployed
+
+**Production version `6277d429`, 2026-10-07.** Everything below in *What is
+already done* is live on `grants.` and `apply.`: the To do screen, the Grants
+and Organizations lists and detail pages, Impact, and the six-item navigation.
+
+The deployed bundle is `index-3pe59Mn5.js`, the same hash built in the agent
+container where the suite ran — so what is serving is byte-identical to what
+passed 1770 tests, rather than a rebuild that merely came from the same
+commit.
+
+**No migration was involved.** 27 migrations before this work and 27 after;
+every new screen reads tables that already existed. There was nothing to
+apply and nothing that could half-apply, which is why this deploy carried
+none of the usual schema risk.
+
+How to check: `npx wrangler deployments list --env production` names the
+version, and the Grants tab lists the imported 2025 grants.
+
+---
+
 ## What is already done
 
 Finished and verified, so neither of us re-opens it:
