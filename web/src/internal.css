@@ -935,7 +935,7 @@ tbody tr.band:hover {
  * a list of findings stays a list of findings.
  */
 .storage-usage {
-  border-left: 3px solid var(--accent);
+  border-left: 3px solid var(--blue);
   padding-left: var(--space-4);
 }
 .storage-usage[data-over='true'] { border-left-color: var(--warn-ink); }
@@ -1219,7 +1219,7 @@ tbody tr.band:hover {
  * that should not look like the rest of the page's furniture.
  */
 .request-updates {
-  border-left: 3px solid var(--accent);
+  border-left: 3px solid var(--blue);
   padding-left: var(--space-4);
   margin-top: var(--space-5);
 }

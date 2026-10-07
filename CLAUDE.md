@@ -69,6 +69,40 @@ Violating any of these is a hard stop. If a request requires it, refuse the appr
 - Ask "is this what you actually need, or would [alternative] solve the real problem better?"
 - Keep an open decisions list. Surface blockers early.
 
+### 4a. Every bug is a class, not an instance
+
+A bug that has been found once has told you something about how this codebase
+goes wrong. Fixing only the instance throws that away.
+
+So on finding any bug, before fixing it:
+
+1. **Name the class.** Not "`--rule` is undefined" but "a CSS custom property
+   read with no fallback silently drops its whole declaration".
+2. **Sweep for siblings**, mechanically where possible. Grep, a script, a
+   query — not a reread of the file it was found in.
+3. **Report the sweep's result either way.** "Swept, found two more" and
+   "swept, this was the only one" are both answers. Silence is not.
+4. **Leave a guard** where the class can recur: a test, a check script, a
+   lint. One that would have caught the original.
+
+Examples this rule came from:
+
+- `var(--rule)` undefined → swept → `var(--accent)` undefined in two more
+  places, both accent bars that had never rendered → `npm run check:css`.
+- Route `/api/awards/:id` shadowing `/api/awards/search` → swept the whole
+  table → `test/routeShadowing.test.ts`.
+- One mutation surviving on `focusArea` → the present-or-absent behaviour was
+  pinned for one field of four → test extended to all four.
+- A comment claiming two modules agree (`0028` on counties) → swept for other
+  "same shape as" claims → found a three-way claim about metric field types
+  verified nowhere → `test/metricTypeAgreement.test.ts`.
+
+**A test that passes is not evidence until you know why it passes.** Two in
+this project passed for the wrong reason: a CSS check whose `?raw` import
+returned an empty string under the Worker pool, and a trigger test refused by
+a different trigger than the one under test. Assert on the specific message,
+the specific count, the specific value.
+
 ### 5. Phase discipline
 - Anything over ~200 lines or touching 3+ components gets a phase proposal first.
 - Each phase: clear deliverable, verification method, stated dependencies.

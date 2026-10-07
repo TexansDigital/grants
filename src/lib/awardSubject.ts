@@ -28,6 +28,7 @@ import type { RequestContext, Session } from '../types';
 import { AppError, notFound } from './errors';
 import { auditStatement } from './audit';
 import { nowIso } from './time';
+import { canonicalCountyList } from './counties';
 
 /** The columns this write owns. Spelled as the database spells them. */
 const FIELDS = ['project_title', 'purpose', 'focus_area', 'counties_served_json'] as const;
@@ -80,11 +81,20 @@ function cleanText(raw: string | null | undefined, field: SubjectField, label: s
 /**
  * A list of counties to the JSON the column holds, or null.
  *
- * Stored in the same shape as `applications.counties_served_json` -- a JSON
- * array of strings -- so one reporting query can read across both tables. An
- * empty list is null, not `[]`: "nobody recorded this" and "recorded as none"
- * are not a distinction this Foundation has ever needed, and `[]` would read
- * as an answer on every screen that checks for one.
+ * NOT THE SAME STRINGS AS AN APPLICATION'S, and 0028's header wrongly says
+ * they are. An application promotes a multi_select's OPTION VALUES, so Inspire
+ * Change stores ["harris","fort_bend"]; an award stores the names a person
+ * reads. src/lib/counties.ts holds the correction and the one function that
+ * reconciles them.
+ *
+ * Canonicalised against the 254 Census county names on the way in, so
+ * "harris", "Harris County" and "HARRIS" become one row in a report rather
+ * than three. A name that is not a Texas county is kept exactly as typed: a
+ * program funding in Louisiana is a program this platform has to run.
+ *
+ * An empty list is null, not `[]`: "nobody recorded this" and "recorded as
+ * none" are not a distinction this Foundation has ever needed, and `[]` would
+ * read as an answer on every screen that checks for one.
  */
 function cleanCounties(raw: string[] | null | undefined): string | null {
   if (raw === null || raw === undefined) return null;
@@ -114,6 +124,8 @@ function cleanCounties(raw: string[] | null | undefined): string | null {
       });
     }
     // Case-insensitively unique: "Fort Bend" twice is a typo, not two places.
+    // Counted here only to apply the cap; canonicalCountyList does the real
+    // de-duplication, which also folds "Harris County" into "Harris".
     if (!seen.has(name.toLowerCase())) seen.add(name.toLowerCase());
   }
   if (seen.size === 0) return null;
@@ -125,18 +137,12 @@ function cleanCounties(raw: string[] | null | undefined): string | null {
     });
   }
   /*
-   * The ORIGINAL casing is stored, de-duplicated case-insensitively. Lowercasing
-   * what somebody typed would render "fort bend" on a board report.
+   * Canonical where it is a Texas county, the person's own words where it is
+   * not, de-duplicated either way. Lowercasing what somebody typed would
+   * render "fort bend" on a board report; keeping both "Harris" and "harris"
+   * would put the same county on a report twice.
    */
-  const kept: string[] = [];
-  const used = new Set<string>();
-  for (const entry of raw) {
-    if (typeof entry !== 'string') continue;
-    const name = entry.trim();
-    if (name === '' || used.has(name.toLowerCase())) continue;
-    used.add(name.toLowerCase());
-    kept.push(name);
-  }
+  const kept = canonicalCountyList(raw.filter((x): x is string => typeof x === 'string'));
   const json = JSON.stringify(kept);
   if (json.length > LIMITS.counties_served_json) {
     throw new AppError('VALIDATION_FAILED', 'That is more places than this field holds.', {
