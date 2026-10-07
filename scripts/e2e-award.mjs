@@ -557,8 +557,45 @@ async function main() {
       await page.locator('#subject-purpose').fill('Two campus coordinators at Alief Taylor.');
       await page.locator('#subject-title').fill('Campus literacy coaches');
       await page.locator('#subject-focus').fill('Education');
-      // What a person actually types, blanks and all.
-      await page.locator('#subject-counties').fill('Harris, , Fort Bend,');
+      /*
+       * THE COUNTY PICKER, which exists because the source data this project
+       * was built from spells McLennan two ways. Typed lowercase on purpose:
+       * the control canonicalises against the 254 Census names, so the chip a
+       * person sees is the string that gets stored.
+       */
+      await page.locator('#subject-counties').fill('harris');
+      await page.keyboard.press('Enter');
+      await page.locator('#subject-counties').fill('fort bend county');
+      await page.getByRole('button', { name: 'Add', exact: true }).click();
+      check(
+        'a county typed in any case is stored the way the Census spells it',
+        await page.locator('.chip > span:first-child').evaluateAll((els) =>
+          els.map((e) => e.textContent.trim()),
+        ),
+        ['Harris', 'Fort Bend'],
+      );
+
+      // The same county twice is a slip, not two places.
+      await page.locator('#subject-counties').fill('HARRIS');
+      await page.getByRole('button', { name: 'Add', exact: true }).click();
+      check('and adding it twice adds it once', await page.locator('.chip').count(), 2);
+
+      /*
+       * THE PAYOFF. "Ft Bend" is a different word and this deliberately does
+       * not guess at it -- but it is marked, which is how somebody notices.
+       * Silent acceptance is what put two spellings of McLennan in the data
+       * this vocabulary was built from.
+       */
+      await page.locator('#subject-counties').fill('Ft Bend');
+      await page.getByRole('button', { name: 'Add', exact: true }).click();
+      const flagged = page.locator(".chip[data-unknown='true']");
+      check('an abbreviation nobody can resolve is flagged, not refused', await flagged.count(), 1);
+      truthy('and says why', /not a Texas county/.test(await flagged.innerText()));
+
+      // And it can be taken back off.
+      await page.getByRole('button', { name: 'Remove Ft Bend' }).click();
+      check('a chip can be removed', await page.locator('.chip').count(), 2);
+
       await page.getByRole('button', { name: 'Save', exact: true }).click();
       await page.getByRole('status').first().waitFor({ timeout: 10_000 });
 

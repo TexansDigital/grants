@@ -23,6 +23,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { ReactElement } from 'react';
 import { ApiError, api } from './api';
+import { TEXAS_COUNTIES } from '../../src/data/texasCounties';
+import { canonicalCounty, isTexasCounty } from '../../src/lib/counties';
 import type { AwardOverview, RelatedAward } from './api';
 import { formatCents } from '../../src/lib/money';
 import { formatDay } from './reportWording';
@@ -447,10 +449,28 @@ function Subject({
   const [title, setTitle] = useState(subject.projectTitle ?? '');
   const [purpose, setPurpose] = useState(subject.purpose ?? '');
   const [focus, setFocus] = useState(subject.focusArea ?? '');
-  const [counties, setCounties] = useState(subject.countiesServed.join(', '));
+  const [counties, setCounties] = useState<string[]>([...subject.countiesServed]);
+  const [countyDraft, setCountyDraft] = useState('');
 
   const nothingRecorded =
     !subject.projectTitle && !subject.purpose && !subject.focusArea && subject.countiesServed.length === 0;
+
+  /*
+   * Add whatever is in the box, canonicalised where it is a Texas county.
+   *
+   * Canonicalising HERE as well as on the server is not belt and braces for
+   * its own sake: the chip the person sees has to be the string that gets
+   * stored, or the screen quietly disagrees with the database.
+   */
+  function addCounty(): void {
+    const typed = countyDraft.trim();
+    if (typed === '') return;
+    const name = canonicalCounty(typed) ?? typed;
+    setCounties((cs) =>
+      cs.some((c) => c.toLowerCase() === name.toLowerCase()) ? cs : [...cs, name],
+    );
+    setCountyDraft('');
+  }
 
   function open(): void {
     // Reopen from what is on the record, not from whatever was half-typed and
@@ -458,7 +478,8 @@ function Subject({
     setTitle(subject.projectTitle ?? '');
     setPurpose(subject.purpose ?? '');
     setFocus(subject.focusArea ?? '');
-    setCounties(subject.countiesServed.join(', '));
+    setCounties([...subject.countiesServed]);
+    setCountyDraft('');
     setEditing(true);
   }
 
@@ -527,17 +548,81 @@ function Subject({
           placeholder="Education"
         />
       </div>
-      <div className="filter">
+      {/* Spans the row, like the description below it. Greater Houston alone
+          is eighteen counties, and eighteen chips stacked in a 14rem column
+          is a column of chips rather than a list of places. */}
+      <div className="filter wide">
         <label htmlFor="subject-counties">Counties served</label>
+        {/*
+          A NATIVE DATALIST, not a custom combobox.
+
+          254 counties is too many for a checkbox list and too many to
+          remember, so the control has to offer the vocabulary rather than
+          wait to be typed at. The ARIA 1.2 combobox pattern would do it
+          better and I cannot verify it: nobody has put a screen reader near
+          this application. A datalist is typeahead the browser and the
+          assistive technology already understand, and it costs nothing when
+          it is ignored -- the field is still a text input, so a county in
+          Louisiana can be typed straight in.
+        */}
         <input
           id="subject-counties"
-          value={counties}
-          onChange={(e) => setCounties(e.target.value)}
-          placeholder="Harris, Fort Bend"
+          list="texas-counties"
+          value={countyDraft}
+          autoComplete="off"
+          onChange={(e) => setCountyDraft(e.target.value)}
+          onKeyDown={(e) => {
+            // Enter adds, and does not submit anything: there is no form
+            // element here, but a future one would make this a save.
+            if (e.key !== 'Enter') return;
+            e.preventDefault();
+            addCounty();
+          }}
+          placeholder="Start typing a county"
         />
-        {/* Said once, here, rather than left for somebody to discover by
-            typing a semicolon and losing the lot into one county name. */}
-        <span className="meta">Separate them with commas.</span>
+        <datalist id="texas-counties">
+          {TEXAS_COUNTIES.map((c) => (
+            <option key={c} value={c} />
+          ))}
+        </datalist>
+        <div className="actions-inline">
+          <button
+            type="button"
+            className="btn secondary small"
+            disabled={countyDraft.trim() === ''}
+            onClick={addCounty}
+          >
+            Add
+          </button>
+          <span className="meta">
+            {counties.length === 0 ? 'None yet.' : `${counties.length} selected.`}
+          </span>
+        </div>
+        {counties.length > 0 ? (
+          <ul className="chips">
+            {counties.map((c) => (
+              <li key={c} className="chip" data-unknown={isTexasCounty(c) ? undefined : 'true'}>
+                <span>{c}</span>
+                {/*
+                  NOT A TEXAS COUNTY is said, not refused. The platform runs
+                  programs that fund anywhere, so this is never an error -- but
+                  it is how a reader notices they typed "Ft Bend", which is the
+                  whole reason the vocabulary exists. Silent acceptance is what
+                  produced two spellings of McLennan in the source data.
+                */}
+                {isTexasCounty(c) ? null : <span className="meta">not a Texas county</span>}
+                <button
+                  type="button"
+                  className="chip-remove"
+                  aria-label={`Remove ${c}`}
+                  onClick={() => setCounties((cs) => cs.filter((x) => x !== c))}
+                >
+                  &times;
+                </button>
+              </li>
+            ))}
+          </ul>
+        ) : null}
       </div>
       <div className="filter wide">
         <label htmlFor="subject-purpose">What the money paid for</label>
@@ -562,16 +647,12 @@ function Subject({
                 purpose: purpose.trim() === '' ? null : purpose,
                 focusArea: focus.trim() === '' ? null : focus,
                 /*
-                 * Split, trimmed, blanks dropped. "Harris, , Fort Bend," is
-                 * what a person actually types, and the server would refuse
-                 * nothing here -- it drops blanks too -- but sending them
-                 * would make the audit row's before/after noisier than the
-                 * change it records.
+                 * Already a list, already canonical, already de-duplicated by
+                 * the time it gets here -- the control adds one at a time.
+                 * Anything still in the box unadded is deliberately NOT sent:
+                 * a half-typed word is not a county.
                  */
-                countiesServed: counties
-                  .split(',')
-                  .map((c) => c.trim())
-                  .filter((c) => c !== ''),
+                countiesServed: counties,
                 expectedUpdatedAt: award.updatedAt,
               });
               setEditing(false);

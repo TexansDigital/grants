@@ -746,12 +746,76 @@ tbody tr.band:hover {
 .subject-form .actions {
   grid-column: 1 / -1;
 }
+/* The input itself stays input-sized; only the field spans the row, so the
+   chips below it have somewhere to go. A 1,200px-wide box for one county
+   name reads as a mistake. */
+.subject-form .filter.wide input {
+  max-width: 22rem;
+}
 .subject-form .actions {
   margin-top: 0;
   padding-top: 0;
   border-top: 0;
   display: flex;
   gap: var(--space-3);
+}
+
+/* The county picker's chips.
+ *
+ * A list, not a row of buttons: each chip is a thing that has been chosen, and
+ * the control that removes it belongs to it. Flex-wrapped, because eighteen
+ * Greater Houston counties will not fit on one line at any width this screen
+ * is used at.
+ */
+.chips {
+  list-style: none;
+  margin: var(--space-2) 0 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  font-size: var(--step--1);
+}
+/* Not an error -- a program may fund anywhere -- but visible, which is how
+   somebody notices they typed "Ft Bend". */
+.chip[data-unknown='true'] {
+  border-color: var(--warn);
+}
+.chip .meta {
+  font-size: 11px;
+}
+.chip-remove {
+  border: 0;
+  background: none;
+  cursor: pointer;
+  color: var(--ink-3);
+  font-size: var(--step-0);
+  line-height: 1;
+  /* A 24px target is small; it sits inside a 13px chip and enlarging the chip
+     to carry a 44px control would make eighteen of them unreadable. The
+     keyboard path is the real one and it is a plain button. */
+  padding: 0 var(--space-1);
+}
+.chip-remove:hover,
+.chip-remove:focus-visible {
+  color: var(--danger-ink, var(--danger));
+}
+
+/* The Add button and its running count, on one line under the input. */
+.actions-inline {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-top: var(--space-2);
 }
 
 /* A paragraph under the facts, with a measure. The same reasoning as the
