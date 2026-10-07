@@ -1,12 +1,33 @@
 # Status
 
-**Last verified: 2026-10-04.** Every line below says how to check it, because a
+**Last verified: 2026-10-07.** Every line below says how to check it, because a
 status file that nobody can re-verify becomes fiction within a week. This
 project has already been bitten three times by a document that was true when
 written and false when read.
 
 Where it says **you**, that is the Foundation. Where it says **Claude**, that
 is the assistant. Where it says **unknown**, neither of us has checked.
+
+---
+
+## Blocking right now
+
+**One thing, and it is a bookkeeping fault rather than a schema fault.**
+`npm run golive` reports `27 applied, 28 on disk`.
+
+Migration `0028_award_subject.sql` **has run** against production — four
+queries, 2026-10-07 — but it was applied with `wrangler d1 execute --file=`,
+which runs the SQL and writes no row to `d1_migrations`. So the columns exist
+and the ledger disagrees.
+
+**Do not run `migrate:production` to fix it.** Wrangler would try 0028 again
+and SQLite refuses a duplicate column. The fix is to record the row that was
+never written; the command is below, once the naming convention in that table
+has been read back.
+
+`npm run migrate:production` now exists, so the next one does not go this way.
+`docs/PRODUCTION-CUTOVER.md` has always carried the right command and it was
+not read.
 
 ---
 
@@ -23,13 +44,17 @@ with a higher bar (see *Not in scope* at the bottom).
 
 ## The thirteen conditions
 
-Production is "live" when all thirteen are true. Today: **0 of 13.**
+Production is "live" when all thirteen are true. Today: **11 of 13**, with
+the two outstanding both the Foundation's to run.
+
+That count was stale at `0 of 13` while eleven rows beneath it said *done* —
+the first thing this file warns about, in its own opening paragraph.
 
 ### Infrastructure — production serving
 
 | # | Condition | State | How to check |
 |---|---|---|---|
-| 1 | `steward-production` migrated clean from empty | **done 2026-10-04** | 27 migrations, schema identical to preview: 41 tables, 95 indexes, 102 triggers in both |
+| 1 | `steward-production` migrated clean from empty | **done 2026-10-04**, 28 migrations as of 2026-10-07 | the schema matches preview; the LEDGER does not — see *Blocking right now* |
 | 2 | R2 buckets and KV created and bound | **done** | `npm run check:config` |
 | 3 | Five production secrets set, new signing key | **done 2026-10-04** | `npx wrangler secret list --env production` lists all five |
 | 4 | Seeded config only; apps, awards, orgs all 0 | **done 2026-10-04** | 1 program, 2 stages, 2 forms, 2 admins, 5 metrics; apps/awards/orgs all 0 |
@@ -44,8 +69,8 @@ Production is "live" when all thirteen are true. Today: **0 of 13.**
 
 | # | Condition | State | How to check |
 |---|---|---|---|
-| 9 | Thirteen imported, with an audit row each | not done | *Checking the databases* |
-| 10 | Update request dry-run matched 13, then run | not done | Configuration → Ask past grantees for an update |
+| 9 | Thirteen imported, with an audit row each | **needs re-checking** | *Checking the databases* — the Grants tab lists thirteen grants, so this may be done and unrecorded. Run the count query below before trusting either answer. |
+| 10 | Update request dry-run matched 13, then run | not done | Programs → Ask past grantees for an update. **Gated on a decision, not on engineering:** the due date for the 2025 update is also the send schedule, because the nightly job mails at 14 days, 3 days and on the day. A date inside two weeks means everybody is emailed tomorrow. |
 | 11 | A magic link clicked on a phone, from Outlook, with a photo attached | **done 2026-10-04** | link delivered to a shared M365 mailbox, opened on a phone; 3 files uploaded to steward-production-files after bucket CORS was set |
 | 12 | Restore drill run against production | **done 2026-10-05** | export `d1/2026-10-05/070101`, 573 rows across 33 tables, every table matching the manifest, 102 triggers off and back on, no dangling references; thirteen organizations and their amounts recognised by hand |
 | 13 | One grantee claim approved end to end | **done 2026-10-05** | connected, declined, and the new grantee signed in to exactly one award with no sign of the other thirteen |
@@ -80,7 +105,26 @@ Production is "live" when all thirteen are true. Today: **0 of 13.**
 
 ## Blocked on Claude
 
-Nothing. The next move is yours.
+Nothing is blocked. Not yet deployed: the Texas county vocabulary and the
+picker (`10dcc9e`, `898d37a`). They carry no migration.
+
+Owed, and named here rather than left in a commit message:
+
+- **The funding-history search is not built.** The data it needs now exists
+  (an award's focus area, counties and purpose), and the index does not. Until
+  it does, a grant is findable by the organization's name, its EIN and its
+  reference, and not by what it funded.
+- **No CSV or PDF export.** Executives never log in — CLAUDE.md is explicit
+  that the export *is* the product for them — so there is currently nothing
+  for an executive at all. That is Phase 6.
+- **Neither the Grants nor the Organizations list paginates.** The 101st row
+  is unreachable. Harmless at thirteen; it is on the clock against 2026.
+- **`reportDue` computes the UTC day while the grantee portal uses Central.**
+  A grantee opening the portal at 8pm Central on the due date sees "due
+  today"; the server already counts it a day late, and under a `block`
+  compliance policy that can refuse their next application for a report that
+  is not late. Flagged four times, not fixed, because it moves a boundary that
+  refuses people money and that is not a decision to slip into a UI commit.
 
 ## Waiting on the Foundation team
 
@@ -117,19 +161,25 @@ not, something was copied that should not have been.
 
 ## Deployed
 
-**Production version `6277d429`, 2026-10-07.** Everything below in *What is
-already done* is live on `grants.` and `apply.`: the To do screen, the Grants
-and Organizations lists and detail pages, Impact, and the six-item navigation.
+**Production version `618a4bfb`, 2026-10-07**, the fourth deploy that day.
+Bundle `index-BOuqzgBY.js`, byte-identical to the build that passed the suite
+in the agent container rather than a rebuild from the same commit.
 
-The deployed bundle is `index-3pe59Mn5.js`, the same hash built in the agent
-container where the suite ran — so what is serving is byte-identical to what
-passed 1770 tests, rather than a rebuild that merely came from the same
-commit.
+Four deploys on 2026-10-07, in order:
 
-**No migration was involved.** 27 migrations before this work and 27 after;
-every new screen reads tables that already existed. There was nothing to
-apply and nothing that could half-apply, which is why this deploy carried
-none of the usual schema risk.
+| Version | Carries |
+|---|---|
+| `6277d429` | the To do screen, Grants and Organizations, Impact, the six-item nav |
+| `d1715cc0` | the audit-pass fixes — overdue firing a day early, cancelled awards in totals, `revisions_requested` dropped from To do |
+| `e970fce1` | the compliance desk banded by who is holding each report up, and the report panel restructured |
+| `618a4bfb` | an award's own subject matter: what it funded, its focus area, its counties |
+
+**`618a4bfb` was the first deploy this project has made that carried a
+migration** — `0028_award_subject.sql`, four nullable columns on `awards`. It
+applied, and the ledger row did not get written; see *Blocking right now*.
+
+Not yet deployed: the Texas county vocabulary and the picker built on it
+(`10dcc9e`, `898d37a`).
 
 How to check: `npx wrangler deployments list --env production` names the
 version, and the Grants tab lists the imported 2025 grants.
@@ -304,6 +354,96 @@ Check it: `npm run e2e:nav`, which measures that the bar is one line at
 1280px, that Escape *and* a background click close the menu, and that opening
 something from the menu still tells you where you are.
 
+### The compliance desk, banded
+
+Reports was thirteen rows reading *Final report / December 3 / Scheduled* with
+the two or three that needed something scattered among them. The header said
+"3 overdue" and then hid those three in the pile.
+
+Four bands, by **who is holding each report up**, which is the only question
+that changes what you do next: *Waiting on us* (filed, unread) · *Late* ·
+*Still to come* · *Settled*. A fifth catches any status the rules do not claim
+and says so, because a screen promising "every obligation" must not be able to
+drop a nonprofit's report between bands when a seventh status is added.
+
+The largest band says in words why it is largest: **"The scheduled ones have
+not been asked for."** All thirteen sit there, and that sentence is the only
+outstanding work this month.
+
+Three things that were wrong and had one cause each:
+
+- **The filter captions were 16px body text** — larger than the column
+  headings and every value in the table. `internal.css` styles `.filter
+  label`, and this screen alone wrote `<label class="filter">` with a bare
+  span, matching no rule at all. Twelve of sixteen filter controls looked one
+  way and these four looked another.
+- **Clicking a row appeared to do nothing.** The detail panel renders after
+  the table, so at thirteen rows it opened about 500px below the bottom of an
+  800px window and the page did not move. It scrolls and takes focus now, and
+  closing returns focus to the row.
+- **The loudest badge marked the row that needed nothing.** ACCEPTED was a
+  solid fill while FILED, AWAITING US — the only row where the Foundation is
+  the hold-up — was a quiet outline.
+
+Check it: `npm run e2e:reports`, which counts the distinct type treatments on
+the screen and fails if the number grows, because "so many fonts and font
+sizes" is only a number a machine can hold on to.
+
+### What a grant was for
+
+The system could say the Foundation gave an organization $50,000 in 2025.
+**Nothing in it could say what for.**
+
+That is not a gap in a search box. `0005_search.sql` declares an index with
+`counties`, `focus_area` and `narrative`, and its header opens by quoting *"have
+we ever funded youth mental health in Fort Bend County"*. It indexes
+**applications**. `awards.application_id` is NULL for everything imported, and
+the award importer accepts identity and dates — ein, amount, term_start,
+status, notes — and nothing describing the work. None of the thirteen has a row
+in that index and none ever will.
+
+So `0028` gives an award its own `project_title`, `purpose`, `focus_area` and
+`counties_served_json`, editable on the grant page, audit-logged, under the
+same optimistic lock as an amendment. It is **not** an amendment: that trail
+answers "what changed about this grant's terms" and filling in a blank
+description is not that. The Grants list shows the focus area under the
+organization, so the blanks are visible across the portfolio rather than one
+grant at a time.
+
+**All thirteen are blank today.** Thirteen grants is a screen's work and there
+is no bulk route; an importer column is the answer if a year ever arrives with
+ninety.
+
+### The Texas place vocabulary
+
+254 counties from the US Census county FIPS file, and 1,471 cities mapped to
+the counties their ZIPs fall in. Generated by `scripts/buildTexasPlaces.py`,
+which documents provenance and refuses to emit a county it cannot reconcile
+against the Census list.
+
+The ZIP source spells two of them wrong — *De Witt* for DeWitt, *Mclennan* for
+McLennan — which is the argument for a vocabulary in one line. Katy resolves to
+Harris, Fort Bend **and** Waller, which is the real answer.
+
+The grant page offers the 254 through a native datalist and adds them as
+chips, canonicalised in the browser as well as on the server so the chip
+somebody sees is the string that gets stored. **"Ft Bend" is marked, not
+refused** — the platform runs programs that fund anywhere, so an unrecognised
+place is never an error, but it carries *not a Texas county* in amber, which
+is how a person notices they abbreviated.
+
+It also caught a false claim: `0028`'s header says
+`awards.counties_served_json` is "the same shape as
+`applications.counties_served_json`". It is not — an application promotes the
+multi-select's option VALUES, so Inspire Change stores `["harris","fort_bend"]`
+while an award stores the names a person reads. `src/lib/counties.ts` carries
+the correction and the one function that reconciles them. An applied migration
+is never edited, so the file still says the wrong thing.
+
+And the eighteen Greater Houston counties typed by hand into the Inspire
+Change seed are now checked against the Census list. Nothing had ever verified
+them. They are all correct.
+
 ### The audit pass
 
 After the first production deploy, the new screens were audited for UX and for
@@ -401,6 +541,50 @@ found by reading real output rather than by testing:
   in that file predicts this exact mistake, and it is now the third time.
 
 ---
+
+### Bugs found by sweeping for the class, not the instance
+
+Adam asked, on 2026-10-07, why a bug found is not treated as evidence about
+how this codebase goes wrong, and swept for siblings. It is now rule 4a in
+`CLAUDE.md`. The first sweeps found three more bugs and two tests that passed
+for the wrong reason:
+
+- **`var(--rule)` is defined nowhere**, so `.danger-row`'s top border has never
+  rendered — CSS drops the whole declaration when a var() in it resolves to
+  nothing. Swept: **`var(--accent)` is undefined too**, in `.storage-usage` and
+  `.request-updates`, both `border-left: 3px solid var(--accent)`. Neither has
+  ever had the accent bar that is the point of the treatment, and one of them
+  is the panel that writes report obligations against other organizations'
+  grants, whose own comment says it "should not look like the rest of the
+  page's furniture". Guarded by `npm run check:css`, now part of `verify`.
+- **A comment claiming two modules agree** (`0028` on counties). Swept:
+  `metricColumnFor` says it "mirrors the trigger in 0013 and the scaffolder's
+  FIELD_TYPE_BY_METRIC_TYPE" and nothing checked it — the existing test
+  asserts that constant equals a literal copy of itself, so changing the
+  trigger leaves it green and the first symptom would be a grantee's report
+  refused by the database mid-submit. `test/metricTypeAgreement.test.ts` drives
+  all three for real.
+- Two sweeps came back clean and are recorded as such: `??` not catching an
+  empty string has three sibling call sites, all safe because `isBlank`
+  normalises `''` to an all-NULL row at coercion; and unscoped harness
+  selectors are self-detecting, because Playwright throws on a multiple match.
+
+**And two tests written that day passed for the wrong reason.** A CSS check
+written as a vitest test imported the stylesheets with `?raw` — which resolves
+to an **empty string** under `vitest-pool-workers`, so all three assertions
+passed against nothing. And a trigger test used an *application* form, so the
+insert was refused by a different trigger entirely. Both caught before they
+shipped, only by asking why they passed. That is also now in `CLAUDE.md`.
+
+### A migration applied without its ledger row
+
+`0028` was applied to production with `wrangler d1 execute --file=`, on
+instructions from Claude, rather than `wrangler d1 migrations apply`. The DDL
+ran; `d1_migrations` was never written. `npm run golive` caught it —
+`27 applied, 28 on disk` — which is the check doing exactly its job.
+
+`npm run migrate:production` now exists, because the absence of a script is
+why the wrong command got improvised in the first place.
 
 ## Not in scope for this launch
 
