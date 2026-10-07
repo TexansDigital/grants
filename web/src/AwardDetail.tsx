@@ -25,6 +25,7 @@ import type { ReactElement } from 'react';
 import { ApiError, api } from './api';
 import type { AwardOverview, RelatedAward } from './api';
 import { formatCents } from '../../src/lib/money';
+import { formatDay } from './reportWording';
 import { AwardPaperwork } from './AwardPaperwork';
 import { PaymentLedger } from './PaymentLedger';
 import { InfoTip } from './InfoTip';
@@ -35,9 +36,19 @@ interface Props {
 }
 
 /** A date as a person reads it, or an em dash. Never an empty cell. */
+/*
+ * The house date helper, not a local slice.
+ *
+ * These four screens each kept a private `iso.slice(0, 10)`, so the
+ * compliance desk said a report was due "December 31, 2025" and the award
+ * page for the same grant said "2025-12-31" -- one person moving between them
+ * all day, looking at two products. formatDay also pins the rendering to UTC,
+ * for the reason its own docblock gives: a calendar date rendered in Central
+ * lands on the previous day, and a grant running to 31 December displayed as
+ * ending the 30th.
+ */
 function day(iso: string | null): string {
-  if (!iso) return '—';
-  return iso.slice(0, 10);
+  return formatDay(iso) || '—';
 }
 
 function relatedLabel(a: RelatedAward): string {
@@ -73,15 +84,15 @@ export function AwardDetail({ awardId, onNavigate }: Props): ReactElement {
   if (error) {
     return (
       <section className="panel">
-        <h2>Grant</h2>
-        <p role="alert">{error.message}</p>
+        <h2 tabIndex={-1} data-route-heading>Grant</h2>
+        <p className="banner danger" role="alert">{error.message}</p>
       </section>
     );
   }
   if (!data) {
     return (
       <section className="panel">
-        <h2>Grant</h2>
+        <h2 tabIndex={-1} data-route-heading>Grant</h2>
         <p className="meta">Loading…</p>
       </section>
     );
@@ -134,7 +145,7 @@ export function AwardDetail({ awardId, onNavigate }: Props): ReactElement {
         </div>
 
         <div className="panel-head">
-          <h2>{data.organizationName}</h2>
+          <h2 tabIndex={-1} data-route-heading>{data.organizationName}</h2>
           <span className={`badge badge-${data.status}`}>{data.status}</span>
           {data.isMultiYear ? <span className="badge">Multi-year</span> : null}
           {data.isPublic ? <span className="badge badge-published">Listed publicly</span> : null}
@@ -190,7 +201,7 @@ export function AwardDetail({ awardId, onNavigate }: Props): ReactElement {
                     which no unit test could have seen.
                   */}
                   <InfoTip label="the grant period">
-                    Report obligations are generated from the grant period, so an award without
+                    Report due dates are worked out from the grant period, so an award without
                     one cannot be asked for an update until the dates are added. Add them with
                     the Amend this award form further down this page.
                   </InfoTip>
@@ -199,7 +210,7 @@ export function AwardDetail({ awardId, onNavigate }: Props): ReactElement {
             </dd>
           </div>
           <div>
-            <dt>Programme</dt>
+            <dt>Program</dt>
             <dd>{data.programName}</dd>
           </div>
           <div>
@@ -332,20 +343,20 @@ export function AwardDetail({ awardId, onNavigate }: Props): ReactElement {
                 className="btn small"
                 disabled={busy}
                 onClick={() =>
-                  void act('Creating the report obligations', async () => {
+                  void act('Setting the report due dates', async () => {
                     const r = await api.generateAwardReportPeriods(awardId);
                     return r.created > 0
-                      ? `Created ${r.created} report ${r.created === 1 ? 'obligation' : 'obligations'}. Nothing has been emailed yet.`
-                      : 'No obligations were created.';
+                      ? `Set ${r.created} report due ${r.created === 1 ? 'date' : 'dates'}. Nothing has been emailed yet.`
+                      : 'No due dates were set.';
                   })
                 }
               >
-                Create the report obligations
+                Set the report due dates
               </button>
             </p>
             <p className="meta">
-              This writes the obligations only. Reminder emails go out on the schedule once a due
-              date is close.
+              This sets the dates only. Reminder emails go out on the schedule once a due date is
+              close.
             </p>
           </>
         )}

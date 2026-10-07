@@ -34,6 +34,7 @@
 
 import type { Session } from '../types';
 import { notFound } from './errors';
+import { today } from './reportDue';
 
 /** One grant, as much as a list row needs. */
 export interface OrganizationAward {
@@ -67,6 +68,7 @@ export interface OrganizationContact {
   isPrimary: boolean;
   /** True when a user row exists for this email on this organization. */
   hasAccount: boolean;
+  /** Null when they have never completed a sign-in. */
   lastLoginAt: string | null;
 }
 
@@ -89,13 +91,27 @@ export interface OrganizationOverview {
 
   /** Every grant ever made to them, in cents. Integer arithmetic throughout. */
   totalAwardedCents: number;
-  /*
-   * CAN ANYBODY HERE LOG IN? False means no automated reminder can ever reach
-   * this organization, whatever is overdue -- somebody has to write to them.
-   * It is the first thing to know about a grantee and the last thing anyone
-   * would think to check.
+  /**
+   * An account exists for somebody here.
+   *
+   * NOT evidence that anybody can be reached, and this field was briefly used
+   * as though it were. The awards importer creates a `users` row for every
+   * imported grant that carried a contact email, so all thirteen 2025
+   * grantees "have an account" that a spreadsheet made for them: nobody
+   * verified the address, nobody there knows the account exists, and nobody
+   * has used it. A screen that read this as "can sign in" said Yes for every
+   * one of them and made the question unanswerable.
    */
-  canSignIn: boolean;
+  hasAccount: boolean;
+  /**
+   * When somebody here last completed a sign-in, or null if nobody ever has.
+   *
+   * THIS is the honest signal. `users.last_login_at` is written only by
+   * recordLogin, which runs when a magic link is actually redeemed -- so a
+   * date here means a real person at this nonprofit opened a real email. Null
+   * means every reminder this system has ever sent them is unaccounted for.
+   */
+  lastSignInAt: string | null;
 }
 
 export async function organizationOverview(
@@ -128,11 +144,13 @@ export async function organizationOverview(
      * point of the row, and a correlated subquery keeps "a grant and how its
      * reporting went" as a single thing that cannot come apart.
      *
-     * 'overdue' here is a date comparison, not reportDue.ts's definition.
-     * That is deliberate and narrow: this is a COUNT for a summary row, and
-     * the authoritative per-report view is the compliance desk, which the
-     * page links to. It is not a second answer to "is this report late" for
-     * anything to act on.
+     * 'overdue' here compares against reportDue's own calendar day, so it
+     * cannot diverge from the compliance desk. It bound a full ISO instant,
+     * which is a DIFFERENT predicate -- a due date stored as a plain date or
+     * as midnight UTC sorts before any same-day timestamp, so a report due
+     * today was counted as overdue here and called fine there, on two screens
+     * one click apart. The bind is the fix; the substr beside it is defence
+     * against a third storage shape and changes no result today.
      */
     db
       .prepare(
@@ -142,15 +160,31 @@ export async function organizationOverview(
                 p.name AS programName,
                 (SELECT COUNT(*) FROM report_periods rp
                   WHERE rp.award_id = w.id AND rp.deleted_at IS NULL) AS reportsTotal,
+                /*
+                 * WAIVED COUNTS AS SETTLED, as it does on the dashboard. A
+                 * grant with one accepted and one waived period has nothing
+                 * outstanding, and reading "1 of 2 accepted" on a row where
+                 * nothing is outstanding reads as a missing report.
+                 */
                 (SELECT COUNT(*) FROM report_periods rp
                   WHERE rp.award_id = w.id AND rp.deleted_at IS NULL
-                    AND rp.status = 'accepted') AS reportsAccepted,
+                    AND rp.status IN ('accepted','waived')) AS reportsAccepted,
+                /*
+                 * CANCELLED AWARDS EXCLUDED, as dashboard.ts has done since
+                 * it was written. When a grantee refuses an award, 0020
+                 * records it as 'cancelled' and leaves any already-generated
+                 * report periods alone -- so counted, they sit in the overdue
+                 * column forever for a grant nobody ever took, with no way to
+                 * clear them short of waiving a period on a cancelled award.
+                 */
                 (SELECT COUNT(*) FROM report_periods rp
                   WHERE rp.award_id = w.id AND rp.deleted_at IS NULL
+                    AND w.status <> 'cancelled'
                     AND rp.status IN ('scheduled','open','revisions_requested')
-                    AND rp.due_date < ?) AS reportsOverdue,
+                    AND substr(rp.due_date, 1, 10) < ?) AS reportsOverdue,
                 (SELECT COUNT(*) FROM report_periods rp
                   WHERE rp.award_id = w.id AND rp.deleted_at IS NULL
+                    AND w.status <> 'cancelled'
                     AND rp.status IN ('scheduled','open','submitted',
                                       'revisions_requested')) AS reportsOutstanding
            FROM awards w
@@ -158,7 +192,7 @@ export async function organizationOverview(
           WHERE w.organization_id = ? AND w.deleted_at IS NULL
           ORDER BY w.awarded_at DESC`,
       )
-      .bind(new Date().toISOString(), organizationId)
+      .bind(today(new Date().toISOString()), organizationId)
       .all<OrganizationAward>(),
 
     db
@@ -219,21 +253,26 @@ export async function organizationOverview(
   }));
 
   /*
-   * The sign-in question is asked of USERS, not of contacts.
+   * Asked of USERS, not of contacts.
    *
    * An approved past-grantee claim creates a user without necessarily
    * creating a contact row, so deriving this from `contactRows` would report
-   * "nobody can sign in" for an organization that had just been connected --
-   * the precise moment somebody is checking.
+   * "nobody has an account" for an organization that had just been connected
+   * -- the precise moment somebody is checking.
+   *
+   * MAX over last_login_at rather than a count of non-null ones: the question
+   * is whether ANYBODY here has ever got in, and when. SQLite's MAX ignores
+   * NULLs, so an organization where one of three contacts has signed in
+   * returns that date rather than null.
    */
   const signIn = await db
     .prepare(
-      `SELECT COUNT(*) AS n FROM users
+      `SELECT COUNT(*) AS n, MAX(last_login_at) AS lastSignInAt FROM users
         WHERE organization_id = ? AND is_active = 1 AND deleted_at IS NULL
           AND role IN ('applicant','grantee')`,
     )
     .bind(organizationId)
-    .first<{ n: number }>();
+    .first<{ n: number; lastSignInAt: string | null }>();
 
   const awardRows = awards.results ?? [];
 
@@ -251,9 +290,20 @@ export async function organizationOverview(
     awards: awardRows,
     applications: applications.results ?? [],
     contacts: contactRows,
-    // Integer cents, summed as integers. No float ever touches this.
-    totalAwardedCents: awardRows.reduce((sum, a) => sum + a.awardedAmountCents, 0),
-    canSignIn: (signIn?.n ?? 0) > 0,
+    /*
+     * Integer cents, summed as integers. No float ever touches this.
+     *
+     * CANCELLED AWARDS ARE EXCLUDED FROM THE TOTAL but still listed in
+     * `awards` above, which is deliberate: the grant is part of the record
+     * and the row carries its status, while the money is not committed. This
+     * matches dashboard.ts, so the organization page and the dashboard cannot
+     * report different totals for the same nonprofit.
+     */
+    totalAwardedCents: awardRows
+      .filter((a) => a.status !== 'cancelled')
+      .reduce((sum, a) => sum + a.awardedAmountCents, 0),
+    hasAccount: (signIn?.n ?? 0) > 0,
+    lastSignInAt: signIn?.lastSignInAt ?? null,
   };
 }
 
@@ -264,12 +314,19 @@ export async function organizationOverview(
 /**
  * Every nonprofit the Foundation has a record of.
  *
- * THE COLUMN THAT MATTERS IS "CAN SIGN IN". A list of organizations is of
- * mild interest; a list that answers "which of our grantees cannot be reached
- * by anything this system sends" is the one somebody needs this month, and it
- * is a question nothing in the platform has ever been able to answer in one
- * place. The detail page says it for one nonprofit at a time, which is no use
- * for finding the ones nobody has thought about.
+ * THE COLUMN THAT MATTERS IS WHETHER ANYBODY HAS EVER SIGNED IN, and the
+ * first version of it was wrong in a way worth recording. It asked whether a
+ * `users` row existed and called that "can sign in" -- but the awards
+ * importer creates one for every imported grant that carried a contact email,
+ * so all thirteen 2025 grantees answered Yes to a question nobody had
+ * actually put to them. The filter built on it returned nothing, and the one
+ * thing this screen exists to find became unfindable.
+ *
+ * `last_login_at` is the honest signal. It is written only when a magic link
+ * is redeemed, so a date means a real person at that nonprofit opened a real
+ * email; null means every reminder we have ever sent them is unaccounted for.
+ * That is the list somebody needs before a press goes out, and the detail
+ * page can only answer it one nonprofit at a time.
  */
 export interface OrganizationListRow {
   id: string;
@@ -282,7 +339,10 @@ export interface OrganizationListRow {
   lastAwardedAt: string | null;
   applications: number;
   reportsOverdue: number;
-  canSignIn: boolean;
+  /** An account exists. Says nothing about whether anybody has used it. */
+  hasAccount: boolean;
+  /** When anybody here last completed a sign-in. Null if nobody ever has. */
+  lastSignInAt: string | null;
 }
 
 export interface OrganizationListFilters {
@@ -290,8 +350,8 @@ export interface OrganizationListFilters {
   q?: string | null;
   /** Only nonprofits that have been funded. */
   fundedOnly?: boolean;
-  /** Only funded nonprofits that nothing automated can reach. */
-  unreachableOnly?: boolean;
+  /** Only funded nonprofits where nobody has ever signed in. */
+  neverSignedInOnly?: boolean;
   limit?: number;
   offset?: number;
 }
@@ -316,7 +376,7 @@ export async function listOrganizations(
 
   const limit = Math.min(Math.max(filters.limit ?? 100, 1), 500);
   const offset = Math.max(filters.offset ?? 0, 0);
-  const now = new Date().toISOString();
+  const todayDate = today(new Date().toISOString());
 
   /*
    * Correlated subqueries rather than GROUP BY across three joins. Joining
@@ -331,8 +391,18 @@ export async function listOrganizations(
            o.ein_verified_at AS einVerifiedAt, o.status,
            (SELECT COUNT(*) FROM awards w
              WHERE w.organization_id = o.id AND w.deleted_at IS NULL) AS grants,
+           /*
+            * CANCELLED EXCLUDED, matching dashboard.ts's definition of
+            * committed money. A refused or rescinded award is money the
+            * Foundation promised and did not give; counting it made this
+            * column disagree with the dashboard for the same organization --
+            * $65,000 here against $25,000 there, with nothing saying why.
+            * A pending offer is kept, as the dashboard keeps it: an offer
+            * out and not yet refused is still committed.
+            */
            (SELECT COALESCE(SUM(w.awarded_amount_cents), 0) FROM awards w
-             WHERE w.organization_id = o.id AND w.deleted_at IS NULL)
+             WHERE w.organization_id = o.id AND w.deleted_at IS NULL
+               AND w.status <> 'cancelled')
              AS totalAwardedCents,
            (SELECT MAX(w.awarded_at) FROM awards w
              WHERE w.organization_id = o.id AND w.deleted_at IS NULL) AS lastAwardedAt,
@@ -341,19 +411,29 @@ export async function listOrganizations(
            (SELECT COUNT(*) FROM report_periods rp
               JOIN awards w2 ON w2.id = rp.award_id
              WHERE w2.organization_id = o.id AND w2.deleted_at IS NULL
+               AND w2.status <> 'cancelled'
                AND rp.deleted_at IS NULL
                AND rp.status IN ('scheduled','open','revisions_requested')
-               AND rp.due_date < ?) AS reportsOverdue,
+               AND substr(rp.due_date, 1, 10) < ?) AS reportsOverdue,
            (SELECT COUNT(*) FROM users u
              WHERE u.organization_id = o.id AND u.is_active = 1 AND u.deleted_at IS NULL
-               AND u.role IN ('applicant','grantee')) AS accounts
+               AND u.role IN ('applicant','grantee')) AS accounts,
+           /*
+            * MAX ignores NULLs in SQLite, so this is the most recent sign-in
+            * by ANYBODY here, and null only when not one of them has ever
+            * got in. A count of non-null logins would have answered a
+            * different and less useful question.
+            */
+           (SELECT MAX(u.last_login_at) FROM users u
+             WHERE u.organization_id = o.id AND u.is_active = 1 AND u.deleted_at IS NULL
+               AND u.role IN ('applicant','grantee')) AS lastSignInAt
       FROM organizations o
      WHERE ${where.join(' AND ')}
      ORDER BY o.legal_name`;
 
   const { results } = await db
     .prepare(`${sql} LIMIT ? OFFSET ?`)
-    .bind(now, ...binds, limit, offset)
+    .bind(todayDate, ...binds, limit, offset)
     .all<Record<string, unknown>>();
 
   const counted = await db
@@ -372,18 +452,21 @@ export async function listOrganizations(
     lastAwardedAt: (r.lastAwardedAt as string | null) ?? null,
     applications: r.applications as number,
     reportsOverdue: r.reportsOverdue as number,
-    canSignIn: (r.accounts as number) > 0,
+    hasAccount: (r.accounts as number) > 0,
+    lastSignInAt: (r.lastSignInAt as string | null) ?? null,
   }));
 
   // Both filters run after the page, so `total` is the unfiltered count --
   // named separately rather than conflated, as the compliance desk does.
   if (filters.fundedOnly) rows = rows.filter((r) => r.grants > 0);
   /*
-   * "Unreachable" means FUNDED and with nobody who can sign in. An
-   * organization that has only ever applied and cannot sign in is not a
-   * problem; a grantee who cannot is one nobody will otherwise notice.
+   * FUNDED, and nobody has ever signed in. The funded half matters: an
+   * organization that has only ever applied and never signed in is not a
+   * problem, while a grantee who has not is one nobody will otherwise notice.
    */
-  if (filters.unreachableOnly) rows = rows.filter((r) => r.grants > 0 && !r.canSignIn);
+  if (filters.neverSignedInOnly) {
+    rows = rows.filter((r) => r.grants > 0 && r.lastSignInAt === null);
+  }
 
   return { rows, total: counted?.n ?? rows.length };
 }

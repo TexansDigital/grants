@@ -49,15 +49,23 @@ function value(metricType: string, total: number, unit: string | null): string {
  */
 function coverage(p: ImpactProgram): string {
   if (p.obligations === 0 && p.grantsNeverAsked === 0) {
-    return 'No grants in this programme yet.';
+    return 'No grants in this program yet.';
   }
   if (p.obligations === 0) {
     return `Nothing below has been reported. None of the ${p.grantsNeverAsked} grant${
       p.grantsNeverAsked === 1 ? '' : 's'
-    } in this programme has been asked for an update yet.`;
+    } in this program has been asked for an update yet.`;
   }
   const asked = `${p.accepted} of ${p.obligations} update${p.obligations === 1 ? '' : 's'} accepted`;
-  const money = `covering ${formatCents(p.totalAwardedCents)} of grants`;
+  /*
+   * BOTH NUMBERS, ALWAYS. This read "covering $469,000 of grants" using the
+   * TOTAL -- the one figure on a screen built to carry denominators that had
+   * none, and the one most likely to be lifted into a board paper as the
+   * amount those updates account for.
+   */
+  const money = `covering ${formatCents(p.acceptedAwardedCents)} of ${formatCents(
+    p.totalAwardedCents,
+  )} in grants`;
   const never =
     p.grantsNeverAsked > 0
       ? `, and ${p.grantsNeverAsked} further grant${
@@ -88,15 +96,15 @@ export function ImpactScreen({ year, onYearChange }: Props): ReactElement {
   if (error) {
     return (
       <section className="panel">
-        <h2>Impact</h2>
-        <p role="alert">{error.message}</p>
+        <h2 tabIndex={-1} data-route-heading>Impact</h2>
+        <p className="banner danger" role="alert">{error.message}</p>
       </section>
     );
   }
   if (!data) {
     return (
       <section className="panel">
-        <h2>Impact</h2>
+        <h2 tabIndex={-1} data-route-heading>Impact</h2>
         <p className="meta">Loading…</p>
       </section>
     );
@@ -106,7 +114,7 @@ export function ImpactScreen({ year, onYearChange }: Props): ReactElement {
     <>
       <section className="panel">
         <div className="panel-head">
-          <h2>Impact</h2>
+          <h2 tabIndex={-1} data-route-heading>Impact</h2>
           <span className="meta">
             {year === null ? 'Every year' : `Grant year ${year}`}
           </span>
@@ -118,27 +126,31 @@ export function ImpactScreen({ year, onYearChange }: Props): ReactElement {
         </p>
 
         {data.years.length > 0 ? (
-          <label className="year-picker">
-            <span>Grant year</span>
-            <select
-              id="impact-year"
-              value={year === null ? '' : String(year)}
-              onChange={(e) => onYearChange(e.target.value === '' ? null : Number(e.target.value))}
-            >
-              <option value="">Every year</option>
-              {data.years.map((y) => (
-                <option key={y} value={y}>
-                  {y}
-                </option>
-              ))}
-            </select>
-          </label>
+          <div className="filters year-picker">
+            <div className="filter">
+              <label htmlFor="impact-year">Grant year</label>
+              <select
+                id="impact-year"
+                value={year === null ? '' : String(year)}
+                onChange={(e) =>
+                  onYearChange(e.target.value === '' ? null : Number(e.target.value))
+                }
+              >
+                <option value="">Every year</option>
+                {data.years.map((y) => (
+                  <option key={y} value={y}>
+                    {y}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
         ) : null}
       </section>
 
       {data.programs.length === 0 ? (
         <section className="panel">
-          <p className="empty-reason">No programmes yet.</p>
+          <p className="empty-reason">No programs yet.</p>
         </section>
       ) : null}
 
@@ -157,8 +169,8 @@ export function ImpactScreen({ year, onYearChange }: Props): ReactElement {
 
           {p.metrics.length === 0 ? (
             <p className="empty-reason">
-              This programme has no impact metrics defined, so there is nothing for grantees to
-              report against. Metrics are set up per programme, before the report form is built.
+              This program has no impact metrics defined, so there is nothing for grantees to
+              report against. Metrics are set up per program, before the report form is built.
             </p>
           ) : (
             <dl className="facts impact-facts">
@@ -188,8 +200,15 @@ export function ImpactScreen({ year, onYearChange }: Props): ReactElement {
                         <strong className="impact-number">
                           {value(m.metricType, m.total, m.unit)}
                         </strong>
+                        {/*
+                          The denominator here too. "from 3 updates" two
+                          inches under a promise that every figure is shown
+                          with the share it is drawn from was the promise
+                          being broken by the screen that made it.
+                        */}
                         <span className="meta">
-                          from {m.answered} update{m.answered === 1 ? '' : 's'}
+                          from {m.answered} of {p.obligations} update
+                          {p.obligations === 1 ? '' : 's'}
                         </span>
                       </>
                     )}

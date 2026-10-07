@@ -132,7 +132,8 @@ const UNCLAIMED = {
   applications: [],
   contacts: [],
   totalAwardedCents: 3_500_000,
-  canSignIn: false,
+  hasAccount: true,
+  lastSignInAt: null,
 };
 
 /** The same nonprofit once they have claimed, reported, and applied again. */
@@ -193,7 +194,8 @@ const ESTABLISHED = {
     },
   ],
   totalAwardedCents: 6_000_000,
-  canSignIn: true,
+  hasAccount: true,
+  lastSignInAt: '2026-09-28T00:00:00.000Z',
 };
 
 const MERGED = {
@@ -250,9 +252,20 @@ async function main() {
       });
 
       const banner = await page.getByRole('status').first().innerText();
+      /*
+       * The fixture gives this nonprofit an ACCOUNT but no sign-in, which is
+       * the exact state the awards importer leaves all thirteen 2025 grantees
+       * in: a users row created from a spreadsheet address that nobody has
+       * ever opened. The banner must still fire, and must say why the account
+       * is not reassurance.
+       */
       truthy(
-        'the page says no reminder can reach them',
-        /no reminder from Steward can reach them/i.test(banner),
+        'the page says no reminder has been shown to reach them',
+        /no reminder from Steward has been shown to reach them/i.test(banner),
+      );
+      truthy(
+        'and that an imported account is not evidence the address works',
+        /created from the grant import/i.test(banner),
       );
       truthy(
         'and names what a person has to do about it',

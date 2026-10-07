@@ -20,14 +20,26 @@ import type { ReactElement } from 'react';
 import { ApiError, api } from './api';
 import type { OrganizationOverview } from './api';
 import { formatCents } from '../../src/lib/money';
+import { formatDay } from './reportWording';
 
 interface Props {
   organizationId: string;
   onNavigate: (path: string) => void;
 }
 
+/*
+ * The house date helper, not a local slice.
+ *
+ * These four screens each kept a private `iso.slice(0, 10)`, so the
+ * compliance desk said a report was due "December 31, 2025" and the award
+ * page for the same grant said "2025-12-31" -- one person moving between them
+ * all day, looking at two products. formatDay also pins the rendering to UTC,
+ * for the reason its own docblock gives: a calendar date rendered in Central
+ * lands on the previous day, and a grant running to 31 December displayed as
+ * ending the 30th.
+ */
 function day(iso: string | null): string {
-  return iso ? iso.slice(0, 10) : '—';
+  return formatDay(iso) || '—';
 }
 
 /** An EIN as it is printed on a Form 990. Stored as nine digits. */
@@ -57,15 +69,15 @@ export function OrganizationDetail({ organizationId, onNavigate }: Props): React
   if (error) {
     return (
       <section className="panel">
-        <h2>Organization</h2>
-        <p role="alert">{error.message}</p>
+        <h2 tabIndex={-1} data-route-heading>Organization</h2>
+        <p className="banner danger" role="alert">{error.message}</p>
       </section>
     );
   }
   if (!data) {
     return (
       <section className="panel">
-        <h2>Organization</h2>
+        <h2 tabIndex={-1} data-route-heading>Organization</h2>
         <p className="meta">Loading…</p>
       </section>
     );
@@ -88,7 +100,7 @@ export function OrganizationDetail({ organizationId, onNavigate }: Props): React
         </div>
 
         <div className="panel-head">
-          <h2>{data.legalName}</h2>
+          <h2 tabIndex={-1} data-route-heading>{data.legalName}</h2>
           <span className={`badge badge-${data.status}`}>{data.status}</span>
         </div>
 
@@ -117,11 +129,18 @@ export function OrganizationDetail({ organizationId, onNavigate }: Props): React
           report and merely a fact for an organization that has only ever
           applied.
         */}
-        {funded > 0 && !data.canSignIn ? (
+        {funded > 0 && data.lastSignInAt === null ? (
           <p role="status" className="empty-reason">
-            Nobody at this organization can sign in yet, so no reminder from Steward can reach
-            them — whatever becomes overdue. Somebody has to write to them and ask them to claim
-            their grant at the public site.
+            Nobody at this organization has ever signed in, so no reminder from Steward has been
+            shown to reach them — whatever becomes overdue. Somebody has to write to them and ask
+            them to claim their grant at the public site.
+            {data.hasAccount ? (
+              <>
+                {' '}
+                An account exists for them, but it was created from the grant import rather than
+                by anybody here, so it is no evidence the address works.
+              </>
+            ) : null}
           </p>
         ) : null}
 
@@ -177,8 +196,16 @@ export function OrganizationDetail({ organizationId, onNavigate }: Props): React
             </dd>
           </div>
           <div>
-            <dt>Can sign in</dt>
-            <dd>{data.canSignIn ? 'Yes' : 'No'}</dd>
+            <dt>Last signed in</dt>
+            <dd>
+              {/*
+                NOT "can sign in", which this said and which was false
+                comfort: the awards importer creates an account for every
+                imported grant, so that read Yes for thirteen nonprofits none
+                of whom had ever opened the system.
+              */}
+              {data.lastSignInAt ? day(data.lastSignInAt) : 'Never'}
+            </dd>
           </div>
         </dl>
 
@@ -207,7 +234,7 @@ export function OrganizationDetail({ organizationId, onNavigate }: Props): React
               <thead>
                 <tr>
                   <th scope="col">Awarded</th>
-                  <th scope="col">Programme</th>
+                  <th scope="col">Program</th>
                   <th scope="col">Amount</th>
                   <th scope="col">Reporting</th>
                 </tr>

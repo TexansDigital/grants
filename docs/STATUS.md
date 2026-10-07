@@ -304,6 +304,45 @@ Check it: `npm run e2e:nav`, which measures that the bar is one line at
 1280px, that Escape *and* a background click close the menu, and that opening
 something from the menu still tells you where you are.
 
+### The audit pass
+
+After the first production deploy, the new screens were audited for UX and for
+correctness. Both passes found real defects; the worst were mine, and several
+had been live.
+
+**Things that said more than they knew.** "Can sign in" was true whenever a
+`users` row existed — but the awards importer creates one for every imported
+grant, so all thirteen 2025 grantees read Yes and the filter built on it
+matched nothing. It now reports **when anybody last signed in**, which is
+written only when a magic link is actually redeemed. Impact's coverage line
+said "covering $469,000 of grants" using the *total*, on the one screen built
+to carry denominators. The To do screen told a reviewer "no unanswered claims,
+no reports, nothing overdue, no files near destruction" about three queues it
+never queried and that they are not allowed to see.
+
+**Things that disagreed with each other.** Overdue was re-implemented in SQL as
+`due_date < <full ISO instant>`, which calls a report due *today* overdue —
+while the compliance desk, running `reportDue.ts`, called the same report fine.
+Refused awards kept their report periods and were counted as live obligations,
+so a grant nobody took sat red forever. "Total awarded" included cancelled
+awards, so the organization page and the dashboard reported different totals
+for the same nonprofit. A waived report read as missing.
+
+**Things only rendering shows.** Filter labels ran into their dropdowns because
+the screens didn't use the house `.filter` wrapper. A failed load rendered
+beside the empty state, so a 500 could read "Nothing to chase." Dates were ISO
+on the new screens and "December 3, 2026" everywhere else. `badge-cancelled`,
+`badge-completed` and `badge-pending` were never defined, so a rescinded grant
+looked like one awaiting acceptance. The status filter offered "closed", which
+is not a status this system has, and omitted "completed", which is what every
+imported grant is.
+
+**And the tests that would not have caught any of it.** The anti-row-
+multiplication test created zero applications; the overdue test used a date two
+years past, so it pinned the sign and not the boundary; the horizon test was
+written in terms of the constant it was testing. Each is now pinned, and every
+fix above was mutation-tested by reintroducing the bug.
+
 ### Bugs found and fixed during this work
 
 Recorded because all four were invisible to a green test suite, and three were

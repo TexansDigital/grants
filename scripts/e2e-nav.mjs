@@ -181,10 +181,24 @@ async function main() {
       await toggle.click();
       await page.getByRole('button', { name: 'Retention' }).click();
       await page.waitForURL(`${base}/retention`, { timeout: 10_000 });
+      /*
+       * MARKED, BUT NOT WITH aria-current. Putting it on the toggle meant two
+       * current-page controls in one nav whenever the menu was open -- this
+       * one and the item inside it. The visual mark moved to a data
+       * attribute, which the stylesheet keys on beside the real one.
+       */
       check(
         'and the More button is marked when the open screen is inside it',
+        await toggle.getAttribute('data-section-current'),
+        'true',
+      );
+      falsy(
+        'without claiming to be the current page itself',
         await toggle.getAttribute('aria-current'),
-        'page',
+      );
+      falsy(
+        'and without promising menu behaviour it does not have',
+        await toggle.getAttribute('aria-haspopup'),
       );
       check('with nothing else in the bar claiming to be current',
         await page.locator(".mainnav > button[aria-current='page']").count(), 0);

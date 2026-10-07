@@ -145,9 +145,25 @@ export function Pipeline({ programs, cycles, query, onQueryChange, onOpen }: Pro
           </span>
         </div>
 
-        {/* ---- search ------------------------------------------------------ */}
+        {/*
+          ---- search ------------------------------------------------------
+          "Applications", not "narratives". The latter is the data model's
+          word for the long-text answers, borrowed from the project notes; no
+          one at the Foundation uses it, and a label naming an internal
+          concept makes a reader wonder what else they are missing.
+
+          IT SEARCHES APPLICATIONS AND ONLY APPLICATIONS. The index holds one
+          document per submitted application, so a grant imported from a
+          spreadsheet -- which is every grant made before this platform -- is
+          not in it and cannot be found here. "Have we ever funded youth
+          mental health in Fort Bend" is a question about GRANTS, and this box
+          cannot answer it: there is no text on an imported award to match,
+          and no way to narrow a search to the funded ones. That belongs on
+          the Grants tab and is written up in docs/ROADMAP.md rather than
+          implied by a hopeful label here.
+        */}
         <form className="searchbar" onSubmit={runSearch} role="search">
-          <label htmlFor="fts">Search narratives</label>
+          <label htmlFor="fts">Search applications</label>
           <input
             id="fts"
             type="search"

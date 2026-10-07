@@ -306,30 +306,39 @@ describe('the grants list', () => {
     expect(row!.reportsOutstanding).toBeGreaterThan(0);
   });
 
-  it('says on every row whether the grantee can be reached at all', async () => {
+  it('reports when the grantee last signed in, and an imported account is not a sign-in', async () => {
     const admin = adminSession();
     const programId = await program();
     const orgId = await org('Unreachable Trust');
     const awardId = await importedAward({ programId, orgId });
+    const row = async () =>
+      (await listAwards(db, admin, { q: 'Unreachable Trust' })).rows.find((r) => r.id === awardId)!;
+
+    expect((await row()).granteeLastSignInAt).toBeNull();
 
     /*
-     * A grant whose grantee has no account cannot be chased by anything
-     * automated, and before this column that was invisible in any list -- you
-     * could only learn it one nonprofit at a time.
+     * THE BUG THIS REPLACED. The awards importer creates a users row for
+     * every imported grant that carried a contact email, so this column --
+     * when it asked whether an account EXISTED -- read "can sign in: yes" for
+     * all thirteen 2025 grantees, none of whom has ever opened the system.
+     * A row created by a spreadsheet is not somebody who can be reached.
      */
-    const before = await listAwards(db, admin, { q: 'Unreachable Trust' });
-    expect(before.rows.find((r) => r.id === awardId)!.granteeCanSignIn).toBe(false);
-
+    const userId = newId();
     await db
       .prepare(
         `INSERT INTO users (id, email, role, organization_id, is_active, created_at, updated_at)
          VALUES (?,?, 'grantee', ?, 1, ?, ?)`,
       )
-      .bind(newId(), `reach-${seq}@example.org`, orgId, nowIso(), nowIso())
+      .bind(userId, `reach-${seq}@example.org`, orgId, nowIso(), nowIso())
       .run();
+    expect((await row()).granteeLastSignInAt).toBeNull();
 
-    const after = await listAwards(db, admin, { q: 'Unreachable Trust' });
-    expect(after.rows.find((r) => r.id === awardId)!.granteeCanSignIn).toBe(true);
+    // Only a real sign-in counts, which is what recordLogin stamps.
+    await db
+      .prepare(`UPDATE users SET last_login_at = ? WHERE id = ?`)
+      .bind(day('2026-09-28'), userId)
+      .run();
+    expect((await row()).granteeLastSignInAt).toBe(day('2026-09-28'));
   });
 
   it('finds a grant by EIN typed with or without its dash', async () => {
@@ -360,6 +369,81 @@ describe('the grants list', () => {
     const ids = out.rows.map((r) => r.id);
     expect(ids).toContain(owing);
     expect(ids).not.toContain(clear);
+  });
+
+  it('narrows by program and by status', async () => {
+    const admin = adminSession();
+    const programId = await program();
+    const otherProgram = await program();
+    const orgId = await org('Filtered');
+    const mine = await importedAward({ programId, orgId });
+    const theirs = await importedAward({ programId: otherProgram, orgId: await org('Other') });
+
+    /*
+     * Neither filter was asserted anywhere, so deleting either `where.push`
+     * passed the whole suite -- on a screen where a filter returning the
+     * wrong set reads as the Foundation not having those grants.
+     */
+    const byProgram = await listAwards(db, admin, { programId, limit: 500 });
+    expect(byProgram.rows.map((r) => r.id)).toContain(mine);
+    expect(byProgram.rows.map((r) => r.id)).not.toContain(theirs);
+
+    await db.prepare(`UPDATE awards SET status = 'completed' WHERE id = ?`).bind(mine).run();
+    const byStatus = await listAwards(db, admin, { status: 'completed', limit: 500 });
+    expect(byStatus.rows.map((r) => r.id)).toContain(mine);
+    expect(
+      (await listAwards(db, admin, { status: 'pending', limit: 500 })).rows.map((r) => r.id),
+    ).not.toContain(mine);
+  });
+
+  it('counts overdue on the same day the compliance desk does', async () => {
+    const admin = adminSession();
+    const programId = await program();
+    const orgId = await org('Boundary');
+    const awardId = await importedAward({ programId, orgId });
+    await generateReportPeriods(db, ctxFor(admin), awardId);
+
+    const setDue = (d: string) =>
+      db.prepare(`UPDATE report_periods SET due_date = ?, status = 'open' WHERE award_id = ?`)
+        .bind(d, awardId).run();
+    const row = async () =>
+      (await listAwards(db, admin, { limit: 500 })).rows.find((r) => r.id === awardId)!;
+
+    /*
+     * `reportsOverdue` was asserted by no test at all, which is why the
+     * boundary bug lived here: the count was `due_date < <full ISO instant>`,
+     * and both stored date shapes sort before any same-day timestamp, so a
+     * report due TODAY counted as overdue while the desk called it fine.
+     */
+    const todayUtc = new Date().toISOString().slice(0, 10);
+    await setDue(todayUtc);
+    expect((await row()).reportsOverdue).toBe(0);
+    await setDue(new Date(Date.now() - 86_400_000).toISOString().slice(0, 10));
+    expect((await row()).reportsOverdue).toBe(1);
+    // Both stored shapes: generateReportPeriods writes midnight UTC.
+    await setDue(`${todayUtc}T00:00:00.000Z`);
+    expect((await row()).reportsOverdue).toBe(0);
+  });
+
+  it('does not count a refused grant as owing anything', async () => {
+    const admin = adminSession();
+    const programId = await program();
+    const awardId = await importedAward({ programId, orgId: await org('Refused') });
+    await generateReportPeriods(db, ctxFor(admin), awardId);
+    const row = async () =>
+      (await listAwards(db, admin, { limit: 500 })).rows.find((r) => r.id === awardId)!;
+
+    expect((await row()).reportsOutstanding).toBeGreaterThan(0);
+
+    /*
+     * A refused award keeps its generated report periods, so counted they put
+     * a permanent obligation on a grant nobody took -- unclearable except by
+     * waiving a period on a cancelled award. dashboard.ts has excluded them
+     * since it was written; these list queries had not.
+     */
+    await db.prepare(`UPDATE awards SET status = 'cancelled' WHERE id = ?`).bind(awardId).run();
+    expect((await row()).reportsOutstanding).toBe(0);
+    expect((await row()).reportsOverdue).toBe(0);
   });
 
   it('leaves out soft-deleted grants', async () => {

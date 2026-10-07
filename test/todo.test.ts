@@ -134,10 +134,42 @@ describe('the to-do list', () => {
     const admin = adminSession();
     // A report period a year out: it exists, it is open, and it is nobody's
     // work today. The horizon has to exclude it or "empty" never happens.
-    await scenario({ dueDate: inDays(300) });
+    const s = await scenario({ dueDate: inDays(300) });
 
+    /*
+     * NOT A FILTER ON ONE KIND. This asserted only that no `report_due` item
+     * appeared, so a spurious item of any other kind passed -- on the one
+     * test guarding the property the module leads with, that an empty list
+     * means nothing is outstanding. Scoped to this scenario's own rows,
+     * because the database is shared across tests in this file.
+     */
     const out = await todo(db, admin, nowIso());
-    expect(out.items.filter((i) => i.kind === 'report_due')).toHaveLength(0);
+    const mine = out.items.filter((i) => i.id.endsWith(s.periodId) || i.id.endsWith(s.awardId));
+    expect(mine).toEqual([]);
+  });
+
+  it('carries a report sent back for revisions, which the grantee still owes', async () => {
+    const admin = adminSession();
+    const s = await scenario({ dueDate: inDays(-5) });
+    await db
+      .prepare(`UPDATE report_periods SET status = 'revisions_requested' WHERE id = ?`)
+      .bind(s.periodId)
+      .run();
+
+    /*
+     * THE GAP THIS CLOSES. The status test was spelled out here as `open` or
+     * `scheduled`, which silently dropped revisions_requested -- a report the
+     * Foundation sent back and is waiting on. reportDue.GRANTEE_OWES has
+     * always included it, the compliance desk counted it overdue, and the
+     * application gate could block that nonprofit's next cycle over it, while
+     * this screen showed nothing.
+     */
+    const out = await todo(db, admin, nowIso());
+    const row = out.items.find((i) => i.id === `overdue:${s.periodId}`);
+    expect(row).toBeDefined();
+    expect(row!.urgency).toBe('now');
+    // And it is NOT described as unasked -- it has been asked for twice.
+    expect(row!.detail).not.toContain('Nobody has asked');
   });
 
   it('surfaces an overdue report as needing attention now', async () => {
@@ -157,8 +189,14 @@ describe('the to-do list', () => {
 
   it('surfaces a report due inside the horizon, but not one beyond it', async () => {
     const admin = adminSession();
-    const near = await scenario({ dueDate: inDays(REPORT_HORIZON_DAYS - 1) });
-    const far = await scenario({ dueDate: inDays(REPORT_HORIZON_DAYS + 30) });
+    /*
+     * THE HORIZON IS PINNED TO A NUMBER, not expressed in terms of itself.
+     * Written as REPORT_HORIZON_DAYS ± n, changing the constant from 14 to
+     * 3650 passed, so the value was unprotected by the test that names it.
+     */
+    expect(REPORT_HORIZON_DAYS).toBe(14);
+    const near = await scenario({ dueDate: inDays(13) });
+    const far = await scenario({ dueDate: inDays(44) });
 
     const out = await todo(db, admin, nowIso());
     const ids = out.items.map((i) => i.id);
@@ -303,14 +341,22 @@ describe('the to-do list', () => {
     expect(forReviewer.items.some((i) => i.kind === 'files_due')).toBe(false);
   });
 
-  it('reports whether the list is the whole list', async () => {
+  it('reports whether the list is the whole list, in both directions', async () => {
     const admin = adminSession();
+    // Two obligations, so that asking for a page of one genuinely truncates.
     await scenario({ dueDate: inDays(-5) });
-    const out = await todo(db, admin, nowIso());
-    // True at this Foundation's volume for the next decade. The flag exists so
-    // that the day it is false, the screen says so instead of quietly showing
-    // the first page of a longer list.
-    expect(out.complete).toBe(true);
+    await scenario({ dueDate: inDays(-6) });
+    // True at this Foundation's volume for the next decade.
+    expect((await todo(db, admin, nowIso())).complete).toBe(true);
+
+    /*
+     * AND THE OTHER DIRECTION, which is the informative one and was missing:
+     * asserting only `true` on a near-empty database passes if the field is
+     * hardcoded. Driven by shrinking the page rather than by inserting five
+     * hundred rows, which is the same condition reportPortfolio reports.
+     */
+    const few = await todo(db, admin, nowIso(), 1);
+    expect(few.complete).toBe(false);
   });
 
   it('refuses an applicant outright', async () => {

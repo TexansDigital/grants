@@ -178,6 +178,27 @@ describe('impact', () => {
     expect(p.accepted).toBe(1);
   });
 
+  it('separates the money behind accepted updates from the money in total', async () => {
+    const { admin, adminCtx, programId } = await scenario();
+    const filed = await award(programId, 2_500_000);
+    const silent = await award(programId, 1_000_000);
+    await generateReportPeriods(db, adminCtx, filed);
+    await generateReportPeriods(db, adminCtx, silent);
+    await acceptedReport(programId, filed, 412);
+
+    /*
+     * THE NUMERATOR AND THE DENOMINATOR, SEPARATELY. The coverage sentence
+     * said "covering $35,000 of grants" when one of two had filed, using the
+     * total as though it were the amount the accepted update accounted for --
+     * the one figure on a screen built to carry denominators that had none,
+     * on its way into a board paper.
+     */
+    const p = programOf(await impact(db, admin, nowIso()), programId);
+    expect(p.acceptedAwardedCents).toBe(2_500_000);
+    expect(p.totalAwardedCents).toBe(3_500_000);
+    expect(Number.isInteger(p.acceptedAwardedCents)).toBe(true);
+  });
+
   it('never turns an unanswered metric into a zero', async () => {
     const { admin, adminCtx, programId } = await scenario();
     const a = await award(programId);
@@ -249,7 +270,7 @@ describe('impact', () => {
 
     /*
      * THE MIRROR OF THE TEST ABOVE, and the reason the null is computed from
-     * SUM rather than from a count. A grantee who ran the programme and
+     * SUM rather than from a count. A grantee who ran the program and
      * reached nobody has reported a real figure, and showing it as "nobody has
      * told us yet" would erase an answer they took the trouble to give.
      */
@@ -295,7 +316,7 @@ describe('impact', () => {
     await award(programId); // never asked
 
     /*
-     * THE THIRTEEN ARE ALL IN THIS BUCKET TODAY. Without it, a programme
+     * THE THIRTEEN ARE ALL IN THIS BUCKET TODAY. Without it, a program
      * whose grants have no obligations shows "0 of 0 updates", which reads as
      * complete rather than as nothing having been asked -- the exact
      * misreading that would let an empty year be reported as a finished one.
@@ -363,6 +384,79 @@ describe('impact', () => {
     const p = programOf(await impact(db, admin, nowIso()), programId);
     expect(p.obligations).toBe(2);
     expect(p.totalAwardedCents).toBe(3_000_000);
+    // And the accepted sum uses the same EXISTS shape, so it cannot double
+    // either once one of those periods is accepted.
+    expect(p.acceptedAwardedCents).toBe(0);
+  });
+
+  it('counts each grant once, not once per obligation', async () => {
+    const { admin, adminCtx, programId } = await scenario();
+    const a = await award(programId, 3_000_000);
+    await generateReportPeriods(db, adminCtx, a);
+    await db
+      .prepare(
+        `INSERT INTO report_periods (id, award_id, label, period_type, due_date,
+           period_start, period_end, status, created_at, updated_at)
+         VALUES (?,?,'Interim','interim',?,?,?, 'open', ?, ?)`,
+      )
+      .bind(newId(), a, day('2025-06-30'), day('2025-01-01'), day('2025-06-30'),
+            nowIso(), nowIso())
+      .run();
+
+    /*
+     * `grants` was asserted by nothing, so dropping the DISTINCT from
+     * COUNT(DISTINCT w.id) -- which inflates it to one count per
+     * (award, period) pair -- survived. A programme reporting twice as many
+     * grants as it made is the denominator of every figure on the screen.
+     */
+    const p = programOf(await impact(db, admin, nowIso()), programId);
+    expect(p.grants).toBe(1);
+    expect(p.obligations).toBe(2);
+  });
+
+  it('keeps unasked grants out of the money the figures rest on', async () => {
+    const { admin, adminCtx, programId } = await scenario();
+    const asked = await award(programId, 2_000_000);
+    await generateReportPeriods(db, adminCtx, asked);
+    await award(programId, 5_000_000); // never asked
+
+    /*
+     * The never-asked scenario never asserted the money, so dropping the
+     * EXISTS from the denominator -- which would fold unasked grants into it
+     * -- survived. The coverage line would then read "covering $0 of $70,000"
+     * where $50,000 of that has not been asked for at all.
+     */
+    const p = programOf(await impact(db, admin, nowIso()), programId);
+    expect(p.totalAwardedCents).toBe(2_000_000);
+    expect(p.grantsNeverAsked).toBe(1);
+  });
+
+  it('does not count a refused grant toward coverage or money', async () => {
+    const { admin, adminCtx, programId } = await scenario();
+    const taken = await award(programId, 2_000_000);
+    const refused = await award(programId, 9_000_000);
+    await generateReportPeriods(db, adminCtx, taken);
+    await generateReportPeriods(db, adminCtx, refused);
+    await db.prepare(`UPDATE awards SET status = 'cancelled' WHERE id = ?`).bind(refused).run();
+
+    /*
+     * A refused award keeps its generated report periods, so counted they
+     * inflate both the obligation count and the money behind every figure --
+     * "covering $X of $11,000" where $9,000 is a grant nobody took.
+     */
+    /*
+     * And a refused grant with NO periods must not be counted among the ones
+     * "never asked" either -- that figure is the Foundation's own outstanding
+     * work, and a grant nobody took is not work.
+     */
+    await award(programId, 7_000_000).then((id) =>
+      db.prepare(`UPDATE awards SET status = 'cancelled' WHERE id = ?`).bind(id).run(),
+    );
+
+    const p = programOf(await impact(db, admin, nowIso()), programId);
+    expect(p.obligations).toBe(1);
+    expect(p.totalAwardedCents).toBe(2_000_000);
+    expect(p.grantsNeverAsked).toBe(0);
   });
 
   it('is refused to a reviewer, an applicant and a grantee', async () => {

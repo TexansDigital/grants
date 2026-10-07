@@ -141,6 +141,26 @@ function buildContext(request: Request): RequestContext {
   };
 }
 
+/**
+ * A whole number from a query string, or undefined so the caller's default
+ * applies.
+ *
+ * `Number(p.get('limit') ?? '100')` looked safe and was not: an EMPTY value
+ * (`?limit=`) is 0, which the clamp below turns into 1 -- one row returned
+ * beside a total of four hundred, with no error anywhere. Junk (`?limit=abc`)
+ * is NaN, which binds as null and makes SQLite reject `LIMIT NULL` outright.
+ * Both list screens forward the address bar verbatim, so both are one typo
+ * away for anybody editing a URL.
+ *
+ * This file already guards exactly this class for the impact year; it is the
+ * same reasoning, in a helper, so the next list route gets it for free.
+ */
+function intParam(raw: string | null): number | undefined {
+  if (raw === null || raw.trim() === '') return undefined;
+  const n = Number(raw);
+  return Number.isInteger(n) ? n : undefined;
+}
+
 function json(body: unknown, ctx: RequestContext, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: securityHeaders(ctx.requestId) });
 }
@@ -871,8 +891,8 @@ const routes: readonly Route[] = [
           status: p.get('status'),
           q: p.get('q'),
           outstandingOnly: p.get('outstanding') === 'true',
-          limit: Number(p.get('limit') ?? '100'),
-          offset: Number(p.get('offset') ?? '0'),
+          limit: intParam(p.get('limit')),
+          offset: intParam(p.get('offset')),
         }),
         ctx,
       );
@@ -888,9 +908,9 @@ const routes: readonly Route[] = [
         await listOrganizations(env.DB, session, {
           q: p.get('q'),
           fundedOnly: p.get('funded') === 'true',
-          unreachableOnly: p.get('unreachable') === 'true',
-          limit: Number(p.get('limit') ?? '100'),
-          offset: Number(p.get('offset') ?? '0'),
+          neverSignedInOnly: p.get('never_signed_in') === 'true',
+          limit: intParam(p.get('limit')),
+          offset: intParam(p.get('offset')),
         }),
         ctx,
       );

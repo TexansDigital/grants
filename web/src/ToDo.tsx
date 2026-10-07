@@ -28,6 +28,20 @@ import type { TodoItem } from './api';
 
 interface Props {
   onNavigate: (path: string) => void;
+  /**
+   * Whether the reader is an admin, and it changes what the empty state may
+   * CLAIM rather than what it shows.
+   *
+   * src/lib/todo.ts gates two of its three sources on the admin role --
+   * past-grantee claims and the retention schedule are both ADMIN_ONLY -- so
+   * for a reviewer those queries never run. The empty state nonetheless said
+   * "No unanswered claims, no reports to read, nothing overdue, and no files
+   * near destruction. This list covers all four", which asserted three
+   * all-clears about queues that were not consulted and that the reader is
+   * not permitted to see. On the landing page. CLAUDE.md: no false green
+   * lights.
+   */
+  isAdmin: boolean;
 }
 
 /*
@@ -58,7 +72,12 @@ const KIND_LABEL: Record<TodoItem['kind'], string> = {
   report_filed: 'Filed',
   report_overdue: 'Overdue',
   report_due: 'Due',
-  files_due: 'File',
+  /*
+   * "Keeping", not "File". A retention row sat directly under a "Filed" row
+   * -- two badges three characters apart meaning opposite things, in a fixed
+   * column whose whole purpose is to be scanned.
+   */
+  files_due: 'Keeping',
 };
 
 /*
@@ -71,10 +90,15 @@ const KIND_ACTION: Record<TodoItem['kind'], string> = {
   report_filed: 'Read report',
   report_overdue: 'Open report',
   report_due: 'Open report',
-  files_due: 'Open file',
+  /*
+   * The button goes to the retention screen, not to the document, and the
+   * rule above is that the label names the job rather than a destination --
+   * so naming a destination it does not even reach was doubly wrong.
+   */
+  files_due: 'Review retention',
 };
 
-export function ToDo({ onNavigate }: Props): ReactElement {
+export function ToDo({ onNavigate, isAdmin }: Props): ReactElement {
   const [items, setItems] = useState<TodoItem[] | null>(null);
   /*
    * Whether the list is the WHOLE list. It is true for the next decade at this
@@ -110,7 +134,7 @@ export function ToDo({ onNavigate }: Props): ReactElement {
     return (
       <section className="panel">
         <div className="panel-head">
-          <h2>To do</h2>
+          <h2 tabIndex={-1} data-route-heading>To do</h2>
         </div>
         <p role="alert" className="todo-failed">
           This list could not be loaded, so it is not showing anything — including anything that
@@ -126,7 +150,7 @@ export function ToDo({ onNavigate }: Props): ReactElement {
     return (
       <section className="panel">
         <div className="panel-head">
-          <h2>To do</h2>
+          <h2 tabIndex={-1} data-route-heading>To do</h2>
         </div>
         <p className="meta">Loading…</p>
       </section>
@@ -137,14 +161,27 @@ export function ToDo({ onNavigate }: Props): ReactElement {
     return (
       <section className="panel">
         <div className="panel-head">
-          <h2>To do</h2>
+          <h2 tabIndex={-1} data-route-heading>To do</h2>
         </div>
         <div className="empty">
           <p>Nothing is waiting on you.</p>
-          <p className="meta">
-            No unanswered claims, no reports to read, nothing overdue, and no files near
-            destruction. This list covers all four — if it is empty, they are all clear.
-          </p>
+          {isAdmin ? (
+            <p className="meta">
+              No unanswered claims, no reports to read, nothing overdue, and no files near
+              destruction. This list covers all four — if it is empty, they are all clear.
+            </p>
+          ) : (
+            /*
+              A reviewer is told what this list DOES cover for them, and sent
+              to the one place that holds their actual work. Claiming the
+              claims queue and the retention schedule are clear would be
+              claiming it about queries that never ran.
+            */
+            <p className="meta">
+              Nothing here is waiting on you. Applications you have been asked to score are
+              under My reviews.
+            </p>
+          )}
         </div>
       </section>
     );
@@ -153,7 +190,7 @@ export function ToDo({ onNavigate }: Props): ReactElement {
   return (
     <section className="panel">
       <div className="panel-head">
-        <h2>To do</h2>
+        <h2 tabIndex={-1} data-route-heading>To do</h2>
         <span className="count">{items.length}</span>
       </div>
 

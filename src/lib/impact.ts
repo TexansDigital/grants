@@ -14,7 +14,7 @@
  * from the compliance desk. A total whose denominator is unknown is not an
  * achievement; it is an unsourced claim.
  *
- * WHY IT IS NOT THE DASHBOARD. The dashboard answers "how is the programme
+ * WHY IT IS NOT THE DASHBOARD. The dashboard answers "how is the program
  * running" -- applications received, committed against budget, compliance
  * rate. This answers "what changed in the world", which is a different
  * question with a different audience and, crucially, a different failure
@@ -68,11 +68,21 @@ export interface ImpactProgram {
    */
   obligations: number;
   accepted: number;
-  /** Grants in this programme with no report obligation of any kind. */
+  /** Grants in this program with no report obligation of any kind. */
   grantsNeverAsked: number;
   /** Grants counted in the coverage above. */
   grants: number;
+  /** Every grant with an obligation, in cents. The denominator. */
   totalAwardedCents: number;
+  /**
+   * The money behind the ACCEPTED updates only. The numerator.
+   *
+   * Without it the coverage sentence read "covering $469,000 of grants" when
+   * three of thirteen had filed -- the one figure on a screen built to carry
+   * denominators that had none, and the one most likely to be lifted into a
+   * board paper as the amount those three updates account for.
+   */
+  acceptedAwardedCents: number;
 }
 
 export interface Impact {
@@ -102,7 +112,7 @@ export async function impact(
 ): Promise<Impact> {
   /*
    * Admin only. These totals are the Foundation's to publish and the figures
-   * are drawn from every programme at once, which is outside a reviewer's
+   * are drawn from every program at once, which is outside a reviewer's
    * scope in the same way award amounts are.
    */
   if (session.role !== 'admin') {
@@ -138,7 +148,7 @@ export async function impact(
         /*
          * COUNTED IN THE AGGREGATE, NOT FILTERED IN THE WHERE, and the
          * difference is a bug this had. Filtering the row out when the value
-         * does not count made the whole METRIC disappear: a programme where
+         * does not count made the whole METRIC disappear: a program where
          * one grantee had filed and the report was then sent back for
          * revision lost "Individuals served" from the screen altogether,
          * rather than reading "nobody has answered yet". Same for a year with
@@ -183,7 +193,7 @@ export async function impact(
       .all<Record<string, unknown>>(),
 
     /*
-     * THE DENOMINATOR. Obligations and how many are settled, per programme,
+     * THE DENOMINATOR. Obligations and how many are settled, per program,
      * alongside the money those grants represent -- so "4,200 people" can be
      * read against "from 3 of 13 updates, covering $120,000 of $469,000".
      */
@@ -199,20 +209,45 @@ export async function impact(
                 COALESCE((SELECT SUM(w2.awarded_amount_cents)
                             FROM awards w2
                            WHERE w2.program_id = p.id AND w2.deleted_at IS NULL
+                             AND w2.status <> 'cancelled'
                              AND EXISTS (SELECT 1 FROM report_periods rp2
                                           WHERE rp2.award_id = w2.id
                                             AND rp2.deleted_at IS NULL
                                             ${year === null ? '' : `AND CAST(substr(COALESCE(rp2.period_end, rp2.due_date), 1, 4) AS INTEGER) = ?`})
-                         ), 0) AS totalAwardedCents
+                         ), 0) AS totalAwardedCents,
+                /*
+                 * THE NUMERATOR: grants whose obligation has actually been
+                 * accepted. Same DISTINCT-by-EXISTS shape, so a grant with
+                 * three accepted periods still counts its amount once.
+                 */
+                COALESCE((SELECT SUM(w3.awarded_amount_cents)
+                            FROM awards w3
+                           WHERE w3.program_id = p.id AND w3.deleted_at IS NULL
+                             AND w3.status <> 'cancelled'
+                             AND EXISTS (SELECT 1 FROM report_periods rp3
+                                          WHERE rp3.award_id = w3.id
+                                            AND rp3.deleted_at IS NULL
+                                            AND rp3.status = 'accepted'
+                                            ${year === null ? '' : `AND CAST(substr(COALESCE(rp3.period_end, rp3.due_date), 1, 4) AS INTEGER) = ?`})
+                         ), 0) AS acceptedAwardedCents
            FROM programs p
+           /*
+            * The cancelled test sits in the ON clause, not the WHERE, exactly
+            * as dashboard.ts does it: a program whose only award was refused
+            * still has to render, with a row of zeroes rather than vanishing.
+            * Without this, a refused award's leftover report periods counted
+            * toward obligations and its amount toward the denominator, so
+            * "covering $X of grants" included money nobody accepted.
+            */
            LEFT JOIN awards w ON w.program_id = p.id AND w.deleted_at IS NULL
+                                 AND w.status <> 'cancelled'
            LEFT JOIN report_periods rp
                   ON rp.award_id = w.id AND rp.deleted_at IS NULL${yearFilter}
           WHERE p.deleted_at IS NULL
           GROUP BY p.id
           ORDER BY p.name`,
       )
-      .bind(...yearBind, ...yearBind)
+      .bind(...yearBind, ...yearBind, ...yearBind)
       .all<Record<string, unknown>>(),
 
     /*
@@ -228,6 +263,7 @@ export async function impact(
         `SELECT w.program_id AS programId, COUNT(*) AS n
            FROM awards w
           WHERE w.deleted_at IS NULL
+            AND w.status <> 'cancelled'
             AND NOT EXISTS (SELECT 1 FROM report_periods rp
                              WHERE rp.award_id = w.id AND rp.deleted_at IS NULL)
           GROUP BY w.program_id`,
@@ -251,6 +287,7 @@ export async function impact(
       grantsNeverAsked: neverAskedBy.get(id) ?? 0,
       grants: (c.grants as number) ?? 0,
       totalAwardedCents: (c.totalAwardedCents as number) ?? 0,
+      acceptedAwardedCents: (c.acceptedAwardedCents as number) ?? 0,
     });
   }
 
@@ -272,7 +309,7 @@ export async function impact(
        * showed that guard changes nothing: SUM has already produced NULL, and
        * the branch would also have to NOT fire for a grantee who genuinely
        * answered zero. It is gone rather than kept as decoration, and the
-       * behaviour is pinned by tests from both directions instead.
+       * behavior is pinned by tests from both directions instead.
        */
       total: (m.total as number | null) ?? null,
       answered,

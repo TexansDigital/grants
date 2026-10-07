@@ -31,6 +31,7 @@ import { isStaffRole } from './scope';
 import { reportPortfolio } from './reportAdmin';
 import { listClaims } from './granteeClaims';
 import { filesDueWithin } from './retention';
+import { GRANTEE_OWES } from './reportDue';
 
 /**
  * How loudly an item asks.
@@ -83,6 +84,12 @@ export async function todo(
   db: D1Database,
   session: Session,
   nowIso: string,
+  /*
+   * The report page size, injectable only so a test can reach the truncated
+   * case without inserting five hundred report periods. Nothing in the app
+   * passes it; the default is the real one.
+   */
+  portfolioPage: number = PORTFOLIO_PAGE,
 ): Promise<{ items: TodoItem[]; generatedAt: string; complete: boolean }> {
   /*
    * Checked here as well as at the route. This composes three queries that
@@ -119,7 +126,7 @@ export async function todo(
    */
   const [claims, reports, files] = await Promise.all([
     isAdmin ? listClaims(db, 'pending') : Promise.resolve([]),
-    reportPortfolio(db, session, { limit: PORTFOLIO_PAGE }),
+    reportPortfolio(db, session, { limit: portfolioPage }),
     isAdmin ? filesDueWithin(db, nowIso, FILE_HORIZON_DAYS) : Promise.resolve([]),
   ]);
 
@@ -163,22 +170,32 @@ export async function todo(
     }
 
     /*
-     * 'scheduled' COUNTS, and leaving it out was the first bug in this file.
+     * GRANTEE_OWES IS THE LIST, not a copy of it written here.
      *
-     * A report period is born 'scheduled' when it is generated from an award's
-     * term dates, and only becomes 'open' once somebody asks the grantee for
-     * it. So a scheduled row is not "not yet our problem" -- it is the one row
-     * on this screen where the Foundation has not done its part, and dropping
-     * it would have hidden exactly the obligation this screen exists for: a
-     * grant whose report is due in a fortnight and whose grantee has never
-     * been told. Anything else -- accepted, waived, revisions already
-     * requested -- has been answered by somebody and is not outstanding.
+     * This was spelled out as `open` or `scheduled`, which silently dropped
+     * `revisions_requested` -- a report the Foundation sent back and is
+     * waiting on. The comment even claimed revisions "has been answered by
+     * somebody", which is backwards: we asked, and the grantee has not
+     * answered. Meanwhile the compliance desk counted it overdue and the
+     * application gate could block that nonprofit's next cycle over it, while
+     * the screen whose contract is "an empty list means nothing is
+     * outstanding" showed nothing at all.
+     *
+     * reportDue.ts owns the definition precisely so the desk, the gate and
+     * this list cannot disagree. Anything outside it -- submitted, accepted,
+     * waived -- is ours or finished, and `submitted` is picked up above as
+     * work for the Foundation rather than for the grantee.
      */
-    if (r.status !== 'open' && r.status !== 'scheduled') continue;
+    if (!(GRANTEE_OWES as readonly string[]).includes(r.status)) continue;
 
-    // Said out loud in the row, because "overdue" against a grantee nobody
-    // contacted is a different conversation from "overdue" against one who was
-    // reminded three times, and the two look identical without this.
+    /*
+     * Said out loud in the row, because "overdue" against a grantee nobody
+     * contacted is a different conversation from "overdue" against one who
+     * was reminded three times, and the two look identical without this.
+     *
+     * Keyed on `scheduled` ALONE. A period in revisions_requested has very
+     * much been asked for -- twice.
+     */
     const unasked = r.status === 'scheduled' ? ' Nobody has asked them for it yet.' : '';
 
     if (r.overdue) {

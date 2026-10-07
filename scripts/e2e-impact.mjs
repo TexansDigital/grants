@@ -15,7 +15,7 @@
  *   2. A metric nobody has answered reads "Not reported yet" and NEVER "0".
  *   3. A grantee who genuinely reached nobody reads "0", not "not reported".
  *   4. A written answer produces no figure at all.
- *   5. A programme where nothing has been asked says so, rather than
+ *   5. A program where nothing has been asked says so, rather than
  *      presenting "0 of 0 updates" as though the year were complete.
  *
  * WHAT IT DOES NOT PROVE: nothing about Cloudflare Access, the ADMIN_ONLY
@@ -282,7 +282,7 @@ async function main() {
       await page.close();
     }
 
-    // ---- a programme where nothing has been asked --------------------------
+    // ---- a program where nothing has been asked --------------------------
     {
       const page = await browser.newPage();
       await stubApi(page, NOTHING_ASKED);
@@ -293,10 +293,10 @@ async function main() {
       /*
        * THE STATE THE THIRTEEN ARE IN TODAY. "0 of 0 updates accepted" would
        * read as a complete year rather than an empty one, which is how an
-       * untouched programme gets reported as a finished one.
+       * untouched program gets reported as a finished one.
        */
       truthy('it says nothing has been reported', /Nothing below has been reported/i.test(cov));
-      truthy('and that none of the grants has been asked', /13 grants in this programme has|13 grants/.test(cov));
+      truthy('and that none of the grants has been asked', /13 grants in this program has|13 grants/.test(cov));
       falsy('and never presents it as complete', /0 of 0/.test(cov));
       await page.close();
     }

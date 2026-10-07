@@ -94,7 +94,7 @@ const NAV: NavItem[] = [
   { path: '/impact', label: 'Impact', routes: ['impact'], adminOnly: true, primary: true },
   /*
    * "Results", not "Dashboard". Nobody goes looking for a dashboard; they go
-   * looking for how the programme did.
+   * looking for how the program did.
    */
   { path: '/dashboard', label: 'Results', routes: ['dashboard'], adminOnly: true, primary: true },
 
@@ -114,7 +114,7 @@ const NAV: NavItem[] = [
   { path: '/data-health', label: 'Data health', routes: ['dataHealth'], adminOnly: true, primary: false },
   { path: '/retention', label: 'Retention', routes: ['retention'], adminOnly: true, primary: false },
   /*
-   * "Programs", not "Configuration". It is where a programme, its cycles, its
+   * "Programs", not "Configuration". It is where a program, its cycles, its
    * forms and its rubrics are set up -- which is a subject, not a settings
    * screen, and calling it settings is why nobody could guess what was in it.
    */
@@ -132,6 +132,7 @@ export function Shell({
 }: Props): ReactElement {
   const [moreOpen, setMoreOpen] = useState(false);
   const moreRef = useRef<HTMLDivElement | null>(null);
+  const toggleRef = useRef<HTMLButtonElement | null>(null);
   const menuId = useId();
 
   /*
@@ -145,7 +146,14 @@ export function Shell({
       if (moreRef.current && !moreRef.current.contains(e.target as Node)) setMoreOpen(false);
     };
     const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') setMoreOpen(false);
+      if (e.key !== 'Escape') return;
+      setMoreOpen(false);
+      /*
+       * Focus goes back to the button that opened it. Without this a keyboard
+       * user who tabbed into the menu and pressed Escape is dropped on
+       * <body>, which is the same as being lost.
+       */
+      toggleRef.current?.focus();
     };
     document.addEventListener('mousedown', onDown);
     document.addEventListener('keydown', onKey);
@@ -208,13 +216,27 @@ export function Shell({
 
             {more.length > 0 ? (
               <div className="navmore" ref={moreRef}>
+                {/*
+                  NO aria-haspopup, and NOT aria-current.
+
+                  `aria-haspopup="true"` means "menu", and the panel below is
+                  a plain group of buttons with no role="menu" and no arrow
+                  keys -- promising behaviour that is not there is worse than
+                  promising nothing. It is a disclosure, and aria-expanded /
+                  aria-controls say so correctly.
+
+                  And marking the toggle aria-current="page" put TWO current
+                  controls in one nav whenever the menu was open: this one and
+                  the item inside it. The visual mark moves to a data
+                  attribute, which the stylesheet keys on beside the real one.
+                */}
                 <button
                   type="button"
+                  ref={toggleRef}
                   className="navmore-toggle"
                   aria-expanded={moreOpen}
-                  aria-haspopup="true"
                   aria-controls={menuId}
-                  aria-current={moreHoldsCurrent ? 'page' : undefined}
+                  data-section-current={moreHoldsCurrent ? 'true' : undefined}
                   onClick={() => setMoreOpen((v) => !v)}
                 >
                   More

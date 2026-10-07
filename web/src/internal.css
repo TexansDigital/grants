@@ -166,9 +166,37 @@ th.num {
 }
 .badge-archived,
 .badge-retired,
-.badge-closed {
+.badge-closed,
+/* Award and organization end states. Without these, `badge-completed` and
+   `badge-merged` fell through to the bare .badge and a finished grant looked
+   identical to one awaiting acceptance -- on the page carrying the amount
+   and the payment schedule. The status values are from 0012 and 0002. */
+.badge-completed,
+.badge-merged,
+.badge-inactive {
   border-color: var(--line);
   color: var(--ink-3);
+  text-decoration: line-through;
+}
+
+/* Awaiting a decision by somebody else: visibly unfinished, not an alert. */
+.badge-pending {
+  border-color: var(--line-control);
+  color: var(--ink-2);
+}
+
+/*
+ * A rescinded or withdrawn award. This one spends a little red, unlike a
+ * declined APPLICATION above: a declined application is a normal outcome of
+ * grantmaking, while a cancelled award is money the Foundation promised and
+ * then did not give, and somebody reading a list of grants must not mistake
+ * it for one that simply ended. Outlined rather than filled -- it is a
+ * category, not an emergency -- and struck through so the meaning does not
+ * rest on colour alone.
+ */
+.badge-cancelled {
+  border-color: var(--red);
+  color: var(--danger-ink);
   text-decoration: line-through;
 }
 
@@ -301,8 +329,11 @@ th.num {
   color: var(--white);
   background: rgba(255, 255, 255, 0.08);
 }
-/* The current section is marked by weight and a rule, not by colour alone. */
-.mainnav button[aria-current='page'] {
+/* The current section is marked by weight and a rule, not by color alone.
+   `data-section-current` is the More button when the open screen lives inside
+   its menu: the same mark, without a second aria-current in one nav. */
+.mainnav button[aria-current='page'],
+.mainnav button[data-section-current='true'] {
   color: var(--white);
   background: rgba(255, 255, 255, 0.12);
   box-shadow: inset 0 -2px 0 var(--blue);
@@ -1409,11 +1440,11 @@ td > .meta {
   line-height: 1.1;
 }
 
+/* Uses the house .filters/.filter pattern; this only sets the spacing above
+   it, since it follows a paragraph rather than opening the panel. */
 .year-picker {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  margin: var(--space-4) 0 0;
+  margin-top: var(--space-4);
+  margin-bottom: 0;
 }
 
 /* ---- the More menu --------------------------------------------------------- */

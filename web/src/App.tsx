@@ -334,9 +334,15 @@ export function App(): ReactElement {
   useEffect(() => {
     const titles: Record<string, string> = {
       granteeClaims: 'Past grantees · Steward',
-      pipeline: 'Pipeline · Steward',
+      toDo: 'To do · Steward',
+      awardsList: 'Grants · Steward',
+      award: 'Grant · Steward',
+      organizationsList: 'Organizations · Steward',
+      organization: 'Organization · Steward',
+      impact: 'Impact · Steward',
+      pipeline: 'Applications · Steward',
       application: 'Application · Steward',
-      home: 'Configuration · Steward',
+      home: 'Programs · Steward',
       reporting: 'Grant reports · Steward',
       dataHealth: 'Data health · Steward',
       openCycles: 'Apply for a grant · Houston Texans Foundation',
@@ -934,7 +940,7 @@ export function App(): ReactElement {
   }
 
   if (route.name === 'toDo') {
-    return shell(<ToDo onNavigate={navigate} />);
+    return shell(<ToDo onNavigate={navigate} isAdmin={home.user.role === 'admin'} />);
   }
 
   if (route.name === 'award') {

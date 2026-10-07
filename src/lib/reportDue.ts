@@ -10,6 +10,30 @@
  * Pure: no database, no Env. Both callers pass what they have.
  */
 
+/**
+ * The calendar day an instant falls on, as YYYY-MM-DD.
+ *
+ * EXPORTED SO SQL CAN BIND THE SAME THING THIS MODULE COMPARES. Three list
+ * queries re-implemented "overdue" as `due_date < ?` with a full ISO instant
+ * bound, which is not the same predicate: due dates are stored either as a
+ * plain date ('2026-10-07', what requestUpdates writes) or midnight UTC, and
+ * string comparison makes BOTH sort before any same-day timestamp. So a
+ * report due today read as overdue from a millisecond after midnight, in red,
+ * on screens sitting next to the compliance desk saying it was fine.
+ *
+ * Any SQL asking this question binds `today(nowIso)` and compares
+ * `substr(due_date, 1, 10) < ?`, so the string comparison is between two
+ * plain dates and cannot diverge from daysUntil below.
+ *
+ * NOTE, AND IT IS NOT FIXED HERE: this is the UTC day, while the grantee
+ * portal deliberately uses the Central one (web/src/reportWording.ts). That
+ * fork predates this helper and changing it moves the application-blocking
+ * boundary, so it is reported rather than quietly altered.
+ */
+export function today(nowIso: string): string {
+  return nowIso.slice(0, 10);
+}
+
 /** Whole calendar days from today to a due date. Negative means past. */
 export function daysUntil(dueIso: string, nowIso: string): number {
   const due = dueIso.slice(0, 10);

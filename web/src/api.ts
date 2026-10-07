@@ -218,7 +218,8 @@ export interface OrganizationOverview {
   applications: OrganizationApplicationRow[];
   contacts: OrganizationContact[];
   totalAwardedCents: number;
-  canSignIn: boolean;
+  hasAccount: boolean;
+  lastSignInAt: string | null;
 }
 
 export interface AwardListRow {
@@ -234,7 +235,8 @@ export interface AwardListRow {
   reportsTotal: number;
   reportsOverdue: number;
   reportsOutstanding: number;
-  granteeCanSignIn: boolean;
+  /** Null when nobody at the grantee has ever completed a sign-in. */
+  granteeLastSignInAt: string | null;
 }
 
 export interface OrganizationListRow {
@@ -248,7 +250,10 @@ export interface OrganizationListRow {
   lastAwardedAt: string | null;
   applications: number;
   reportsOverdue: number;
-  canSignIn: boolean;
+  /** An account exists. Says nothing about whether anybody has used it. */
+  hasAccount: boolean;
+  /** When anybody here last signed in. Null if nobody ever has. */
+  lastSignInAt: string | null;
 }
 
 /** Mirrors src/lib/impact.ts. */
@@ -270,6 +275,7 @@ export interface ImpactProgram {
   grantsNeverAsked: number;
   grants: number;
   totalAwardedCents: number;
+  acceptedAwardedCents: number;
 }
 
 export interface Impact {

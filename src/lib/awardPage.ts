@@ -33,6 +33,7 @@
 import type { Session } from '../types';
 import { notFound } from './errors';
 import { reportPortfolio, type PortfolioRow } from './reportAdmin';
+import { today } from './reportDue';
 
 /** A linked award, named as little as the page needs to offer the link. */
 export interface RelatedAward {
@@ -236,12 +237,18 @@ export interface AwardListRow {
   reportsTotal: number;
   reportsOverdue: number;
   reportsOutstanding: number;
-  /*
-   * Whether anybody at the grantee can sign in. On the row because a grant
-   * whose grantee has no account cannot be chased by anything automated, and
-   * that is invisible everywhere else in a list.
+  /**
+   * When anybody at the grantee last completed a sign-in, or null if nobody
+   * ever has.
+   *
+   * On the row because a grant whose grantee has never got in cannot be
+   * chased by anything automated, and that is invisible everywhere else in a
+   * list. It was first written as "can sign in", derived from whether a
+   * `users` row existed -- which the awards importer creates for every
+   * imported grant, so it read Yes for all thirteen 2025 grantees and told
+   * nobody anything.
    */
-  granteeCanSignIn: boolean;
+  granteeLastSignInAt: string | null;
 }
 
 export interface AwardListFilters {
@@ -264,6 +271,12 @@ export async function listAwards(
   if (session.role !== 'admin') throw notFound('awards');
 
   const where: string[] = ['w.deleted_at IS NULL', 'o.deleted_at IS NULL'];
+  /*
+   * A cancelled award stays in the list -- this IS the list of grants, and a
+   * rescinded one is part of the record -- but its reporting counts must not
+   * read as live obligations. Handled in the subqueries below rather than
+   * here, so the row is still visible with its status badge.
+   */
   const binds: unknown[] = [];
 
   if (filters.programId) {
@@ -292,7 +305,7 @@ export async function listAwards(
 
   const limit = Math.min(Math.max(filters.limit ?? 100, 1), 500);
   const offset = Math.max(filters.offset ?? 0, 0);
-  const now = new Date().toISOString();
+  const todayDate = today(new Date().toISOString());
 
   const sql = `
     SELECT w.id, w.organization_id AS organizationId,
@@ -301,18 +314,43 @@ export async function listAwards(
            o.legal_name AS organizationName, p.name AS programName,
            (SELECT COUNT(*) FROM report_periods rp
              WHERE rp.award_id = w.id AND rp.deleted_at IS NULL) AS reportsTotal,
+           /*
+            * COMPARED AGAINST A PLAIN DATE, and that bind is the fix. This
+            * bound a full ISO instant, which is a different predicate: a due
+            * date stored as '2026-10-07' or as midnight UTC both sort BEFORE
+            * any same-day timestamp, so a report due today counted as overdue
+            * here while the compliance desk -- which runs reportDue -- called
+            * it fine, on two screens one click apart.
+            *
+            * The substr is defence, not the fix: a mutation run showed that
+            * removing it changes no result, because once both sides are plain
+            * dates a longer stored value sorts after today either way. It
+            * stays so that a due date stored in some third shape cannot
+            * reopen this quietly.
+            */
            (SELECT COUNT(*) FROM report_periods rp
              WHERE rp.award_id = w.id AND rp.deleted_at IS NULL
+               AND w.status <> 'cancelled'
                AND rp.status IN ('scheduled','open','revisions_requested')
-               AND rp.due_date < ?) AS reportsOverdue,
+               AND substr(rp.due_date, 1, 10) < ?) AS reportsOverdue,
+           /*
+            * A GRANT NOBODY TOOK OWES NOTHING. 0020 records a refused award
+            * as 'cancelled' and leaves its generated report periods alone, so
+            * counting them puts a permanent obligation on a grant that was
+            * never accepted -- which is why dashboard.ts has excluded them
+            * since it was written.
+            */
            (SELECT COUNT(*) FROM report_periods rp
              WHERE rp.award_id = w.id AND rp.deleted_at IS NULL
+               AND w.status <> 'cancelled'
                AND rp.status IN ('scheduled','open','submitted',
                                  'revisions_requested')) AS reportsOutstanding,
-           (SELECT COUNT(*) FROM users u
+           -- MAX ignores NULLs, so this is the latest sign-in by anybody at
+           -- the grantee, and null only when not one of them has ever got in.
+           (SELECT MAX(u.last_login_at) FROM users u
              WHERE u.organization_id = w.organization_id AND u.is_active = 1
                AND u.deleted_at IS NULL
-               AND u.role IN ('applicant','grantee')) AS granteeAccounts
+               AND u.role IN ('applicant','grantee')) AS granteeLastSignInAt
       FROM awards w
       JOIN organizations o ON o.id = w.organization_id
       JOIN programs p ON p.id = w.program_id
@@ -321,7 +359,7 @@ export async function listAwards(
 
   const { results } = await db
     .prepare(`${sql} LIMIT ? OFFSET ?`)
-    .bind(now, ...binds, limit, offset)
+    .bind(todayDate, ...binds, limit, offset)
     .all<Record<string, unknown>>();
 
   const counted = await db
@@ -346,7 +384,7 @@ export async function listAwards(
     reportsTotal: r.reportsTotal as number,
     reportsOverdue: r.reportsOverdue as number,
     reportsOutstanding: r.reportsOutstanding as number,
-    granteeCanSignIn: (r.granteeAccounts as number) > 0,
+    granteeLastSignInAt: (r.granteeLastSignInAt as string | null) ?? null,
   }));
 
   /*
