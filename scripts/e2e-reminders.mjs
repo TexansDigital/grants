@@ -13,8 +13,8 @@
  * WHAT IT PROVES. The cron reaches the reminder job at all; a grantee with a
  * report due three days out gets exactly one message however often the cron
  * fires; the message is a report_reminder on the transactional template and
- * carries no sign-in token; the report period records that it was chased; and
- * a grant the organization refused is never chased.
+ * carries no sign-in token; a SUPPRESSED send does not stamp the period as
+ * chased; and a grant the organization refused is never chased.
  *
  * WHAT IT DOES NOT PROVE. No mail is delivered -- local dev has no
  * RESEND_API_KEY, so every send is recorded as `suppressed`, which is the
@@ -155,10 +155,33 @@ note('send status (local dev has no provider key)', sent[0]?.status ?? '(none)')
 check('the grant that was refused is not chased',
   sql(`SELECT id FROM email_messages WHERE to_email = ${q(refused.email)}`).length, 0);
 
-check('the report period records that it was chased',
-  one(`SELECT reminder_count AS n FROM report_periods WHERE id = ${q(owed.periodId)}`, 'n'), 1);
-check('and when',
-  one(`SELECT reminder_last_sent_at IS NOT NULL AS ok FROM report_periods WHERE id = ${q(owed.periodId)}`, 'ok'), 1);
+/*
+ * A SUPPRESSED MESSAGE DOES NOT STAMP THE PERIOD, and these two checks used to
+ * assert the opposite.
+ *
+ * `reminder_count` and `reminder_last_sent_at` render on the compliance desk
+ * as "2 - September 28": a claim about the outside world, that this nonprofit
+ * was chased, on that date. Local dev has no provider key, so every send here
+ * is `suppressed` -- the row is written and nothing leaves the building. A
+ * stamp on that is the Foundation believing it had chased somebody it had
+ * never contacted, and telling "they are ignoring us" from "nobody has asked
+ * them" is the desk's entire job.
+ *
+ * These checks were written against the behaviour as it was, and when the
+ * behaviour was corrected they were not: this harness is not part of
+ * `npm run verify`, so nothing ran them. They asserted the bug for as long as
+ * they went unrun.
+ *
+ * THE SENT CASE IS COVERED, just not here. `test/reportReminders.test.ts`
+ * injects a provider that accepts and asserts that a sent message DOES stamp.
+ * This script fires the real cron over HTTP and has nowhere to inject one, so
+ * the suppressed path is the only one it can speak to -- and it is the path
+ * that actually runs in preview.
+ */
+check('a suppressed reminder does not claim the grantee was chased',
+  one(`SELECT reminder_count AS n FROM report_periods WHERE id = ${q(owed.periodId)}`, 'n'), 0);
+check('and records no date it was chased on',
+  one(`SELECT reminder_last_sent_at IS NULL AS ok FROM report_periods WHERE id = ${q(owed.periodId)}`, 'ok'), 1);
 
 /*
  * A SECOND FIRING THE SAME NIGHT. A retry, an overlapping run, somebody

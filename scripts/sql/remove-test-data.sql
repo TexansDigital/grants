@@ -110,7 +110,13 @@ INSERT INTO audit_log (
   request_id, ip, user_agent, created_at
 )
 SELECT
-  'audit-testdata-' || a.source_reference,
+  -- Keyed on the AWARD ID, not the reference. Keyed on the reference, a second
+  -- test reusing `TEST-2026-001` would collide with the audit row written for
+  -- the first one and be skipped by the NOT EXISTS below -- so the later
+  -- removal would happen with no audit row at all. The id is unique per award,
+  -- so a new test gets its own row and a re-run on the same award still
+  -- collides, which is what the guard is for.
+  'audit-testdata-' || a.id,
   NULL,
   'system',
   NULL,
@@ -137,7 +143,7 @@ SELECT
    AND a.deleted_at IS NULL
    AND NOT EXISTS (
          SELECT 1 FROM audit_log
-          WHERE id = 'audit-testdata-' || a.source_reference
+          WHERE id = 'audit-testdata-' || a.id
        );
 
 -- 5. The awards. awarded_amount_cents is untouched, so
