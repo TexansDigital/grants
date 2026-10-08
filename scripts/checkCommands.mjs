@@ -83,9 +83,13 @@ const RULES = [
      * docs/PRODUCTION-CUTOVER.md before this check existed, and a command
      * without it was still handed over and still run against production.
      *
-     * Scoped to `d1 execute`. `d1 migrations apply --remote` does not need it
-     * -- npm run migrate:production works without -- so widening this to every
-     * remote D1 command would be wrong.
+     * Scoped to `d1 execute` because that is the only command with a `--json`
+     * flag to add. NOT because other remote D1 commands are fine: on
+     * 2026-10-08 `d1 migrations apply --remote` failed with the same 7403, a
+     * few hours after this comment claimed it "does not need it -- npm run
+     * migrate:production works without". It does not work, and it takes no
+     * --json, so there is nothing for this rule to suggest. See
+     * scripts/migrateProduction.mjs for the route that does work.
      */
     hit: (cmd) =>
       cmd.includes('d1 execute') &&

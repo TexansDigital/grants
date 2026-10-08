@@ -12,73 +12,53 @@ is the assistant. Where it says **unknown**, neither of us has checked.
 
 ## Blocking right now
 
-**Two things. Neither is engineering.**
+**One thing: migration 0029 is not applied to production, and wrangler cannot
+apply it.**
 
-### 1. Two test rows are still in production
-
-The database holds **fifteen** awards, not thirteen. Thirteen are the real
-2025 grants (`IC-2025-001` .. `IC-2025-013`, $469,000 in total, imported
-2026-10-04). The other two were created by hand while testing:
-
-| Reference | Organization | Amount | Status |
-|---|---|---|---|
-| `TEST-2026-001` | Steward End To End Test Org | $100 | completed |
-| `DEMO-01` | Demo Nonprofit (not a real grantee) | $1 | active |
-
-**Why they cannot be left alone.** "Ask past grantees for an update" selects
-every award that is `active` or `completed`, has term dates, and has no report
-period. The demo row qualifies, so the dry run would say **fourteen** — and
-confirming that dialog emails whoever is on its contact record. The test row
-also carries a report period marked `accepted`, which Impact counts in its
-reporting-coverage figure.
-
-**Fix:** `scripts/sql/remove-test-data.sql`, applied with
+`npm run migrate:production` ran the official command and failed:
 
 ```
-npx wrangler d1 execute steward-production --remote --env production --yes --json --command="$(cat scripts/sql/remove-test-data.sql)"
+wrangler d1 migrations apply steward-production --remote --env production
+-> The given account is not valid or is not authorized to access this service [code: 7403]
 ```
 
-Three flags in that command are load-bearing, and all three were got wrong
-first, each time by handing over a command whose failure this repository had
-already recorded somewhere:
+The same 7403 that `d1 execute --remote` gives without `--json`, on a Super
+Administrator token carrying `d1 (write)`. `d1 execute` has `--json` to reach
+the code path that works. **`d1 migrations apply` has no such flag**, so there
+is no way to reach it at all.
 
-- **Not `--file`.** That path switches to D1's bulk IMPORT endpoint, which
-  refuses an OAuth login with `Authentication error [code: 10000]`. Described
-  in `scripts/apply-sql.mjs` and `docs/RUNNING-COMMANDS.md`; walked into on
-  2026-10-07.
-- **`--json`.** Without it the /query endpoint answers 7403, *"The given
-  account is not valid or is not authorized to access this service"* — which is
-  not an account problem. Recorded in this file and in
-  `docs/PRODUCTION-CUTOVER.md`; walked into on 2026-10-08.
-- **`--command=` with the equals sign.** The file opens with a `--` comment, so
-  yargs reads the leading dashes of an unbound value as the next flag and exits
-  with *"You must provide either --command or --file"*.
+**The route that works**, generated so the ledger row cannot be forgotten the
+way it was for 0028:
 
-`npm run check:commands` now fails on all three, anywhere in the repository,
-and joins `\` continuations so a flag on the second line still counts. It
-cannot see a command built as an argv array; `scripts/apply-sql.mjs` is the one
-of those and carries `--json` by hand.
-Soft-delete only, scoped through `source_reference`, re-runnable, one audit row
-per award. Verified against a throwaway database built from all 28 migrations:
-real rows untouched, re-run a no-op. Expect **13 / 46900000 / 13 / 0** from the
-verification query the file ends with.
+```
+npx wrangler d1 execute steward-production --remote --env production --yes --json --command="$(cat scripts/sql/apply-0029.sql)"
+```
 
-A blocking Data health check, `test_data_present`, now looks for this, because
-nothing read for it before — the rows sat there for three days, honestly
-labelled and completely invisible.
+```
+npm run golive
+```
 
-### 2. The due date for the 2025 update has not been chosen
+Expect **29 applied, 29 on disk**. Every statement in that file is idempotent
+and the `d1_migrations` row is written in the same run; a half-applied run is
+fixed by running it again.
 
-This gates the send, and it is a decision rather than a task. The due date
-**is** the send schedule: the nightly job mails at 14 days out, 3 days out, and
-on the day. **A date inside two weeks means all thirteen organizations are
-emailed tomorrow morning**, with no further warning.
+### Do not pull and deploy before applying it
+
+Version `f504fe56` is deployed and is **fine**: it was built from `c2dcbb0`,
+which contains neither 0029 nor any code that reads
+`report_period_amendments`. Confirmed by inspecting that commit.
+
+The new code does read it, on **every report detail page**. Pulling `f49bb91`
+or later and deploying without 0029 applied would turn the compliance desk into
+a 500. Migration first, deploy second.
 
 ### Cleared since the last revision
 
-The migration-ledger fault is **fixed**. `npm run golive` reports 28 applied,
-28 on disk. `npm run migrate:production` now exists so the next migration does
-not go the same way.
+- The two test rows are **gone**. Production reads 13 awards, $469,000, 13
+  organizations, 0 report periods — confirmed 2026-10-08.
+- `npm run migrate:production` now prints the working route instead of running
+  a command that fails. The native one is kept as
+  `migrate:production:native` in case Cloudflare's end changes.
 
 ---
 

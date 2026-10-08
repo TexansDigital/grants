@@ -103,9 +103,14 @@ Three details, every one of them learned by getting it wrong:
   `The given account is not valid or is not authorized to access this service
   [code: 7403]`. That reads like the account lacks permission and it does not —
   the same command with `--json` succeeds, on a Super Administrator token with
-  `d1 (write)`. `d1 migrations apply --remote` does **not** need it, which is
-  why `migrate:production` has always worked and is why the check below is
-  scoped to `d1 execute`.
+  `d1 (write)`.
+
+  **`wrangler d1 migrations apply --remote` fails the same way and cannot be
+  fixed**, because it has no `--json` flag. So migrations reach production
+  through `d1 execute` as well, carrying their own `d1_migrations` row — see
+  *Applying a migration* below. The check is scoped to `d1 execute` because
+  that is the only command with a flag to add, not because the others are
+  fine.
 - **`--command=`, with the equals sign.** Every .sql file here opens with a
   `--` comment, and an unbound `--command "$(cat …)"` makes yargs read those
   leading dashes as the next flag: it exits with *"You must provide either
@@ -126,6 +131,48 @@ The check reads commands written on a line, joining `\` continuations. It
 **cannot** see a command assembled as an argv array, which is how
 `scripts/apply-sql.mjs` builds its own call — that one carries `--json` by
 hand, with a comment saying why.
+
+## Applying a migration to production
+
+`npm run migrate:production` no longer runs anything. It prints the route,
+because wrangler's own migration command fails on this account with 7403 and
+has no `--json` to escape with.
+
+```
+npm run migrate:production
+```
+
+The route it prints, in short: generate an apply file from the migration, then
+run it with `d1 execute --json`.
+
+```
+node scripts/buildMigrationApply.mjs 0029
+```
+
+```
+npx wrangler d1 execute steward-production --remote --env production --yes --json --command="$(cat scripts/sql/apply-0029.sql)"
+```
+
+```
+npm run golive
+```
+
+**The ledger row is in the same command as the DDL, deliberately.** `0028` was
+applied with the DDL alone; no `d1_migrations` row was written, and golive read
+27 applied against 28 on disk — the schema and the ledger disagreeing, with
+nothing but golive able to tell. Separating the two is the mistake the
+generated file exists to make impossible.
+
+Every statement in a generated file is idempotent, because there is no
+cross-statement transaction on this path: a half-applied run is fixed by
+running it again. The generator **refuses** a migration it cannot make safe to
+repeat — a bare `DROP TRIGGER`, an `ALTER TABLE` — and says so rather than
+emitting a file that works once.
+
+`npm run check:migration-apply`, in `verify`, regenerates each apply file and
+fails if it has drifted from its migration. A copy that silently goes stale
+would put the old schema in production while golive reported the ledger
+satisfied.
 
 ## The self-test: proving an upload reaches R2
 
