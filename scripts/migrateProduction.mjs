@@ -4,17 +4,24 @@
  *   npm run migrate:production
  *
  * WHY THIS IS NOT JUST THE WRANGLER COMMAND. It was, until 2026-10-08, when it
- * failed:
+ * failed once:
  *
  *   wrangler d1 migrations apply steward-production --remote --env production
  *   -> The given account is not valid or is not authorized to access this
  *      service [code: 7403]
  *
- * The same 7403 that `d1 execute --remote` gives without `--json`, on a Super
- * Administrator token carrying `d1 (write)`. `d1 execute` has `--json` to take
- * the code path that works; `d1 migrations apply` has no such flag, so there
- * is no way to reach it. The native command is still here as
- * `migrate:production:native` in case Cloudflare's end changes.
+ * It was then believed that `--json` was the escape and that `d1 migrations
+ * apply`, having no such flag, could never work. THAT WAS WRONG. Later the
+ * same day a `d1 execute --json` failed with the identical 7403 and succeeded
+ * on an immediate retry, byte-identical: the code is intermittent and the flag
+ * was never the difference.
+ *
+ * So TRY `npm run migrate:production:native` FIRST, and retry it once on a
+ * 7403. It handles the ledger itself, which is the part that matters.
+ *
+ * This route is kept because of the property below -- the ledger row written
+ * in the same command as the DDL -- not because wrangler's command is known to
+ * be unusable. It has not been re-attempted since the one failure.
  *
  * It PRINTS and does not apply. CLAUDE.md's second non-negotiable is that no
  * script writes to production; the same line scripts/apply-sql.mjs draws. A
@@ -33,6 +40,12 @@ const migrations = readdirSync(join(root, 'migrations'))
 const latest = migrations[migrations.length - 1];
 
 console.log('Migrations on disk:', migrations.length, `(latest: ${latest})\n`);
+
+console.log('0. TRY WRANGLER FIRST. It handles the ledger itself:\n');
+console.log('   npm run migrate:production:native\n');
+console.log('   On a 7403, RETRY ONCE before concluding anything -- that code is');
+console.log('   intermittent, which was learned the hard way on 2026-10-08.\n');
+console.log('   If it works, stop here. The rest of this is the fallback.\n');
 
 console.log('1. Which are already applied? This is read-only:\n');
 console.log(

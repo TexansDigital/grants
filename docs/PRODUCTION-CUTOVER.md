@@ -152,7 +152,9 @@ applied migration. Write a new one.
 npx wrangler d1 execute steward-production --remote --env production --json --command "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
 ```
 
-`--json` is required. A bare `wrangler d1 execute --remote` fails with a 7403.
+`--json` gives machine-readable output. It is NOT a workaround: a bare
+`wrangler d1 execute --remote` sometimes fails with 7403, and so does one
+with `--json` — the code is intermittent. Retry before concluding anything.
 
 ---
 

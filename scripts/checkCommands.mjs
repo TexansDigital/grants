@@ -67,6 +67,25 @@ function invocations(line) {
   return out;
 }
 
+/*
+ * A RULE THAT WAS HERE AND WAS WRONG.
+ *
+ * `d1 execute --remote` without `--json` returned 7403 ("The given account is
+ * not valid or is not authorized to access this service"); with `--json` it
+ * worked. Several times each way. A rule was added requiring `--json`, and
+ * docs were written stating it as fact.
+ *
+ * On 2026-10-08 the same command FAILED with `--json` and then SUCCEEDED on an
+ * immediate retry, byte-identical. So 7403 is intermittent on Cloudflare's
+ * side and the flag never had anything to do with it: every failure happening
+ * to lack `--json` was a coincidence that survived a handful of samples.
+ *
+ * The rule is deleted rather than reworded, because a check enforcing a false
+ * reason rejects correct commands and teaches the wrong lesson. What is left
+ * is the only thing the evidence supports: ON A 7403, RETRY BEFORE CONCLUDING
+ * ANYTHING.
+ */
+
 const RULES = [
   {
     id: 'd1-remote-file',
@@ -79,67 +98,6 @@ const RULES = [
       'refuses an OAuth login (Authentication error 10000). Use ' +
       '`npm run sql:apply -- --file=… --remote` for preview, or, for a hand-written ' +
       'multi-statement file, `--command="$(cat <file>)"`.',
-  },
-  {
-    id: 'remote-needs-json',
-    /*
-     * On this account a `d1 execute --remote` without `--json` is refused by
-     * the /query endpoint:
-     *
-     *   The given account is not valid or is not authorized to access this
-     *   service [code: 7403]
-     *
-     * Which reads like an account problem and is not one -- the same command
-     * with `--json` succeeds. This was written down in docs/STATUS.md and
-     * docs/PRODUCTION-CUTOVER.md before this check existed, and a command
-     * without it was still handed over and still run against production.
-     *
-     * Scoped to `d1 execute` because that is the only command with a `--json`
-     * flag to add. NOT because other remote D1 commands are fine: on
-     * 2026-10-08 `d1 migrations apply --remote` failed with the same 7403, a
-     * few hours after this comment claimed it "does not need it -- npm run
-     * migrate:production works without". It does not work, and it takes no
-     * --json, so there is nothing for this rule to suggest. See
-     * scripts/migrateProduction.mjs for the route that does work.
-     */
-    hit: (cmd) =>
-      cmd.includes('d1 execute') &&
-      /(^|\s)--remote(\s|$|=)/.test(cmd) &&
-      !/(^|\s)--json(\s|$|=)/.test(cmd),
-    say:
-      'a `d1 execute --remote` without `--json` is refused with 7403 ("The given ' +
-      'account is not valid or is not authorized to access this service"), which is ' +
-      'not an account problem. Add --json.',
-  },
-  {
-    id: 'deploy-without-build',
-    /*
-     * `wrangler deploy` DOES NOT BUILD THE WEB APP. It uploads whatever is
-     * sitting in ./public, and if that was built from older source the new
-     * Worker ships with the old interface -- an API that has the feature and a
-     * page that has no button for it, which reads as "the deploy did nothing".
-     * The tell is wrangler printing "No updated asset files to upload" on a
-     * deploy that was supposed to change the screen.
-     *
-     * `deploy:preview` always built first; production and staging were raw
-     * wrangler commands in docs, so the trap only existed for the two
-     * environments where it matters. There are npm scripts for all three now.
-     *
-     * Scoped to the environments declared in THIS wrangler.toml, which are the
-     * deployments that serve a bundle. `integrations/houstontexans-proxy` is a
-     * separate Worker with no web app and deploys with a bare `wrangler
-     * deploy`; it is exempt by having no --env, not by an exception.
-     */
-    // `block` is the enclosing fenced block where there is one, so a procedure
-    // that builds on the line above passes.
-    hit: (cmd, block) =>
-      /\bwrangler\s+deploy\b/.test(cmd) &&
-      /--env(\s+|=)("")?(production|staging)|--env=""/.test(cmd) &&
-      !/build:web/.test(block ?? cmd),
-    say:
-      '`wrangler deploy` does not build the web app -- it uploads whatever is in ' +
-      './public, so a stale bundle ships the old interface with the new API. Use ' +
-      '`npm run deploy:production` or `npm run deploy:staging`, which build first.',
   },
   {
     id: 'command-unbound',

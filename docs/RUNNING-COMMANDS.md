@@ -99,18 +99,17 @@ npx wrangler d1 execute steward-production --remote --env production --yes --jso
 
 Three details, every one of them learned by getting it wrong:
 
-- **`--json`, always.** Without it the /query endpoint answers
-  `The given account is not valid or is not authorized to access this service
-  [code: 7403]`. That reads like the account lacks permission and it does not —
-  the same command with `--json` succeeds, on a Super Administrator token with
-  `d1 (write)`.
+- **A 7403 means retry, not diagnose.** `The given account is not valid or is
+  not authorized to access this service [code: 7403]` appears intermittently
+  and means nothing about the command. On 2026-10-08 a byte-identical command
+  failed and then succeeded on an immediate retry.
 
-  **`wrangler d1 migrations apply --remote` fails the same way and cannot be
-  fixed**, because it has no `--json` flag. So migrations reach production
-  through `d1 execute` as well, carrying their own `d1_migrations` row — see
-  *Applying a migration* below. The check is scoped to `d1 execute` because
-  that is the only command with a flag to add, not because the others are
-  fine.
+  It was briefly believed that `--json` was required, because every failure
+  seen until then happened to lack it. That was a correlation across a handful
+  of samples, written down as cause, and enforced by a check. Both are gone.
+  Use `--json` when you want machine-readable output; it is not a workaround
+  for anything.
+
 - **`--command=`, with the equals sign.** Every .sql file here opens with a
   `--` comment, and an unbound `--command "$(cat …)"` makes yargs read those
   leading dashes as the next flag: it exits with *"You must provide either
@@ -121,11 +120,11 @@ Three details, every one of them learned by getting it wrong:
   the recovery from a half-applied run is to run it again.
 
 `npm run check:commands` fails on any invocation in this repository that
-combines `--remote` with `--file`, writes `--command` unbound, or omits
-`--json` from a remote execute. Each of those three was already written down
-somewhere in this repository before the check existed, and each was still
-walked into against production — the first two on 2026-10-07, the third on
-2026-10-08, after a check existed that did not yet cover it.
+combines `--remote` with `--file`, or writes `--command` unbound. Both were
+already written down somewhere in this repository before the check existed,
+and both were still walked into against production on 2026-10-07.
+
+It briefly also required `--json`, which was wrong — see above.
 
 The check reads commands written on a line, joining `\` continuations. It
 **cannot** see a command assembled as an argv array, which is how
@@ -155,16 +154,28 @@ exempt by having no `--env`, not by an exception.
 
 ## Applying a migration to production
 
-`npm run migrate:production` no longer runs anything. It prints the route,
-because wrangler's own migration command fails on this account with 7403 and
-has no `--json` to escape with.
+**Try wrangler's own command first.** It handles the ledger itself, which is
+the part that matters.
+
+```
+npm run migrate:production:native
+```
+
+It failed once with a 7403 on 2026-10-08 and was declared broken. That was
+wrong: 7403 is intermittent, and a retry is the first thing to try — see
+*A 7403 means retry* above. It has not been re-attempted since.
+
+`npm run migrate:production` prints the fallback route rather than running
+anything:
 
 ```
 npm run migrate:production
 ```
 
-The route it prints, in short: generate an apply file from the migration, then
-run it with `d1 execute --json`.
+The fallback, in short: generate an apply file from the migration, then run it
+with `d1 execute`. It exists because migration 0029 had to go in while the
+7403 was believed to be permanent, and it is kept because of the property
+below, not because the native command is known to be unusable.
 
 ```
 node scripts/buildMigrationApply.mjs 0029

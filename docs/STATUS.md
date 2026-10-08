@@ -50,9 +50,11 @@ with `scripts/sql/remove-test-data.sql`.
 
 - `0029` applied, via `scripts/sql/apply-0029.sql` — the DDL and the
   `d1_migrations` row in one command, which is what `0028` got wrong.
-- `npm run migrate:production` prints the working route instead of running
-  wrangler's migration command, which fails here with 7403 and has no `--json`
-  to escape with. The native one survives as `migrate:production:native`.
+- `npm run migrate:production` prints a route; `migrate:production:native` is
+  wrangler's own command. **A 7403 is intermittent and should be retried** — it
+  was briefly believed that `--json` was the fix and that the migration command
+  could therefore never work, and on 2026-10-08 a `--json` command failed and
+  then succeeded on an immediate retry, which disproved it.
 - `npm run deploy:production` and `deploy:staging` now exist and build first.
   Only `deploy:preview` did.
 
@@ -179,7 +181,9 @@ Cloudflare connector.
 npx wrangler d1 execute steward-production --remote --env production --json --command "SELECT (SELECT COUNT(*) FROM programs) programs, (SELECT COUNT(*) FROM applications) apps, (SELECT COUNT(*) FROM awards) awards, (SELECT COUNT(*) FROM organizations) orgs"
 ```
 
-`--json` is required. A bare `wrangler d1 execute --remote` fails with 7403.
+`--json` gives machine-readable output, nothing more. A 7403 from this
+command is intermittent and the first response is a retry — see
+`docs/RUNNING-COMMANDS.md`.
 
 Before the import, `apps`, `awards` and `orgs` must all read **0**. If they do
 not, something was copied that should not have been.
