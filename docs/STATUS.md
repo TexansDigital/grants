@@ -1,6 +1,6 @@
 # Status
 
-**Last verified: 2026-10-07.** Every line below says how to check it, because a
+**Last verified: 2026-10-08.** Every line below says how to check it, because a
 status file that nobody can re-verify becomes fiction within a week. This
 project has already been bitten three times by a document that was true when
 written and false when read.
@@ -12,49 +12,73 @@ is the assistant. Where it says **unknown**, neither of us has checked.
 
 ## Blocking right now
 
-**Nothing in the database. One deploy, and it must build first.**
+**One decision and one cleanup. No engineering.**
 
-Migration `0029` is **applied** — `npm run golive` reads 29 applied, 29 on
-disk, confirmed 2026-10-08. The two test rows are gone: 13 awards, $469,000,
-13 organizations, 0 report periods.
+The live end-to-end check is **done, 2026-10-08.** A report obligation was
+created against a test grant, the nightly reminder was read as a plan on the
+Reports screen, sent on confirmation, and the letter **arrived in a real
+inbox** reading *"October 22, 2026. Due in 14 days."* — the right day, in the
+right words, from `grants@houstontexansfoundation.org`.
 
-### The deploy has to build the web app
+That is the first time this system has been shown to put a letter in front of
+a human being. It also caught a bug before thirteen nonprofits did: see
+*A due date in a letter is a day, not an instant* below.
 
-Version `f504fe56` is live and was built from `c2dcbb0`: the old code, which
-reads nothing from `report_period_amendments`, and which only ever sets
-`form_definition_id`, `reminder_last_sent_at` and `status` on
-`report_periods` — never `due_date`. So the new triggers cannot fire against
-it and the live Worker is safe under the new schema.
+### 1. The due date for the 2025 update — the Foundation's call
 
-The new code is pulled but not deployed. Deploy with:
+Condition 10, and the only thing gating the pilot. The due date **is** the send
+schedule: the nightly job mails at 14 days, 3 days and on the day, so a date
+inside two weeks emails everybody tomorrow.
+
+### 2. The test rows are in production again
+
+Today's check put them there deliberately. As of 2026-10-08 production holds
+**14 awards, $469,001.00, 14 organizations and 2 report periods** — the real
+thirteen plus `TEST-2026-001`, its two periods (one `accepted`, one `open`) and
+its three grantee logins.
+
+Clear them before the real ask, or the dry run says fourteen and confirming it
+emails whoever is on the test contact record:
 
 ```
-npm run deploy:production
+npx wrangler d1 execute steward-production --remote --env production --yes \
+  --json --command="$(cat scripts/sql/remove-test-data.sql)"
 ```
 
-**Not a bare `npx wrangler deploy --env production`.** That does not build the
-web app — it uploads whatever is already in `./public`. Straight after a pull,
-that is the OLD interface, so the new API ships with a page that has no button
-for any of it, and wrangler says *"No updated asset files to upload"* on a
-deploy meant to change the screen. `npm run check:commands` now fails on a bare
-one anywhere in the repository.
+It ends by printing what is left. Expect `13 / 46900000 / 13 / 0`. **The dry
+run must say 13** before anyone confirms the real send.
 
-### Then the live check
+### Not blocking: mail into `houstontexans.com`
 
-`docs/RUNNING-COMMANDS.md` carries the sequence. In short: import one test
-grant on a mailbox you control, ask for an update due exactly 14 days out,
-read the plan on Reports, send it, confirm it arrives, then clear the test rows
-with `scripts/sql/remove-test-data.sql`.
+Two letters to `@houstontexans.com` addresses were recorded `sent`, shown
+**Delivered** by Resend, and reached no mailbox. The same letter reached Gmail.
+So the sending side is sound, and this is filtering inside the Texans' own M365
+tenant — plausibly anti-impersonation, a lookalike domain carrying the
+company's name into the corporate domain being the shape of a phish. **It does
+not touch the thirteen**, who are all on their own domains. One for the mail
+admins, through an Exchange message trace.
+
+Worth doing before the real send regardless: **add Resend to SPF.** The record
+on `houstontexansfoundation.org` is `v=spf1 include:_spf.mx.cloudflare.net
+~all`, which does not include Resend, so every message softfails SPF and leans
+entirely on DKIM. DNS, not code — `docs/EMAIL-DNS-SETUP.md`.
 
 ### Cleared since the last revision
 
+- **Deployed.** `npm run deploy:production` ran twice on 2026-10-08, ending at
+  version `b8249d4f` by wrangler's own report. The new API and the interface
+  that drives it are both live, which a bare `npx wrangler deploy` would not
+  have achieved — it uploads whatever is already in `./public`, so a deploy
+  straight after a pull ships the new API behind the old screen. `npm run
+  check:commands` fails on a bare one anywhere in this repository.
 - `0029` applied, via `scripts/sql/apply-0029.sql` — the DDL and the
   `d1_migrations` row in one command, which is what `0028` got wrong.
-- `npm run migrate:production` prints a route; `migrate:production:native` is
-  wrangler's own command. **A 7403 is intermittent and should be retried** — it
-  was briefly believed that `--json` was the fix and that the migration command
-  could therefore never work, and on 2026-10-08 a `--json` command failed and
-  then succeeded on an immediate retry, which disproved it.
+  `npm run golive` reads 29 applied, 29 on disk.
+- A 7403 from a remote `d1 execute` **is intermittent, and the first response
+  is a retry.** It was briefly believed that `--json` was the fix and that
+  `npm run migrate:production` could therefore never work; on 2026-10-08 a
+  `--json` command failed and then succeeded on an immediate retry, which
+  disproved it.
 - `npm run deploy:production` and `deploy:staging` now exist and build first.
   Only `deploy:preview` did.
 
@@ -83,7 +107,7 @@ the first thing this file warns about, in its own opening paragraph.
 
 | # | Condition | State | How to check |
 |---|---|---|---|
-| 1 | `steward-production` migrated clean from empty | **done 2026-10-04**, 28 migrations as of 2026-10-07 | `npm run golive` reports 28 applied, 28 on disk; the ledger fault of 2026-10-07 is fixed |
+| 1 | `steward-production` migrated clean from empty | **done 2026-10-04**, 29 migrations as of 2026-10-08 | `npm run golive` reports 29 applied, 29 on disk; the ledger fault of 2026-10-07 is fixed |
 | 2 | R2 buckets and KV created and bound | **done** | `npm run check:config` |
 | 3 | Five production secrets set, new signing key | **done 2026-10-04** | `npx wrangler secret list --env production` lists all five |
 | 4 | Seeded config only; apps, awards, orgs all 0 | **done 2026-10-04** | 1 program, 2 stages, 2 forms, 2 admins, 5 metrics; apps/awards/orgs all 0 |
@@ -98,8 +122,8 @@ the first thing this file warns about, in its own opening paragraph.
 
 | # | Condition | State | How to check |
 |---|---|---|---|
-| 9 | Thirteen imported, with an audit row each | **done 2026-10-04**, confirmed 2026-10-07 | listed by hand: `IC-2025-001` .. `IC-2025-013`, `source_system = 'spreadsheet'`, summing to exactly $469,000. Two further test awards are present and are the first blocker above. |
-| 10 | Update request dry-run matched 13, then run | not done — **do not run until the dry run says 13** | Programs → Ask past grantees for an update. **Gated on a decision, not on engineering:** the due date for the 2025 update is also the send schedule, because the nightly job mails at 14 days, 3 days and on the day. A date inside two weeks means everybody is emailed tomorrow. |
+| 9 | Thirteen imported, with an audit row each | **done 2026-10-04**, confirmed 2026-10-07 | listed by hand: `IC-2025-001` .. `IC-2025-013`, `source_system = 'spreadsheet'`, summing to exactly $469,000. One test award, `TEST-2026-001`, is present again from the 2026-10-08 live check and is cleanup item 2 above. |
+| 10 | Update request dry-run matched 13, then run | not done — **do not run until the dry run says 13**; the mechanism itself was proven end to end on 2026-10-08 against one test grant | Programs → Ask past grantees for an update. **Gated on a decision, not on engineering:** the due date for the 2025 update is also the send schedule, because the nightly job mails at 14 days, 3 days and on the day. A date inside two weeks means everybody is emailed tomorrow. |
 | 11 | A magic link clicked on a phone, from Outlook, with a photo attached | **done 2026-10-04** | link delivered to a shared M365 mailbox, opened on a phone; 3 files uploaded to steward-production-files after bucket CORS was set |
 | 12 | Restore drill run against production | **done 2026-10-05** | export `d1/2026-10-05/070101`, 573 rows across 33 tables, every table matching the manifest, 102 triggers off and back on, no dangling references; thirteen organizations and their amounts recognised by hand |
 | 13 | One grantee claim approved end to end | **done 2026-10-05** | connected, declined, and the new grantee signed in to exactly one award with no sign of the other thirteen |
@@ -134,8 +158,7 @@ the first thing this file warns about, in its own opening paragraph.
 
 ## Blocked on Claude
 
-Nothing is blocked. Not yet deployed: the Texas county vocabulary and the
-picker (`10dcc9e`, `898d37a`). They carry no migration.
+Nothing is blocked, and nothing is waiting to deploy.
 
 Owed, and named here rather than left in a commit message:
 
@@ -148,6 +171,22 @@ Owed, and named here rather than left in a commit message:
   for an executive at all. That is Phase 6.
 - **Neither the Grants nor the Organizations list paginates.** The 101st row
   is unreachable. Harmless at thirteen; it is on the clock against 2026.
+- **Two admin screens render a calendar day in the browser's time zone.**
+  The payment ledger shows a payment due `2026-11-01` as 10/31/2026, and the
+  award amendment trail shows a term starting `2026-01-01` as 12/31/2025 — the
+  wrong year, on the record of a change to a grant. Same class as the bug the
+  reminder letter had; the guard that catches it only looks at the Worker, not
+  at `web/`. Found 2026-10-08 by sweeping, not by anyone hitting it. Detail
+  under *Bugs found by sweeping* below.
+- **A deduplicated send is counted as a send.** `sendEmail` returns
+  `deduplicated: true` when an idempotency key has already been used that day
+  (`report_reminder:<user>:<day>`), and `runReportReminders` ignores the flag,
+  so pressing Send twice reports "N sent" the second time while nothing leaves
+  the building. Seen on 2026-10-08 and not yet fixed. `retention.ts` and
+  `decisionComms.ts` ignore the same flag and have not been checked. The
+  letters are not duplicated — that is the mechanism working — but the count
+  on the screen is a lie, and on a decline run that is a lie about whether
+  someone was told.
 - **`reportDue` computes the UTC day while the grantee portal uses Central.**
   A grantee opening the portal at 8pm Central on the due date sees "due
   today"; the server already counts it a day late, and under a `block`
@@ -192,9 +231,21 @@ not, something was copied that should not have been.
 
 ## Deployed
 
-**Production version `618a4bfb`, 2026-10-07**, the fourth deploy that day.
-Bundle `index-BOuqzgBY.js`, byte-identical to the build that passed the suite
-in the agent container rather than a rebuild from the same commit.
+**Production version `b8249d4f`, 2026-10-08**, the second deploy that day and
+the first one made by `npm run deploy:production`, which builds the web app
+before it uploads.
+
+Two deploys on 2026-10-08:
+
+| Version | Carries |
+|---|---|
+| `f504fe56` | the due-date amendment trail, the reminder plan and confirmed send, the Texas county vocabulary and its picker |
+| `b8249d4f` | `formatCalendarDay` — a due date in a letter is a day, not an instant |
+
+`f504fe56` was deployed before `0029` was applied, and was safe under the new
+schema only because the code in it never writes `report_periods.due_date`, so
+the new triggers could not fire against it. That was luck with a reason behind
+it, not a plan; the ordering to want is migration first, then deploy.
 
 Four deploys on 2026-10-07, in order:
 
@@ -209,8 +260,8 @@ Four deploys on 2026-10-07, in order:
 migration** — `0028_award_subject.sql`, four nullable columns on `awards`. It
 applied, and the ledger row did not get written; see *Blocking right now*.
 
-Not yet deployed: the Texas county vocabulary and the picker built on it
-(`10dcc9e`, `898d37a`).
+Nothing is waiting to deploy. The county vocabulary and picker (`10dcc9e`,
+`898d37a`) went out with `f504fe56`.
 
 How to check: `npx wrangler deployments list --env production` names the
 version, and the Grants tab lists the imported 2025 grants.
@@ -599,6 +650,58 @@ for the wrong reason:
   empty string has three sibling call sites, all safe because `isBlank`
   normalises `''` to an all-NULL row at coercion; and unscoped harness
   selectors are self-detecting, because Playwright throws on a multiple match.
+
+A fourth sweep, on 2026-10-08, came out of the live email check:
+
+- **A due date in a letter is a day, not an instant.** The reminder for a
+  report due `2026-10-22` was sent, arrived, and said **October 21, 2026** —
+  because `new Date('2026-10-22')` parses as UTC midnight and rendering it in
+  `America/Chicago` lands the evening before. Named the class as *a calendar
+  day formatted in a time zone*, and swept every date-formatting call site
+  in the Worker: four, of which **two were wrong**. The second was the embargo
+  date in an award letter, which tells a grantee when they may announce their
+  grant. Fixed with `formatCalendarDay`, which formats in UTC because a
+  calendar day has no time zone. Guarded by `npm run check:dates`, which
+  enumerates the call sites and fails on one that is not classified `calendar`
+  or `instant` with a reason.
+
+  This is the second bug in that corner, which is why the guard enumerates
+  rather than spot-checks. **And the sweep was too narrow** — see below.
+
+- **The same class is live in the admin screens, and the guard does not look
+  there.** `check:dates` walks `src/` — the Worker — and stops. `web/src/`
+  has a correct pair of helpers in `reportWording.ts` (`formatDay` formats in
+  UTC, `formatMoment` in Central, and its comment records this same bug being
+  found in the grantee portal earlier), and fourteen files, some of which
+  bypass them with a bare `new Date(x).toLocaleDateString('en-US')` and no
+  time zone at all — which renders in whatever zone the staff member's browser
+  is in. Two confirmed wrong, both on money and paperwork screens:
+
+  - `PaymentLedger.tsx` renders `scheduledDate` and `paidDate`, which are
+    stored as `YYYY-MM-DD`. A payment due `2026-11-01` shows on the ledger as
+    **10/31/2026**.
+  - `AwardAmendments.tsx` renders the before and after of an amended
+    `term_start`, `term_end` or `announcement_date`. Those are stored by
+    `parseImportDate` as UTC midnight, so an award term starting
+    `2026-01-01` reads **12/31/2025** — the wrong year, in the audit trail of
+    a change to a grant.
+
+  The rest of the fourteen are mostly real instants (`decidedAt`,
+  `declaredAt`, `purged_at`), which the bare call renders acceptably. Each
+  still has to be classified rather than assumed. **Not yet fixed**: it
+  touches a dozen components, so it is a phase, not a patch — and the guard
+  has to be extended to `web/` in the same change, or the next one lands the
+  same way.
+
+- **A retracted claim outlives its retraction.** The `--json` rule was
+  disproved on 2026-10-08 and corrected in four places. Swept the repository
+  for the claim afterwards and found it still asserted in two more:
+  `scripts/apply-sql.mjs` and `scripts/sql/remove-test-data.sql`, both of
+  which still tell a reader that `--json` is what makes a remote execute work,
+  plus the same reasoning carried into `scripts/sql/apply-0029.sql` and
+  `scripts/buildMigrationApply.mjs`. The commands in them still run; the
+  explanation in them is false. **Not yet corrected** — recorded here so the
+  next reader does not act on it.
 
 **And two tests written that day passed for the wrong reason.** A CSS check
 written as a vitest test imported the stylesheets with `?raw` — which resolves
