@@ -28,6 +28,7 @@ import { writeFileSync, mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { watchRenderErrors } from './lib/renderErrors.mjs';
 const APP = process.env.STEWARD_WORKER ?? 'http://127.0.0.1:8787';
 const BROWSER =
   process.env.PLAYWRIGHT_CHROMIUM ?? '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
@@ -172,6 +173,10 @@ check('there is a published report form that asks for media', Boolean(reportForm
 
 const browser = await chromium.launch({ executablePath: BROWSER, args: ['--no-sandbox'] });
 
+
+// A render error becomes a named failure rather than a locator timeout.
+
+watchRenderErrors(browser, (m) => check(m, false, true));
 // --- 1. the claim, as a stranger --------------------------------------------
 console.log('\n  The claim, filed by somebody with no account:\n');
 const anon = await browser.newContext({ viewport: { width: 390, height: 844 } });

@@ -122,6 +122,9 @@ export type AuditAction =
   | 'payment.cancelled'
   // reporting
   | 'report_period.created'
+  // Moving a deadline somebody outside this organization was told. Paired with
+  // a report_period_amendments row, which 0029 makes mandatory.
+  | 'report_period.due_date_moved'
   // generated in bulk from an award term, rather than created one at a time
   | 'report_period.generated'
   // Distinct from .generated on purpose. Generated means derived from an

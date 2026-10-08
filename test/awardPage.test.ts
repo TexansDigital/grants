@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { db, ctxFor, adminSession, reviewerSession, applicantSession, appErrorFrom } from './helpers';
+import { db, ctxFor, adminSession, reviewerSession, applicantSession, appErrorFrom, forceDueDatesForAward } from './helpers';
 import { seedProgram } from '../src/seed/seedProgram';
 import { INSPIRE_CHANGE } from '../src/seed/inspireChange';
 import { generateReportPeriods } from '../src/lib/reportPeriods';
@@ -403,9 +403,7 @@ describe('the grants list', () => {
     const awardId = await importedAward({ programId, orgId });
     await generateReportPeriods(db, ctxFor(admin), awardId);
 
-    const setDue = (d: string) =>
-      db.prepare(`UPDATE report_periods SET due_date = ?, status = 'open' WHERE award_id = ?`)
-        .bind(d, awardId).run();
+    const setDue = (d: string) => forceDueDatesForAward(awardId, d, { status: 'open' });
     const row = async () =>
       (await listAwards(db, admin, { limit: 500 })).rows.find((r) => r.id === awardId)!;
 

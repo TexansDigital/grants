@@ -689,6 +689,22 @@ export interface StaffReport {
     metrics: { metricKey: string; label: string; display: string | null; metricType: string }[];
     attachments: { id: string; filename: string; sizeBytes: number }[];
   }[];
+  /**
+   * Every time this deadline moved, oldest first. Mirrors DueDateAmendment in
+   * src/lib/reportAdmin.ts.
+   *
+   * Empty for almost every report, which is the point: when it is not,
+   * "due 30 November" is not the whole truth, and whoever reads the report
+   * needs the rest of it before judging the nonprofit for being late.
+   */
+  dueDateChanges: {
+    id: string;
+    amendedAt: string;
+    amendedBy: string;
+    oldValue: string | null;
+    newValue: string | null;
+    reason: string;
+  }[];
 }
 
 export interface OrganizationSummary {
@@ -1197,6 +1213,24 @@ export const api = {
     request<ImportRunResult>('/api/awards/import', { method: 'POST', body: { csv } }),
   generateReportPeriods: () =>
     request<BulkGenerateResult>('/api/report-periods/generate', { method: 'POST', body: {} }),
+  /*
+   * A GET, matching the server: the plan writes nothing. See
+   * src/lib/reportReminders.ts for why it is a separate function there rather
+   * than a flag on the run.
+   */
+  reminderPlan: (signal?: AbortSignal) =>
+    get<ReminderPlan>('/api/report-reminders/plan', signal),
+  /*
+   * `expectLetters` is the count the panel was SHOWN. The server refuses the
+   * run if the plan has changed since, and sends nothing. The panel must pass
+   * what it displayed, never a freshly fetched number -- passing a fresh one
+   * would defeat the entire check.
+   */
+  runRemindersNow: (expectLetters: number) =>
+    request<ConfirmedReminderRun>('/api/report-reminders/run', {
+      method: 'POST',
+      body: { expectLetters },
+    }),
   dataHealth: (signal?: AbortSignal) => get<HealthReport>('/api/data-health', signal),
   storage: (signal?: AbortSignal) => get<StorageUsage>('/api/storage', signal),
   searchAwards: (q: string, signal?: AbortSignal) =>
@@ -1243,6 +1277,21 @@ export const api = {
       `/api/reports/${encodeURIComponent(id)}/revisions`,
       { method: 'POST', body: { feedback } },
     ),
+  /*
+   * Moving a deadline. The reason is not optional and the server refuses a
+   * past date -- a past due date is a born-overdue obligation, which is worse
+   * by hand because somebody typed it.
+   */
+  moveReportDueDate: (id: string, dueDate: string, reason: string) =>
+    request<{
+      reportPeriodId: string;
+      previousDueDate: string;
+      dueDate: string;
+      amendedAt: string;
+    }>(`/api/reports/${encodeURIComponent(id)}/due-date`, {
+      method: 'POST',
+      body: { dueDate, reason },
+    }),
   waiveReport: (id: string, reason: string) =>
     request<{ waived: boolean }>(`/api/reports/${encodeURIComponent(id)}/waive`, {
       method: 'POST',
@@ -1274,6 +1323,46 @@ export interface RequestUpdatesResult {
   skipped: UpdateRequestRow[];
   created: number;
   dryRun: boolean;
+}
+
+/**
+ * What tonight's reminder run would do. Mirrors ReminderPlan in
+ * src/lib/reportReminders.ts.
+ */
+export interface ReminderPlanOrg {
+  organizationId: string;
+  organizationName: string;
+  /** Addresses that would be written to. Empty means nobody is reachable. */
+  recipients: string[];
+  reports: {
+    reportPeriodId: string;
+    label: string;
+    programName: string;
+    dueDate: string;
+    /** Negative when the report is already late. */
+    daysUntilDue: number;
+    status: string;
+  }[];
+}
+
+export interface ReminderPlan {
+  now: string;
+  outstanding: number;
+  wouldMail: ReminderPlanOrg[];
+  withNoContact: ReminderPlanOrg[];
+  lettersWouldSend: number;
+  /** False means nothing would actually arrive: no provider is configured. */
+  transportConfigured: boolean;
+}
+
+export interface ConfirmedReminderRun {
+  outstanding: number;
+  granteesMailed: number;
+  messagesRecorded: number;
+  suppressed: number;
+  failed: number;
+  withNoContact: number;
+  plan: ReminderPlan;
 }
 
 export interface StorageUsage {

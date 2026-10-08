@@ -60,6 +60,7 @@ import { chromium } from 'playwright';
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 
+import { watchRenderErrors } from './lib/renderErrors.mjs';
 const APP = process.env.STEWARD_WORKER ?? 'http://127.0.0.1:8787';
 const BROWSER = process.env.PLAYWRIGHT_CHROMIUM ?? '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
 
@@ -116,6 +117,8 @@ async function acknowledgementFor(page, address) {
 
 const run = async () => {
   const browser = await chromium.launch({ executablePath: BROWSER });
+  // A render error becomes a named failure rather than a locator timeout.
+  watchRenderErrors(browser, (m) => check(m, false, true));
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
 
   /*

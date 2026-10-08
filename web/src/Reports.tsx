@@ -14,7 +14,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactElement } from 'react';
 import { ApiError, api } from './api';
-import type { BulkGenerateResult, PortfolioRow, ProgramRow, StaffReport } from './api';
+import type {
+  BulkGenerateResult, ConfirmedReminderRun, PortfolioRow, ProgramRow,
+  ReminderPlan, StaffReport,
+} from './api';
 import { formatCents } from '../../src/lib/money';
 import { formatDay } from './reportWording';
 import { bandsFor } from './reportBands';
@@ -320,6 +323,7 @@ export function Reports({ programs, isAdmin, query, onQueryChange, onNavigate }:
         the first thing under the heading, with a rule above and below it and
         nothing in between. Housekeeping belongs at the bottom of the room.
       */}
+      {isAdmin && <TonightsReminders />}
       {isAdmin && <GeneratePeriods />}
     </>
   );
@@ -528,6 +532,21 @@ function ReportDetail({
 
   const latest = data.submissions[0] ?? null;
   const canDecide = isAdmin && data.period.status === 'submitted';
+  /*
+   * A settled deadline does not move: `accepted` and `waived` are terminal and
+   * their due date is part of what the grantee was held to. The server and
+   * 0029 both refuse it; this keeps the control from appearing at all, so
+   * nobody is offered a door that answers with an error.
+   */
+  /*
+   * `?? []` because a blank is the normal state here and a crash is not. This
+   * screen went blank when a payload arrived without the field -- a browser
+   * left open across a deploy, or any caller older than the server. CLAUDE.md:
+   * empty values degrade gracefully everywhere.
+   */
+  const dueDateChanges = data.dueDateChanges ?? [];
+  const canMove =
+    isAdmin && data.period.status !== 'accepted' && data.period.status !== 'waived';
   const canWaive =
     isAdmin && data.period.status !== 'accepted' && data.period.status !== 'waived';
 
@@ -558,7 +577,22 @@ function ReportDetail({
         </div>
         <div>
           <dt>Due</dt>
-          <dd>{formatDay(data.period.dueDate)}</dd>
+          <dd>
+            {formatDay(data.period.dueDate)}
+            {/*
+              A moved deadline is said HERE, beside the date, not only further
+              down. Somebody deciding whether a nonprofit is late reads this
+              line and nothing else, and "due 30 November" on a report that was
+              originally due in September is not the whole truth.
+            */}
+            {dueDateChanges.length > 0 && (
+              <span className="meta">
+                {' '}
+                moved {dueDateChanges.length}&times; from{' '}
+                {formatDay(dueDateChanges[0]!.oldValue ?? '')}
+              </span>
+            )}
+          </dd>
         </div>
         <div>
           <dt>Status</dt>
@@ -570,6 +604,30 @@ function ReportDetail({
         <p className="banner">
           <strong>Waived:</strong> {data.period.waivedReason}
         </p>
+      )}
+
+      {/*
+        WHY THE DEADLINE MOVED, in full.
+        
+        An extension without its reason is worse than no record: it looks like
+        the date was always this, and the next person to read the file cannot
+        tell a nonprofit who asked for help from one who was simply given
+        longer. Named, dated, reasoned -- the same three things an award
+        amendment carries.
+      */}
+      {dueDateChanges.length > 0 && (
+        <ul className="findings">
+          {dueDateChanges.map((c) => (
+            <li key={c.id}>
+              <span className="who">
+                {formatDay(c.oldValue ?? '')} &rarr; {formatDay(c.newValue ?? '')}
+              </span>
+              <span className="what">
+                {c.reason} &mdash; {c.amendedBy}, {formatDay(c.amendedAt)}
+              </span>
+            </li>
+          ))}
+        </ul>
       )}
 
       {data.submissions.length === 0 && (
@@ -721,6 +779,14 @@ function ReportDetail({
         <p className="banner danger" role="alert">
           {decision.message}
         </p>
+      )}
+
+      {canMove && (
+        <MoveDueDate
+          reportPeriodId={reportPeriodId}
+          currentDueDate={data.period.dueDate}
+          onMoved={onDecided}
+        />
       )}
 
       {canDecide && latest && (
@@ -878,4 +944,328 @@ function GeneratePeriods(): ReactElement {
       )}
     </div>
   );
+}
+
+/**
+ * MOVING A REPORT'S DUE DATE.
+ *
+ * Until this existed, nothing in the system could change a due date. Staff
+ * could accept a report, ask for revisions, or waive it entirely -- so a
+ * nonprofit asking for two more weeks got no answer, because there was none to
+ * give short of editing the database by hand.
+ *
+ * COLLAPSED BY DEFAULT. Extending a deadline is rare and consequential, and a
+ * date field sitting permanently open beside a report invites a stray edit to
+ * something a nonprofit has already been told.
+ *
+ * THE REASON IS A FIELD, NOT A CONFIRMATION. A dialog asking "are you sure"
+ * collects nothing; the reason is the entire content of an extension, because
+ * the new date is already on the record. The server refuses a move without
+ * one, and 0029 refuses the write at the database, so this is the third of
+ * three places that agree rather than the only one.
+ */
+function MoveDueDate({
+  reportPeriodId,
+  currentDueDate,
+  onMoved,
+}: {
+  reportPeriodId: string;
+  currentDueDate: string;
+  onMoved: () => void;
+}): ReactElement {
+  const [open, setOpen] = useState(false);
+  const [date, setDate] = useState('');
+  const [reason, setReason] = useState('');
+  const [state, setState] = useState<
+    { kind: 'idle' } | { kind: 'working' } | { kind: 'error'; message: string }
+  >({ kind: 'idle' });
+
+  /*
+   * Tomorrow, as the earliest selectable day. The server refuses today or
+   * earlier -- a past due date is a born-overdue obligation -- and `min` means
+   * the picker says so before a submit rather than after.
+   */
+  const tomorrow = useMemo(() => {
+    const d = new Date();
+    d.setUTCDate(d.getUTCDate() + 1);
+    return d.toISOString().slice(0, 10);
+  }, []);
+
+  const submit = useCallback(async () => {
+    setState({ kind: 'working' });
+    try {
+      await api.moveReportDueDate(reportPeriodId, date, reason);
+      setOpen(false);
+      setDate('');
+      setReason('');
+      setState({ kind: 'idle' });
+      onMoved();
+    } catch (e) {
+      setState({
+        kind: 'error',
+        message: e instanceof ApiError ? e.message : 'That did not go through. Try again.',
+      });
+    }
+  }, [date, reason, reportPeriodId, onMoved]);
+
+  if (!open) {
+    return (
+      <div className="panel-decide">
+        <div className="actions">
+          <button type="button" className="btn secondary small" onClick={() => setOpen(true)}>
+            Change the due date
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="panel-decide">
+      <div className="filter">
+        <label htmlFor="move-due-date">
+          New due date (currently {formatDay(currentDueDate)})
+        </label>
+        <input
+          id="move-due-date"
+          type="date"
+          min={tomorrow}
+          value={date}
+          onChange={(e) => setDate(e.target.value)}
+        />
+      </div>
+      <div className="filter">
+        {/* Required by the server, and the only part of this that will still
+            mean anything in a year. */}
+        <label htmlFor="move-due-reason">Why it is moving</label>
+        <textarea
+          id="move-due-reason"
+          rows={2}
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+        />
+      </div>
+
+      {state.kind === 'error' && (
+        <p className="banner danger" role="alert">
+          {state.message}
+        </p>
+      )}
+
+      <div className="actions">
+        <button
+          type="button"
+          className="btn small"
+          disabled={state.kind === 'working' || !date || reason.trim().length < 5}
+          onClick={() => void submit()}
+        >
+          {state.kind === 'working' ? 'Saving\u2026' : 'Move the due date'}
+        </button>
+        <button
+          type="button"
+          className="btn secondary small"
+          disabled={state.kind === 'working'}
+          onClick={() => {
+            setOpen(false);
+            setState({ kind: 'idle' });
+          }}
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * WHAT TONIGHT'S REMINDERS WILL DO, AND SENDING THEM NOW.
+ *
+ * The reminder job only ever ran from cron at 07:00, so the only way to find
+ * out what it would do was to let it do it -- to a few hundred nonprofits who
+ * did not ask. This is the panel that answers it first.
+ *
+ * TWO STEPS, THE SAME SHAPE AS THE UPDATE REQUEST. Showing the plan writes
+ * nothing: no letter, no message row, no error row, no reminder stamp. Sending
+ * is a second, deliberate press.
+ *
+ * THE COUNT IT SENDS IS THE COUNT IT SHOWED. `expectLetters` comes from the
+ * plan in state, never from a fresh fetch -- a fresh one would agree with the
+ * server by construction and defeat the check entirely. If the ground has
+ * moved since the plan was read, the server refuses and says by how much.
+ *
+ * It lists the actual addresses rather than a number. A count cannot be
+ * checked against intent; "one letter, to the mailbox I control" can.
+ */
+function TonightsReminders(): ReactElement {
+  const [state, setState] = useState<
+    | { kind: 'idle' }
+    | { kind: 'loading' }
+    | { kind: 'plan'; plan: ReminderPlan }
+    | { kind: 'sending'; plan: ReminderPlan }
+    | { kind: 'sent'; run: ConfirmedReminderRun }
+    | { kind: 'error'; message: string }
+  >({ kind: 'idle' });
+
+  const load = useCallback(async () => {
+    setState({ kind: 'loading' });
+    try {
+      setState({ kind: 'plan', plan: await api.reminderPlan() });
+    } catch (e) {
+      setState({
+        kind: 'error',
+        message: e instanceof ApiError ? e.message : 'Could not work out tonight\u2019s reminders.',
+      });
+    }
+  }, []);
+
+  const send = useCallback(async (plan: ReminderPlan) => {
+    const addresses = plan.wouldMail.flatMap((o) => o.recipients);
+    const ok = window.confirm(
+      `Send ${plan.lettersWouldSend} reminder${plan.lettersWouldSend === 1 ? '' : 's'} now, to:\n\n` +
+        `${addresses.join('\n')}\n\n` +
+        'This cannot be unsent.',
+    );
+    if (!ok) return;
+    setState({ kind: 'sending', plan });
+    try {
+      // The count the panel DISPLAYED. See the note above.
+      setState({ kind: 'sent', run: await api.runRemindersNow(plan.lettersWouldSend) });
+    } catch (e) {
+      setState({
+        kind: 'error',
+        message: e instanceof ApiError ? e.message : 'That did not go through. Nothing was sent.',
+      });
+    }
+  }, []);
+
+  const plan = state.kind === 'plan' || state.kind === 'sending' ? state.plan : null;
+
+  return (
+    <div className="panel-decide">
+      <div className="actions">
+        <button
+          type="button"
+          className="btn secondary small"
+          disabled={state.kind === 'loading' || state.kind === 'sending'}
+          onClick={load}
+        >
+          {state.kind === 'loading' ? 'Working\u2026' : 'Show what tonight\u2019s reminders will do'}
+        </button>
+        {plan && plan.lettersWouldSend > 0 && (
+          <button
+            type="button"
+            className="btn small"
+            disabled={state.kind === 'sending'}
+            onClick={() => void send(plan)}
+          >
+            {state.kind === 'sending'
+              ? 'Sending\u2026'
+              : `Send ${plan.lettersWouldSend} now`}
+          </button>
+        )}
+      </div>
+
+      {state.kind === 'error' && (
+        <p className="banner danger" role="alert">
+          {state.message}
+        </p>
+      )}
+
+      {plan && (
+        <div role="status">
+          <p className="meta">
+            {plan.lettersWouldSend === 0
+              ? 'Nobody is due a reminder today. Reminders go out 14 days before a ' +
+                'report is due, 3 days before, on the day, and weekly once it is late.'
+              : `${plan.lettersWouldSend} letter${plan.lettersWouldSend === 1 ? '' : 's'} to ` +
+                `${plan.wouldMail.length} organization${plan.wouldMail.length === 1 ? '' : 's'}. ` +
+                'Nothing has been sent.'}
+          </p>
+
+          {/*
+            An empty inbox after a confirmed send is otherwise unexplainable:
+            with no provider configured every message is RECORDED and nothing
+            leaves. Said before the send, not after.
+          */}
+          {!plan.transportConfigured && (
+            <p className="banner" role="alert">
+              No email provider is configured, so nothing would actually arrive. Each
+              message would be recorded as suppressed.
+            </p>
+          )}
+
+          {plan.wouldMail.length > 0 && (
+            <ul className="findings">
+              {plan.wouldMail.map((o) => (
+                <li key={o.organizationId}>
+                  <span className="who">{o.organizationName}</span>
+                  <span className="what">
+                    {o.recipients.join(', ')} &mdash;{' '}
+                    {o.reports
+                      .map((r) => `${r.label} (${dueWording(r.daysUntilDue)})`)
+                      .join('; ')}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          {/*
+            Due today with nobody to write to. The real run logs this and
+            nothing shows it; here it is beside the sends, because it is the
+            reason a report will go overdue with no explanation.
+          */}
+          {plan.withNoContact.length > 0 && (
+            <>
+              <p className="meta strong" data-overdue="true">
+                Due today, and no grantee account to write to
+              </p>
+              <ul className="findings">
+                {plan.withNoContact.map((o) => (
+                  <li key={o.organizationId}>
+                    <span className="who">{o.organizationName}</span>
+                    <span className="what">
+                      {o.reports.map((r) => r.label).join('; ')} &mdash; nobody can be reached
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+        </div>
+      )}
+
+      {state.kind === 'sent' && (
+        <div role="status">
+          <p className="meta">
+            {state.run.granteesMailed} sent, {state.run.suppressed} suppressed,{' '}
+            {state.run.failed} refused by the provider.
+            {state.run.withNoContact > 0 &&
+              ` ${state.run.withNoContact} report${
+                state.run.withNoContact === 1 ? '' : 's'
+              } had nobody to write to.`}
+          </p>
+          {state.run.failed > 0 && (
+            <p className="banner danger" role="alert">
+              The provider refused {state.run.failed}. Those grantees were not reached &mdash;
+              Data health lists them under recorded errors.
+            </p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * "in 14 days", "today", "8 days late".
+ *
+ * The sign carries the meaning and a bare number loses it: "14" beside a
+ * report that is a fortnight overdue reads as a fortnight of slack.
+ */
+function dueWording(daysUntilDue: number): string {
+  if (daysUntilDue === 0) return 'due today';
+  if (daysUntilDue > 0) return `due in ${daysUntilDue} day${daysUntilDue === 1 ? '' : 's'}`;
+  const late = -daysUntilDue;
+  return `${late} day${late === 1 ? '' : 's'} late`;
 }

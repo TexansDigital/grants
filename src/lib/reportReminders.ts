@@ -38,12 +38,12 @@
  *      starts.
  */
 
-import type { Env, RequestContext } from '../types';
+import type { Env, RequestContext, Session } from '../types';
 import { nowIso, formatDayInZone } from './time';
 import { sendEmail, transportFor } from './email';
 import { REPORT_REMINDER, type ReminderLine } from './emailTemplates';
 import { daysUntil, GRANTEE_OWES } from './reportDue';
-import { logError } from './errors';
+import { AppError, logError } from './errors';
 
 /**
  * The ladder, in days before the due date.
@@ -200,6 +200,139 @@ async function recipients(
     }
   }
   return byOrg;
+}
+
+/**
+ * WHO TONIGHT'S RUN WOULD WRITE TO, WITHOUT WRITING TO ANYBODY.
+ *
+ * WHY THIS IS A SEPARATE FUNCTION AND NOT A `dryRun` FLAG ON THE RUN. The run
+ * below writes in six places: an email per grantee, an `email_messages` row per
+ * attempt, three `error_log` codes, and the `reminder_count` stamp. A boolean
+ * guarding six branches is one missed branch away from a "dry run" that mails
+ * somebody, and the whole reason this exists is that nobody can afford to find
+ * that out from a nonprofit's inbox. A function containing no call that writes
+ * cannot write, and that property is checked by reading it rather than by
+ * trusting a flag to be threaded correctly.
+ *
+ * It costs a second copy of the grouping logic. That is the right trade here.
+ * The selection it must agree with -- `reportsOwed` and `isReminderDay` -- is
+ * shared, so the two cannot disagree about WHO is due; what is duplicated is
+ * only the grouping of due reports by organization.
+ *
+ * WHAT IT IS FOR. Reminders only ever ran from cron at 07:00, so the only way
+ * to find out what they would do was to let them do it. This answers the
+ * question an administrator has to be able to answer before any send: exactly
+ * which addresses, at which organizations, for which reports. It is also the
+ * safety mechanism for the real run below -- read the list, confirm it holds
+ * nobody it should not, then confirm. Stronger than suppressing the mail,
+ * which would prove the job ran and prove nothing about who it chose.
+ */
+export interface ReminderPlanOrg {
+  organizationId: string;
+  organizationName: string;
+  /** Addresses that would be written to. Empty means nobody can be reached. */
+  recipients: string[];
+  reports: {
+    reportPeriodId: string;
+    label: string;
+    programName: string;
+    dueDate: string;
+    /** Negative when the report is already late. */
+    daysUntilDue: number;
+    status: string;
+  }[];
+}
+
+export interface ReminderPlan {
+  /** The instant the plan was computed for, so a stale panel is obvious. */
+  now: string;
+  /** Everything owed and actionable, whether or not today is a reminder day. */
+  outstanding: number;
+  /** Organizations that would be mailed, with the exact addresses. */
+  wouldMail: ReminderPlanOrg[];
+  /**
+   * Due today, and nobody to write to. Surfaced here rather than logged,
+   * because this function writes nothing -- including to `error_log`.
+   */
+  withNoContact: ReminderPlanOrg[];
+  /** Letters that would leave the building: one per recipient address. */
+  lettersWouldSend: number;
+  /**
+   * Whether a provider is configured at all. False means the real run would
+   * record every message as `suppressed` and nothing would arrive -- which is
+   * the normal state in preview and a missing key in production. Without this
+   * an empty inbox after a confirmed run is unexplainable.
+   */
+  transportConfigured: boolean;
+}
+
+export async function planReportReminders(
+  env: Env,
+  session: Session,
+  opts: { now?: string } = {},
+): Promise<ReminderPlan> {
+  if (session.role !== 'admin') {
+    throw new AppError('FORBIDDEN', 'Only an administrator can do that.', {
+      internalMessage: `reminder plan attempted by role ${session.role}`,
+      severity: 'warn',
+    });
+  }
+
+  const nowStr = opts.now ?? nowIso();
+  const owed = await reportsOwed(env.DB, nowStr);
+  const dueToday = owed.filter((r) => isReminderDay(r.dueDate, nowStr));
+
+  const byOrg = await recipients(env.DB, [...new Set(dueToday.map((r) => r.organizationId))]);
+
+  const grouped = new Map<string, DueReport[]>();
+  for (const r of dueToday) {
+    const list = grouped.get(r.organizationId) ?? [];
+    list.push(r);
+    grouped.set(r.organizationId, list);
+  }
+
+  const wouldMail: ReminderPlanOrg[] = [];
+  const withNoContact: ReminderPlanOrg[] = [];
+  let lettersWouldSend = 0;
+
+  for (const [organizationId, reports] of grouped) {
+    const people = byOrg.get(organizationId) ?? [];
+    const entry: ReminderPlanOrg = {
+      organizationId,
+      organizationName: reports[0]!.organizationName,
+      recipients: people.map((p) => p.email),
+      reports: reports.map((r) => ({
+        reportPeriodId: r.reportPeriodId,
+        label: r.label,
+        programName: r.programName,
+        dueDate: r.dueDate,
+        daysUntilDue: daysUntil(r.dueDate, nowStr),
+        status: r.status,
+      })),
+    };
+    if (people.length === 0) {
+      withNoContact.push(entry);
+    } else {
+      // One letter per grantee ACCOUNT, matching the run: an organization with
+      // two logins gets two, because either of them may be the one who files.
+      lettersWouldSend += people.length;
+      wouldMail.push(entry);
+    }
+  }
+
+  const byName = (a: ReminderPlanOrg, b: ReminderPlanOrg) =>
+    a.organizationName.localeCompare(b.organizationName);
+  wouldMail.sort(byName);
+  withNoContact.sort(byName);
+
+  return {
+    now: nowStr,
+    outstanding: owed.length,
+    wouldMail,
+    withNoContact,
+    lettersWouldSend,
+    transportConfigured: transportFor(env) !== null,
+  };
 }
 
 /**
@@ -400,6 +533,82 @@ export async function runReportReminders(
     failed,
     withNoContact,
   };
+}
+
+/**
+ * An administrator running tonight's reminders now, on purpose.
+ *
+ * WHY IT TAKES A COUNT. The caller must pass the number of letters it was
+ * shown by `planReportReminders`, and a mismatch refuses the whole run. The
+ * failure this prevents is specific and entirely plausible: an administrator
+ * reads a plan that says one letter to a test mailbox, is interrupted, and
+ * confirms twenty minutes later -- by which time an import, another admin, or
+ * the passing of midnight into a 14-day rung has made it thirteen letters to
+ * thirteen nonprofits. The screen said one. The confirm has to mean one.
+ *
+ * It also makes the obvious mistake impossible: a bare POST to this path, from
+ * a script or a curl line, carries no count and is refused.
+ *
+ * NOT AN IDEMPOTENCY MECHANISM. `email_messages` is, as everywhere else in
+ * this system: one letter per grantee account per day, enforced by a unique
+ * index. Running this twice in a day does not mail anybody twice. This guards
+ * against sending the WRONG SIZE of thing, which an idempotency key cannot
+ * see.
+ */
+export interface ConfirmedReminderRun extends ReminderRun {
+  /** The plan that was actually executed, for the record and the screen. */
+  plan: ReminderPlan;
+}
+
+export async function runRemindersNow(
+  env: Env,
+  ctx: RequestContext,
+  session: Session,
+  opts: { expectLetters: number; now?: string; fetcher?: typeof fetch },
+): Promise<ConfirmedReminderRun> {
+  // planReportReminders refuses a non-admin, which covers this path too. The
+  // check is repeated rather than inherited because this is the writing path,
+  // and a future refactor that stops calling the plan first must not quietly
+  // open it.
+  if (session.role !== 'admin') {
+    throw new AppError('FORBIDDEN', 'Only an administrator can do that.', {
+      internalMessage: `reminder run attempted by role ${session.role}`,
+      severity: 'warn',
+    });
+  }
+
+  if (!Number.isInteger(opts.expectLetters) || opts.expectLetters < 0) {
+    throw new AppError('VALIDATION_FAILED', 'Review the plan before sending.', {
+      internalMessage: `runRemindersNow called with expectLetters ${String(opts.expectLetters)}`,
+      severity: 'warn',
+    });
+  }
+
+  const nowStr = opts.now ?? nowIso();
+  const plan = await planReportReminders(env, session, { now: nowStr });
+
+  if (plan.lettersWouldSend !== opts.expectLetters) {
+    throw new AppError(
+      'VALIDATION_FAILED',
+      `This would now send ${plan.lettersWouldSend} ${
+        plan.lettersWouldSend === 1 ? 'letter' : 'letters'
+      }, not ${opts.expectLetters}. Nothing was sent. Review the plan again.`,
+      {
+        internalMessage:
+          `reminder run refused: plan says ${plan.lettersWouldSend}, ` +
+          `caller expected ${opts.expectLetters}`,
+        severity: 'warn',
+      },
+    );
+  }
+
+  /*
+   * NOTHING TO DO IS NOT A FAILURE, and it is the state production is in
+   * before any obligation exists. Returning the zeroed run keeps the screen
+   * able to say "nobody was due" rather than showing an error.
+   */
+  const run = await runReportReminders(env, ctx, new Date(nowStr), opts.fetcher ?? fetch);
+  return { ...run, plan };
 }
 
 /**

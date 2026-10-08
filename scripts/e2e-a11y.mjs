@@ -38,6 +38,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createRequire } from 'node:module';
 
+import { watchRenderErrors } from './lib/renderErrors.mjs';
 const WEB = process.env.STEWARD_WEB ?? 'http://127.0.0.1:5173';
 const BROWSER =
   process.env.PLAYWRIGHT_CHROMIUM ?? '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
@@ -291,6 +292,8 @@ const granteeToken = mintSession(ids.grantee);
 // --- drive ------------------------------------------------------------------
 const browser = await chromium.launch({ executablePath: BROWSER, args: ['--no-sandbox'] });
 
+// A render error becomes a named failure rather than a locator timeout.
+watchRenderErrors(browser, (m) => check(m, false, true));
 /** A context with no session: this is what the public actually arrives as. */
 const anon = await browser.newContext({ viewport: { width: 1280, height: 900 } });
 

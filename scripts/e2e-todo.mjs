@@ -39,6 +39,7 @@ import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { extname, join, normalize } from 'node:path';
 
+import { watchRenderErrors } from './lib/renderErrors.mjs';
 const BROWSER =
   process.env.PLAYWRIGHT_CHROMIUM ?? '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
 
@@ -200,6 +201,8 @@ async function main() {
   const base = `http://127.0.0.1:${port}`;
   const browser = await chromium.launch({ executablePath: BROWSER });
 
+  // A render error becomes a named failure rather than a locator timeout.
+  watchRenderErrors(browser, (m) => check(m, false, true));
   try {
     // ---- 1. a failed load must not read as "nothing to do" ----------------
     {

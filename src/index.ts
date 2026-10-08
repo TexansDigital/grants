@@ -20,7 +20,7 @@ import { newRequestId } from './lib/ids';
 import { AppError, logError, notFound, toErrorResponse, validationFailed } from './lib/errors';
 import { nowIso, formatInZone } from './lib/time';
 import { scheduledBackup } from './lib/backup';
-import { runReportReminders } from './lib/reportReminders';
+import { runReportReminders, planReportReminders, runRemindersNow } from './lib/reportReminders';
 import { securityHeaders, htmlHeaders } from './lib/httpHeaders';
 import { readSessionCookie, resolveSession } from './lib/sessions';
 import {
@@ -80,6 +80,7 @@ import {
 } from './lib/granteeClaims';
 import {
   reportPortfolio, readReportForStaff, acceptReport, requestReportRevisions, waiveReport,
+  moveReportDueDate,
 } from './lib/reportAdmin';
 import { buildReportForm, publishReportForm } from './lib/reportForm';
 import { todo } from './lib/todo';
@@ -717,6 +718,28 @@ const routes: readonly Route[] = [
       );
     },
   },
+  /*
+   * MOVING A DEADLINE A NONPROFIT WAS TOLD. Admin only, reason required, and
+   * 0029 refuses the write at the database unless an amendment row records it
+   * -- so this route cannot move a date without leaving the record, whatever
+   * it passes.
+   */
+  {
+    method: 'POST',
+    path: '/api/reports/:id/due-date',
+    roles: ADMIN_ONLY,
+    handler: async ({ request, env, ctx, params, session }) => {
+      const body = await readJsonBody(request);
+      return json(
+        await moveReportDueDate(
+          env.DB, ctx, session, params.id!,
+          String(body.dueDate ?? ''),
+          String(body.reason ?? ''),
+        ),
+        ctx,
+      );
+    },
+  },
   {
     method: 'POST',
     path: '/api/reports/:id/waive',
@@ -786,6 +809,39 @@ const routes: readonly Route[] = [
           label: typeof body.label === 'string' ? body.label : '',
           dueDate: typeof body.dueDate === 'string' ? body.dueDate : '',
           dryRun: body.dryRun !== false,
+        }),
+        ctx,
+      );
+    },
+  },
+  /*
+   * WHAT TONIGHT'S REMINDERS WOULD DO. A GET, because it writes nothing --
+   * no letter, no `email_messages` row, no `error_log` row, no reminder stamp
+   * -- and the method should say so without anybody reading the handler.
+   */
+  {
+    method: 'GET',
+    path: '/api/report-reminders/plan',
+    roles: ADMIN_ONLY,
+    handler: async ({ env, ctx, session }) =>
+      json(await planReportReminders(env, session), ctx),
+  },
+  /*
+   * SENDING THEM, NOW. The body must carry the letter count the admin was
+   * shown; a mismatch refuses the run and sends nothing. See runRemindersNow
+   * for why a count and not a boolean. A bare POST carries none and is
+   * refused, which is the point.
+   */
+  {
+    method: 'POST',
+    path: '/api/report-reminders/run',
+    roles: ADMIN_ONLY,
+    handler: async ({ request, env, ctx, session }) => {
+      const body = await readJsonBody(request).catch(() => ({}) as Record<string, unknown>);
+      return json(
+        await runRemindersNow(env, ctx, session, {
+          expectLetters:
+            typeof body.expectLetters === 'number' ? body.expectLetters : Number.NaN,
         }),
         ctx,
       );

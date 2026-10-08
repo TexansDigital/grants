@@ -20,7 +20,7 @@
 
 import { env as testEnv } from 'cloudflare:test';
 import { describe, it, expect, beforeEach } from 'vitest';
-import { db, ctxFor, adminSession } from './helpers';
+import { db, ctxFor, adminSession, reviewerSession, applicantSession, appErrorFrom } from './helpers';
 import { seedProgram } from '../src/seed/seedProgram';
 import { INSPIRE_CHANGE } from '../src/seed/inspireChange';
 import { newId } from '../src/lib/ids';
@@ -29,7 +29,7 @@ import { decideApplication } from '../src/lib/decisions';
 import { createAwardFromDecision } from '../src/lib/awards';
 import { buildReportForm } from '../src/lib/reportForm';
 import {
-  runReportReminders, isReminderDay, reportsOwed,
+  runReportReminders, isReminderDay, reportsOwed, planReportReminders, runRemindersNow,
   REMIND_BEFORE_DAYS, OVERDUE_EVERY_DAYS, OVERDUE_STOP_AFTER_DAYS,
 } from '../src/lib/reportReminders';
 import { REPORT_REMINDER } from '../src/lib/emailTemplates';
@@ -536,5 +536,217 @@ describe('running it twice', () => {
       .bind(g.periodId)
       .first<{ n: number }>();
     expect(row?.n).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+/*
+ * SEEING WHAT TONIGHT WOULD DO, WITHOUT DOING IT.
+ *
+ * Reminders only ever ran from cron at 07:00, so the only way to learn what
+ * they would do was to let them do it -- to a few hundred nonprofits. These
+ * tests exist to make the plan trustworthy enough to decide on.
+ *
+ * The two assertions that matter most are the negative ones: no
+ * `email_messages` row and no `reminder_count` stamp. Those are precisely the
+ * two writes the last bug in this file got wrong -- it counted a suppressed
+ * message as sent and stamped the period, so the compliance desk claimed
+ * chases nobody had made. A dry run that wrote either would be the same class
+ * of lie, told louder.
+ */
+describe('the plan for tonight', () => {
+  const stamp = async (periodId: string) =>
+    (await db
+      .prepare(`SELECT reminder_count AS c, reminder_last_sent_at AS at
+                  FROM report_periods WHERE id = ?`)
+      .bind(periodId)
+      .first<{ c: number; at: string | null }>())!;
+
+  const errorRows = async (code: string) =>
+    (await db
+      .prepare(`SELECT COUNT(*) AS n FROM error_log WHERE code = ?`)
+      .bind(code)
+      .first<{ n: number }>())!.n;
+
+  it('names the organization, the address and the report, on a reminder day', async () => {
+    const g = await granteeOwing({ dueInDays: 14 });
+
+    const plan = await planReportReminders(liveEnv(), admin);
+    const mine = plan.wouldMail.find((o) => o.organizationId === g.orgId);
+
+    expect(mine, 'the organization due in 14 days is in the plan').toBeDefined();
+    expect(mine!.recipients).toEqual([g.granteeEmail]);
+    expect(mine!.reports).toHaveLength(1);
+    expect(mine!.reports[0]!.reportPeriodId).toBe(g.periodId);
+    expect(mine!.reports[0]!.daysUntilDue).toBe(14);
+    expect(mine!.reports[0]!.label).toBe('Final report');
+  });
+
+  it('writes no message row and leaves the reminder stamp alone', async () => {
+    const g = await granteeOwing({ dueInDays: 14 });
+    const before = await stamp(g.periodId);
+
+    await planReportReminders(liveEnv(), admin);
+
+    expect(await mailCount(g.granteeEmail!), 'no email_messages row').toBe(0);
+    const after = await stamp(g.periodId);
+    expect(after.c, 'reminder_count untouched').toBe(before.c);
+    expect(after.at, 'reminder_last_sent_at untouched').toBe(before.at);
+  });
+
+  it('leaves an organization out on a day that is not a rung', async () => {
+    const g = await granteeOwing({ dueInDays: 10 });
+
+    const plan = await planReportReminders(liveEnv(), admin);
+
+    expect(plan.wouldMail.some((o) => o.organizationId === g.orgId)).toBe(false);
+    // Still owed, and the plan says so -- the distinction the screen needs.
+    expect(plan.outstanding).toBeGreaterThan(0);
+  });
+
+  it('reports an organization with nobody to write to without logging it', async () => {
+    const before = await errorRows('REPORT_REMINDER_NO_CONTACT');
+    const g = await granteeOwing({ dueInDays: 3, withContact: false });
+
+    const plan = await planReportReminders(liveEnv(), admin);
+    const mine = plan.withNoContact.find((o) => o.organizationId === g.orgId);
+
+    expect(mine, 'surfaced as unreachable').toBeDefined();
+    expect(mine!.recipients).toEqual([]);
+    expect(plan.wouldMail.some((o) => o.organizationId === g.orgId)).toBe(false);
+    /*
+     * The real run logs REPORT_REMINDER_NO_CONTACT here. The plan must not:
+     * "writes nothing" includes the error log, or a panel refreshed a few
+     * times would manufacture its own entries on the Data health screen.
+     */
+    expect(await errorRows('REPORT_REMINDER_NO_CONTACT'), 'nothing logged').toBe(before);
+  });
+
+  it('counts one letter per grantee account, not per organization', async () => {
+    const g = await granteeOwing({ dueInDays: 0 });
+    const now = nowIso();
+    await db
+      .prepare(
+        `INSERT INTO users (id, email, role, organization_id, is_active, created_at, updated_at)
+         VALUES (?,?, 'grantee', ?, 1, ?, ?)`,
+      )
+      .bind(newId(), `second-${crypto.randomUUID().slice(0, 8)}@example.org`, g.orgId, now, now)
+      .run();
+
+    const plan = await planReportReminders(liveEnv(), admin);
+    const mine = plan.wouldMail.find((o) => o.organizationId === g.orgId)!;
+
+    expect(mine.recipients, 'both logins listed').toHaveLength(2);
+    // Two people who may each be the one who files, so two letters.
+    expect(plan.lettersWouldSend).toBe(
+      plan.wouldMail.reduce((n, o) => n + o.recipients.length, 0),
+    );
+  });
+
+  it('says when no provider is configured, so an empty inbox is explainable', async () => {
+    await granteeOwing({ dueInDays: 14 });
+
+    expect((await planReportReminders(mailEnv(), admin)).transportConfigured).toBe(false);
+    expect((await planReportReminders(liveEnv(), admin)).transportConfigured).toBe(true);
+  });
+
+  it('refuses a reviewer and an applicant', async () => {
+    const reviewer = await appErrorFrom(planReportReminders(liveEnv(), reviewerSession()));
+    expect(reviewer.code).toBe('FORBIDDEN');
+    expect(reviewer.httpStatus).toBe(403);
+
+    const applicant = await appErrorFrom(planReportReminders(liveEnv(), applicantSession(newId())));
+    expect(applicant.code).toBe('FORBIDDEN');
+  });
+});
+
+// ---------------------------------------------------------------------------
+/*
+ * SENDING THEM ON PURPOSE, NOW.
+ *
+ * The count in the body is the safety mechanism, and these pin it. The failure
+ * it exists for: an administrator reads a plan saying one letter to a test
+ * mailbox, is interrupted, and confirms later -- by which time it is thirteen
+ * letters to thirteen nonprofits. The screen said one, so the confirm must
+ * mean one.
+ */
+describe('running the reminders now', () => {
+  it('sends when the count matches what the plan showed', async () => {
+    const g = await granteeOwing({ dueInDays: 3 });
+    const plan = await planReportReminders(liveEnv(), admin);
+    expect(plan.lettersWouldSend).toBeGreaterThan(0);
+
+    const run = await runRemindersNow(liveEnv(), ctx(), admin, {
+      expectLetters: plan.lettersWouldSend,
+      fetcher: accepts,
+    });
+
+    expect(run.granteesMailed).toBe(plan.lettersWouldSend);
+    expect(await mailCount(g.granteeEmail!)).toBe(1);
+  });
+
+  it('refuses when the plan has grown since it was read, and sends nothing', async () => {
+    const g = await granteeOwing({ dueInDays: 3 });
+
+    const e = await appErrorFrom(
+      runRemindersNow(liveEnv(), ctx(), admin, { expectLetters: 0, fetcher: accepts }),
+    );
+
+    expect(e.code).toBe('VALIDATION_FAILED');
+    /*
+     * publicMessage, not message. `message` carries the INTERNAL text, so
+     * asserting on it tests a string the administrator never reads -- and
+     * passes or fails for reasons unrelated to what the screen says. The
+     * specific number matters: it is what tells them the ground moved, and by
+     * how much.
+     */
+    expect(e.publicMessage).toContain('not 0');
+    expect(e.publicMessage).toContain('Nothing was sent');
+    expect(await mailCount(g.granteeEmail!), 'no letter left the building').toBe(0);
+  });
+
+  it('refuses a body with no count at all, which is what a stray POST sends', async () => {
+    const g = await granteeOwing({ dueInDays: 3 });
+
+    const e = await appErrorFrom(
+      runRemindersNow(liveEnv(), ctx(), admin, {
+        expectLetters: Number.NaN,
+        fetcher: accepts,
+      }),
+    );
+
+    expect(e.code).toBe('VALIDATION_FAILED');
+    expect(e.publicMessage).toBe('Review the plan before sending.');
+    expect(await mailCount(g.granteeEmail!)).toBe(0);
+  });
+
+  it('accepts zero when there is genuinely nobody due, and reports it as not a failure', async () => {
+    // Owed, but not on a rung: the state production is in before any
+    // obligation exists, and the screen must not show it as an error.
+    await granteeOwing({ dueInDays: 10 });
+
+    const run = await runRemindersNow(liveEnv(), ctx(), admin, {
+      expectLetters: 0,
+      fetcher: accepts,
+    });
+
+    expect(run.granteesMailed).toBe(0);
+    expect(run.messagesRecorded).toBe(0);
+    expect(run.plan.lettersWouldSend).toBe(0);
+  });
+
+  it('refuses a reviewer, and does so before computing anything', async () => {
+    const g = await granteeOwing({ dueInDays: 3 });
+
+    const e = await appErrorFrom(
+      runRemindersNow(liveEnv(), ctx(), reviewerSession(), {
+        expectLetters: 1,
+        fetcher: accepts,
+      }),
+    );
+
+    expect(e.code).toBe('FORBIDDEN');
+    expect(e.httpStatus).toBe(403);
+    expect(await mailCount(g.granteeEmail!)).toBe(0);
   });
 });

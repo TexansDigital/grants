@@ -25,6 +25,8 @@ import { loadFormDefinition } from './loadForm';
 import { allFields } from './forms';
 import { displayValue } from './answerDisplay';
 import { isStaffRole } from './scope';
+import { isPlainDate } from './reportPeriods';
+import { newId } from './ids';
 import { daysUntil as daysUntilDue, isOverdue as reportIsOverdue } from './reportDue';
 import type { StoredValue } from './fieldTypes';
 
@@ -229,6 +231,13 @@ export interface StaffReport {
     metrics: { metricKey: string; label: string; display: string | null; metricType: string }[];
     attachments: { id: string; filename: string; sizeBytes: number }[];
   }[];
+  /*
+   * EVERY TIME THIS DEADLINE MOVED, oldest first. Empty for almost every
+   * report, which is the point: when it is not empty, "due 30 November" is not
+   * the whole truth, and whoever is reading the report needs the rest of it
+   * before they judge the nonprofit for being late.
+   */
+  dueDateChanges: DueDateAmendment[];
 }
 
 /** One report period, with every attempt against it, for staff to read. */
@@ -386,6 +395,7 @@ export async function readReportForStaff(
       termEnd: period.term_end as string | null,
     },
     submissions,
+    dueDateChanges: await dueDateHistory(db, reportPeriodId),
   };
 }
 
@@ -664,4 +674,198 @@ export async function waiveReport(
       severity: 'warn',
     });
   }
+}
+
+/**
+ * One recorded move of a report's due date.
+ *
+ * `amendedBy` is an email where the user row survives, falling back to the id,
+ * matching how award amendments are read. An extension nobody can be named on
+ * is the thing the table exists to prevent, but a deactivated account must not
+ * make the history unreadable.
+ */
+export interface DueDateAmendment {
+  id: string;
+  amendedAt: string;
+  amendedBy: string;
+  oldValue: string | null;
+  newValue: string | null;
+  reason: string;
+}
+
+export async function dueDateHistory(
+  db: D1Database,
+  reportPeriodId: string,
+): Promise<DueDateAmendment[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT a.id, a.amended_at AS amendedAt,
+              COALESCE(u.email, a.amended_by) AS amendedBy,
+              a.old_value AS oldValue, a.new_value AS newValue, a.reason
+         FROM report_period_amendments a
+         LEFT JOIN users u ON u.id = a.amended_by
+        WHERE a.report_period_id = ? AND a.field_changed = 'due_date'
+        ORDER BY a.amended_at, a.created_at`,
+    )
+    .bind(reportPeriodId)
+    .all<DueDateAmendment>();
+  return results ?? [];
+}
+
+export interface MovedDueDate {
+  reportPeriodId: string;
+  previousDueDate: string;
+  dueDate: string;
+  amendedAt: string;
+}
+
+/**
+ * Move a report's due date, and record who moved it and why.
+ *
+ * WHY THIS EXISTS. Nothing in this system could change a due date. Staff could
+ * accept a report, ask for revisions, or waive it entirely -- but a nonprofit
+ * asking for two more weeks got no answer, because there was no way to give
+ * one short of editing production by hand. It also made the update request a
+ * one-way door: thirteen obligations created against a date typed once, with
+ * no correction possible.
+ *
+ * WHAT IT WILL NOT DO:
+ *
+ *   - MOVE A SETTLED DEADLINE. `accepted` and `waived` are terminal, and their
+ *     due date is part of what the grantee was held to. Rewriting it after an
+ *     acceptance is on the row would make the record say something that never
+ *     happened. 0029 refuses this at the database as well.
+ *   - MOVE IT INTO THE PAST. The same guard `requestUpdates` carries, for the
+ *     same reason: a past due date is a born-overdue obligation, and by hand
+ *     it is worse, because somebody typed it.
+ *   - ACCEPT A MOVE WITH NO REASON. "Why" is the whole content of an
+ *     extension; the date itself is already on the period.
+ *
+ * WHAT IT DELIBERATELY LEAVES ALONE. `reminder_count` and
+ * `reminder_last_sent_at` are a record of chases already made, and they stay.
+ * Three reminders sent before an extension were still sent. The ladder then
+ * re-arms against the new date on its own, because `isReminderDay` reads the
+ * due date rather than a counter -- so a report moved from three days out to a
+ * month out gets its 14-day notice again, which is what anybody would expect.
+ */
+export async function moveReportDueDate(
+  db: D1Database,
+  ctx: RequestContext,
+  session: Session,
+  reportPeriodId: string,
+  newDueDate: string,
+  reason: string,
+  opts: { now?: string } = {},
+): Promise<MovedDueDate> {
+  assertAdmin(session);
+
+  const note = reason.trim();
+  if (note.length < 5) {
+    throw new AppError('VALIDATION_FAILED', 'Say why this date is moving.', {
+      internalMessage: `due date move on ${reportPeriodId} with ${note.length} characters`,
+      severity: 'warn',
+      fieldErrors: [{ field: 'reason', message: 'A change of deadline needs a reason.' }],
+    });
+  }
+
+  if (!isPlainDate(newDueDate)) {
+    throw new AppError('VALIDATION_FAILED', 'Enter the new due date as YYYY-MM-DD.', {
+      internalMessage: `due date move called with "${newDueDate}"`,
+      severity: 'warn',
+      fieldErrors: [{ field: 'dueDate', message: 'Enter a date.' }],
+    });
+  }
+
+  const now = opts.now ?? nowIso();
+  if (newDueDate <= now.slice(0, 10)) {
+    throw new AppError('VALIDATION_FAILED', 'A due date has to be in the future.', {
+      internalMessage: `due date move to ${newDueDate} is not after ${now.slice(0, 10)}`,
+      severity: 'warn',
+      fieldErrors: [{ field: 'dueDate', message: 'Pick a date after today.' }],
+    });
+  }
+
+  const period = await db
+    .prepare(
+      `SELECT id, status, due_date AS dueDate FROM report_periods
+        WHERE id = ? AND deleted_at IS NULL`,
+    )
+    .bind(reportPeriodId)
+    .first<{ id: string; status: string; dueDate: string }>();
+  if (!period) throw notFound('report period');
+
+  if (period.status === 'accepted' || period.status === 'waived') {
+    throw new AppError(
+      'CONFLICT',
+      `This report is ${period.status}, so it keeps the date it was held to.`,
+      {
+        internalMessage: `due date move attempted on ${reportPeriodId} in ${period.status}`,
+        severity: 'warn',
+      },
+    );
+  }
+
+  if (period.dueDate === newDueDate) {
+    throw new AppError('VALIDATION_FAILED', 'That is already the due date.', {
+      internalMessage: `due date move on ${reportPeriodId} to its current value`,
+      severity: 'warn',
+      fieldErrors: [{ field: 'dueDate', message: 'Pick a different date.' }],
+    });
+  }
+
+  /*
+   * ORDER IS LOAD-BEARING. 0029 lets the due date move only when a matching
+   * amendment row already exists, stamped at the same instant -- so the INSERT
+   * has to come before the UPDATE in the batch. Reversed, the database refuses
+   * the whole thing, which is the guarantee: the column cannot move without
+   * the record, whatever a future caller does.
+   */
+  const results = await db.batch([
+    auditStatement(db, ctx, {
+      action: 'report_period.due_date_moved',
+      entityType: 'report_period',
+      entityId: reportPeriodId,
+      before: { dueDate: period.dueDate },
+      after: { dueDate: newDueDate, reason: note },
+    }, {
+      guard: {
+        sql: `(SELECT status FROM report_periods WHERE id = ?) NOT IN ('accepted','waived')`,
+        binds: [reportPeriodId],
+      },
+    }),
+    db
+      .prepare(
+        `INSERT INTO report_period_amendments
+           (id, report_period_id, amended_at, amended_by, field_changed,
+            old_value, new_value, reason, created_at)
+         VALUES (?,?,?,?, 'due_date', ?,?,?,?)`,
+      )
+      .bind(newId(), reportPeriodId, now, session.userId, period.dueDate, newDueDate, note, now),
+    db
+      .prepare(
+        `UPDATE report_periods SET due_date = ?, updated_at = ?
+          WHERE id = ? AND due_date = ? AND status NOT IN ('accepted','waived')
+            AND deleted_at IS NULL`,
+      )
+      .bind(newDueDate, now, reportPeriodId, period.dueDate),
+  ]);
+
+  /*
+   * `due_date = ?` in the WHERE is optimistic locking on the value we read.
+   * Two admins extending the same report at once would otherwise both appear
+   * to succeed while one amendment described a move that never happened.
+   */
+  if ((results[results.length - 1]?.meta.changes ?? 0) === 0) {
+    throw new AppError('CONFLICT', 'Somebody else changed this date. Reload and look again.', {
+      internalMessage: `due date move on ${reportPeriodId} lost a race`,
+      severity: 'warn',
+    });
+  }
+
+  return {
+    reportPeriodId,
+    previousDueDate: period.dueDate,
+    dueDate: newDueDate,
+    amendedAt: now,
+  };
 }

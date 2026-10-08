@@ -1,0 +1,114 @@
+-- 0029_report_period_amendments.sql
+--
+-- Moving a report's due date, with a record of the move.
+--
+-- WHAT WAS WRONG. Six statements in this codebase write to `report_periods`,
+-- and not one of them touches `due_date`. Staff could accept a report, request
+-- revisions of it, or waive it entirely with a reason -- but not move it. So a
+-- nonprofit asking for two more weeks had no answer anybody could give them,
+-- and the only remedy was editing the production database by hand: the one
+-- thing CLAUDE.md forbids outright.
+--
+-- That also made the whole update request a one-way door. "Ask past grantees
+-- for an update" creates thirteen obligations against a date typed once, and a
+-- date typed wrong could not be corrected. Handing that to the Foundation team
+-- meant handing them a decision only a terminal could undo.
+--
+-- WHY A TABLE AND NOT COLUMNS ON THE PERIOD. Columns would be overwritten by a
+-- second extension, leaving the first reason only in `audit_log` -- which has
+-- no read surface anywhere in the product. That is exactly the failure this
+-- project has produced repeatedly: recorded correctly, surfaced nowhere. An
+-- append-only table means "extended twice, here is why each time" is a
+-- question the panel can answer.
+--
+-- WHY IT MIRRORS award_amendments. Same kind of fact: a dated commitment to
+-- somebody outside this organization, changed by a named person for a stated
+-- reason. 0024 settled the shape, including the part that matters most -- the
+-- trigger. It is not enough to have somewhere to record a move; the column
+-- must be UNABLE to move without one.
+
+CREATE TABLE report_period_amendments (
+  id                TEXT PRIMARY KEY,
+  report_period_id  TEXT NOT NULL REFERENCES report_periods(id),
+  amended_at        TEXT NOT NULL,
+  -- Who decided. Not nullable, for the same reason as an award amendment: a
+  -- deadline moved by nobody in particular is the gap this closes. A grantee
+  -- asking "who agreed to this" has to have an answer.
+  amended_by        TEXT NOT NULL REFERENCES users(id),
+
+  -- One row per field. Only the due date for now, because it is the only one
+  -- whose immovability was causing harm. A later migration widens the CHECK;
+  -- the column exists so that is a CHECK change rather than a new table.
+  field_changed     TEXT NOT NULL CHECK (field_changed IN ('due_date')),
+
+  -- ISO-8601 dates as stored, never formatted. A record saying "22 October"
+  -- cannot be compared against the column it came from, which is the whole
+  -- job of old_value.
+  old_value         TEXT,
+  new_value         TEXT,
+
+  -- REQUIRED, enforced here and not only in the library. "Why" is the entire
+  -- content of an extension: the new date is already on the period.
+  reason            TEXT NOT NULL CHECK (TRIM(reason) <> ''),
+
+  created_at        TEXT NOT NULL,
+
+  -- A move that moves nothing is a row somebody has to explain.
+  CHECK (old_value IS NOT new_value)
+);
+
+CREATE INDEX report_period_amendments_period_idx
+  ON report_period_amendments (report_period_id, amended_at);
+
+-- APPEND-ONLY, like audit_log and award_amendments. A history of deadline
+-- changes that can itself be rewritten answers nothing.
+CREATE TRIGGER report_period_amendments_no_update
+BEFORE UPDATE ON report_period_amendments
+BEGIN
+  SELECT RAISE(ABORT, 'report period amendments are append-only');
+END;
+
+CREATE TRIGGER report_period_amendments_no_delete
+BEFORE DELETE ON report_period_amendments
+BEGIN
+  SELECT RAISE(ABORT, 'report period amendments are append-only');
+END;
+
+-- THE POINT OF THE MIGRATION. A due date may move ONLY when this exact move is
+-- already recorded, stamped at the same instant as the update -- so a stale
+-- amendment row from an earlier extension cannot wave a later one through. In
+-- a D1 batch that means the INSERT must be ordered before the UPDATE.
+--
+-- Note what this does NOT guard: the INSERT in `requestUpdates` and in the
+-- period generator, which set a due date for the first time. Creating an
+-- obligation is not moving one, and requiring an amendment to explain a date
+-- nobody has been told yet would be noise.
+CREATE TRIGGER report_periods_due_date_needs_an_amendment
+BEFORE UPDATE OF due_date ON report_periods
+WHEN NEW.due_date IS NOT OLD.due_date
+ AND NOT EXISTS (
+   SELECT 1 FROM report_period_amendments
+    WHERE report_period_id = NEW.id
+      AND field_changed = 'due_date'
+      AND old_value = OLD.due_date
+      AND new_value = NEW.due_date
+      AND amended_at = NEW.updated_at
+ )
+BEGIN
+  SELECT RAISE(ABORT, 'a report due date changes through an amendment, not an update');
+END;
+
+-- A DEADLINE THAT HAS ALREADY BEEN SETTLED DOES NOT MOVE.
+--
+-- `accepted` and `waived` are terminal in 0012, and their due date is history
+-- at that point: moving it would rewrite what the grantee was held to after
+-- the fact, with the acceptance still on the row. The library refuses this
+-- too, with a message a human can act on; this is here because the library is
+-- not the only possible caller.
+CREATE TRIGGER report_periods_settled_due_date_is_fixed
+BEFORE UPDATE OF due_date ON report_periods
+WHEN NEW.due_date IS NOT OLD.due_date
+ AND OLD.status IN ('accepted', 'waived')
+BEGIN
+  SELECT RAISE(ABORT, 'a report that is accepted or waived keeps the date it was held to');
+END;

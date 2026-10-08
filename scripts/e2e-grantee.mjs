@@ -33,6 +33,7 @@ import { writeFileSync, mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { watchRenderErrors } from './lib/renderErrors.mjs';
 const APP = process.env.STEWARD_WORKER ?? 'http://127.0.0.1:8787';
 const BROWSER =
   process.env.PLAYWRIGHT_CHROMIUM ?? '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
@@ -289,6 +290,8 @@ note('report period', periodId);
 
 // --- drive ------------------------------------------------------------------
 const browser = await chromium.launch({ executablePath: BROWSER });
+// A render error becomes a named failure rather than a locator timeout.
+watchRenderErrors(browser, (m) => check(m, false, true));
 const context = await browser.newContext();
 // The __Host- prefix requires secure, path=/ and no domain attribute. Playwright
 // needs the domain spelled out anyway, and Chrome accepts secure on 127.0.0.1.

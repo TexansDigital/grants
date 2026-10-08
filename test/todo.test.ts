@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { db, ctxFor, adminSession, reviewerSession, applicantSession, appErrorFrom } from './helpers';
+import { db, ctxFor, adminSession, reviewerSession, applicantSession, appErrorFrom, forceDueDate } from './helpers';
 import { seedProgram } from '../src/seed/seedProgram';
 import { INSPIRE_CHANGE } from '../src/seed/inspireChange';
 import { buildReportForm } from '../src/lib/reportForm';
@@ -76,10 +76,7 @@ async function scenario(opts: { dueDate?: string } = {}) {
     .bind(awardId)
     .first<{ id: string }>();
   if (opts.dueDate) {
-    await db
-      .prepare(`UPDATE report_periods SET due_date=? WHERE id=?`)
-      .bind(opts.dueDate, period!.id)
-      .run();
+    await forceDueDate(period!.id, opts.dueDate);
   }
 
   return { programId: p.programId, orgId, awardId, periodId: period!.id };

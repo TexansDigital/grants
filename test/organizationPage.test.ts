@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { db, ctxFor, adminSession, reviewerSession, applicantSession, appErrorFrom } from './helpers';
+import { db, ctxFor, adminSession, reviewerSession, applicantSession, appErrorFrom, forceDueDatesForAward } from './helpers';
 import { seedProgram } from '../src/seed/seedProgram';
 import { INSPIRE_CHANGE } from '../src/seed/inspireChange';
 import { generateReportPeriods } from '../src/lib/reportPeriods';
@@ -210,10 +210,7 @@ describe('the organization page', () => {
     const orgId = await org('Bayou Bend');
     const awardId = await award({ programId, orgId });
     await generateReportPeriods(db, ctxFor(admin), awardId);
-    await db
-      .prepare(`UPDATE report_periods SET due_date = ? WHERE award_id = ?`)
-      .bind(day('2024-01-01'), awardId)
-      .run();
+    await forceDueDatesForAward(awardId, day('2024-01-01'));
 
     const late = await organizationOverview(db, admin, orgId);
     expect(late.awards[0]!.reportsOverdue).toBeGreaterThan(0);
@@ -408,9 +405,7 @@ describe('the organizations list', () => {
     const awardId = await award({ programId, orgId });
     await generateReportPeriods(db, ctxFor(admin), awardId);
 
-    const setDue = (d: string) =>
-      db.prepare(`UPDATE report_periods SET due_date = ?, status = 'open' WHERE award_id = ?`)
-        .bind(d, awardId).run();
+    const setDue = (d: string) => forceDueDatesForAward(awardId, d, { status: 'open' });
     const overdue = async () =>
       (await organizationOverview(db, admin, orgId)).awards[0]!.reportsOverdue;
 
@@ -449,10 +444,7 @@ describe('the organizations list', () => {
     const orgId = await org('Refused Trust');
     const awardId = await award({ programId, orgId, cents: 4_000_000 });
     await generateReportPeriods(db, ctxFor(admin), awardId);
-    await db
-      .prepare(`UPDATE report_periods SET due_date = ? WHERE award_id = ?`)
-      .bind(day('2024-01-01'), awardId)
-      .run();
+    await forceDueDatesForAward(awardId, day('2024-01-01'));
 
     expect((await organizationOverview(db, admin, orgId)).awards[0]!.reportsOverdue).toBe(1);
 

@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { db, ctxFor, adminSession, reviewerSession, applicantSession, appErrorFrom } from './helpers';
+import {
+  db, ctxFor, adminSession, reviewerSession, applicantSession, appErrorFrom, forceDueDate,
+} from './helpers';
 import { seedProgram } from '../src/seed/seedProgram';
 import { INSPIRE_CHANGE } from '../src/seed/inspireChange';
 import { buildReportForm } from '../src/lib/reportForm';
@@ -7,7 +9,7 @@ import { generateReportPeriods } from '../src/lib/reportPeriods';
 import { submitReport } from '../src/lib/reportSubmit';
 import {
   reportPortfolio, readReportForStaff, acceptReport, requestReportRevisions, waiveReport,
-  daysUntil, isOverdue,
+  daysUntil, isOverdue, moveReportDueDate, dueDateHistory,
 } from '../src/lib/reportAdmin';
 import { newId } from '../src/lib/ids';
 import { nowIso } from '../src/lib/time';
@@ -56,8 +58,7 @@ async function scenario(opts: { dueDate?: string } = {}) {
   const period = await db.prepare(`SELECT id FROM report_periods WHERE award_id=?`)
     .bind(awardId).first<{ id: string }>();
   if (opts.dueDate) {
-    await db.prepare(`UPDATE report_periods SET due_date=? WHERE id=?`)
-      .bind(opts.dueDate, period!.id).run();
+    await forceDueDate(period!.id, opts.dueDate);
   }
 
   const userId = newId();
@@ -449,5 +450,286 @@ describe('how late is late, on the staff side', () => {
     for (const status of ['scheduled', 'open', 'revisions_requested']) {
       expect(isOverdue(status, day('2020-01-01'), now), status).toBe(true);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+/*
+ * MOVING A DUE DATE.
+ *
+ * Six statements in this codebase wrote to `report_periods` and not one
+ * touched `due_date`. Staff could accept a report, ask for revisions, or waive
+ * it -- but a nonprofit asking for two more weeks had no answer anybody could
+ * give, and the only remedy was editing production by hand. It also made the
+ * update request a one-way door: thirteen obligations against a date typed
+ * once, uncorrectable.
+ *
+ * The tests that matter most here are the ones about the DATABASE rather than
+ * the library, because the library is not the only possible caller. A guard
+ * that only exists in TypeScript guards only the path somebody remembered.
+ */
+describe('moving a report due date', () => {
+  const future = (days: number) =>
+    new Date(Date.now() + days * 86_400_000).toISOString().slice(0, 10);
+
+  const period = async (id: string) =>
+    (await db
+      .prepare(
+        `SELECT due_date AS dueDate, status, reminder_count AS reminders,
+                reminder_last_sent_at AS lastSent
+           FROM report_periods WHERE id = ?`,
+      )
+      .bind(id)
+      .first<{ dueDate: string; status: string; reminders: number; lastSent: string | null }>())!;
+
+  const amendments = async (id: string) =>
+    (await db
+      .prepare(`SELECT COUNT(*) AS n FROM report_period_amendments WHERE report_period_id = ?`)
+      .bind(id)
+      .first<{ n: number }>())!.n;
+
+  it('moves it, records the move, and writes an audit row', async () => {
+    const s = await scenario();
+    const was = (await period(s.periodId)).dueDate;
+
+    const moved = await moveReportDueDate(
+      db, s.adminCtx, s.admin, s.periodId, future(30),
+      'They asked for two more weeks to get the figures from their programme team.',
+    );
+
+    expect(moved.previousDueDate).toBe(was);
+    expect(moved.dueDate).toBe(future(30));
+    expect((await period(s.periodId)).dueDate).toBe(future(30));
+
+    const history = await dueDateHistory(db, s.periodId);
+    expect(history).toHaveLength(1);
+    expect(history[0]!.oldValue).toBe(was);
+    expect(history[0]!.newValue).toBe(future(30));
+    expect(history[0]!.reason).toContain('two more weeks');
+    // The actor, by email rather than an id nobody can read.
+    expect(history[0]!.amendedBy).toContain('@');
+
+    const audit = await db
+      .prepare(
+        `SELECT after_json AS after FROM audit_log
+          WHERE action = 'report_period.due_date_moved' AND entity_id = ?`,
+      )
+      .bind(s.periodId)
+      .first<{ after: string }>();
+    expect(audit, 'an audit row was written').toBeTruthy();
+    expect(JSON.parse(audit!.after).dueDate).toBe(future(30));
+  });
+
+  it('keeps both moves when a date is extended twice', async () => {
+    const s = await scenario();
+    await moveReportDueDate(db, s.adminCtx, s.admin, s.periodId, future(20), 'First extension.');
+    await moveReportDueDate(db, s.adminCtx, s.admin, s.periodId, future(40), 'Second extension.');
+
+    const history = await dueDateHistory(db, s.periodId);
+    /*
+     * TWO ROWS, NOT ONE OVERWRITTEN. This is the whole reason the amendment is
+     * a table rather than columns on the period: columns would have lost the
+     * first reason to anything readable, leaving it only in audit_log, which
+     * has no read surface in the product.
+     */
+    expect(history).toHaveLength(2);
+    expect(history.map((h) => h.reason)).toEqual(['First extension.', 'Second extension.']);
+    expect(history[1]!.oldValue).toBe(history[0]!.newValue);
+  });
+
+  it('leaves the record of chases already made alone', async () => {
+    const s = await scenario();
+    const now = nowIso();
+    await db
+      .prepare(
+        `UPDATE report_periods SET reminder_count = 3, reminder_last_sent_at = ? WHERE id = ?`,
+      )
+      .bind(now, s.periodId)
+      .run();
+
+    await moveReportDueDate(db, s.adminCtx, s.admin, s.periodId, future(30), 'Extended.');
+
+    const after = await period(s.periodId);
+    // Three reminders sent before the extension were still sent. The ladder
+    // re-arms against the new date on its own, because isReminderDay reads the
+    // due date rather than a counter.
+    expect(after.reminders).toBe(3);
+    expect(after.lastSent).toBe(now);
+  });
+
+  it('refuses a date in the past, which is a born-overdue obligation', async () => {
+    const s = await scenario();
+    const e = await appErrorFrom(
+      moveReportDueDate(db, s.adminCtx, s.admin, s.periodId, future(-1), 'Backdating it.'),
+    );
+    expect(e.code).toBe('VALIDATION_FAILED');
+    expect(e.publicMessage).toBe('A due date has to be in the future.');
+    expect(await amendments(s.periodId), 'nothing recorded').toBe(0);
+  });
+
+  it('refuses today, because a deadline due today cannot be moved to today', async () => {
+    const s = await scenario();
+    const today = new Date().toISOString().slice(0, 10);
+    const e = await appErrorFrom(
+      moveReportDueDate(db, s.adminCtx, s.admin, s.periodId, today, 'Moving it to today.'),
+    );
+    expect(e.code).toBe('VALIDATION_FAILED');
+    expect(e.publicMessage).toBe('A due date has to be in the future.');
+  });
+
+  it('refuses a move with no reason, because the reason is the content', async () => {
+    const s = await scenario();
+    const e = await appErrorFrom(
+      moveReportDueDate(db, s.adminCtx, s.admin, s.periodId, future(30), '   '),
+    );
+    expect(e.code).toBe('VALIDATION_FAILED');
+    expect(e.publicMessage).toBe('Say why this date is moving.');
+    expect(e.fieldErrors?.[0]?.field).toBe('reason');
+    expect(await amendments(s.periodId)).toBe(0);
+  });
+
+  it('refuses a date that is not a date', async () => {
+    const s = await scenario();
+    const e = await appErrorFrom(
+      moveReportDueDate(db, s.adminCtx, s.admin, s.periodId, '31/12/2026', 'Extended.'),
+    );
+    expect(e.code).toBe('VALIDATION_FAILED');
+    expect(e.publicMessage).toBe('Enter the new due date as YYYY-MM-DD.');
+  });
+
+  it('refuses a move to the date it already has', async () => {
+    const s = await scenario();
+    const current = (await period(s.periodId)).dueDate;
+    const e = await appErrorFrom(
+      moveReportDueDate(db, s.adminCtx, s.admin, s.periodId, current.slice(0, 10), 'No change.'),
+    );
+    expect(e.code).toBe('VALIDATION_FAILED');
+  });
+
+  it('refuses to move a settled deadline, and the database refuses too', async () => {
+    const s = await scenario({ dueDate: day('2026-01-31') });
+    await file(s);
+    await acceptReport(db, s.adminCtx, s.admin, s.periodId);
+
+    const e = await appErrorFrom(
+      moveReportDueDate(db, s.adminCtx, s.admin, s.periodId, future(30), 'Reopening it.'),
+    );
+    expect(e.code).toBe('CONFLICT');
+    expect(e.publicMessage).toContain('keeps the date it was held to');
+
+    /*
+     * AND NOT ONLY IN THE LIBRARY. A fixture writing the amendment correctly
+     * must still be refused on an accepted report, because the date is part of
+     * what the grantee was held to and an acceptance is already on the row.
+     */
+    await expect(forceDueDate(s.periodId, future(30))).rejects.toThrow(
+      /accepted or waived keeps the date it was held to/,
+    );
+  });
+
+  it('refuses a reviewer and an applicant', async () => {
+    const s = await scenario();
+    const reviewer = await appErrorFrom(
+      moveReportDueDate(db, s.adminCtx, reviewerSession(), s.periodId, future(30), 'Extended.'),
+    );
+    expect(reviewer.code).toBe('FORBIDDEN');
+    expect(reviewer.httpStatus).toBe(403);
+
+    const applicant = await appErrorFrom(
+      moveReportDueDate(
+        db, s.adminCtx, applicantSession(s.orgId), s.periodId, future(30), 'Extended.',
+      ),
+    );
+    expect(applicant.code).toBe('FORBIDDEN');
+    expect(await amendments(s.periodId)).toBe(0);
+  });
+
+  it('answers 404 for a report that is not there', async () => {
+    const s = await scenario();
+    const e = await appErrorFrom(
+      moveReportDueDate(db, s.adminCtx, s.admin, newId(), future(30), 'Extended.'),
+    );
+    expect(e.code).toBe('NOT_FOUND');
+    expect(e.httpStatus).toBe(404);
+  });
+
+  // -- what the database guarantees, whatever the caller does ---------------
+
+  it('refuses a bare UPDATE with no amendment at all', async () => {
+    const s = await scenario();
+    await expect(
+      db
+        .prepare(`UPDATE report_periods SET due_date = ?, updated_at = ? WHERE id = ?`)
+        .bind(future(30), nowIso(), s.periodId)
+        .run(),
+    ).rejects.toThrow(/changes through an amendment, not an update/);
+    // And the date did not move.
+    expect((await period(s.periodId)).dueDate).not.toBe(future(30));
+  });
+
+  it('refuses an amendment row stamped at a different instant', async () => {
+    const s = await scenario();
+    const was = (await period(s.periodId)).dueDate;
+    const stale = new Date(Date.now() - 60_000).toISOString();
+    const actor = await db
+      .prepare(`SELECT id FROM users WHERE role = 'admin' LIMIT 1`)
+      .first<{ id: string }>();
+
+    await db
+      .prepare(
+        `INSERT INTO report_period_amendments
+           (id, report_period_id, amended_at, amended_by, field_changed,
+            old_value, new_value, reason, created_at)
+         VALUES (?,?,?,?, 'due_date', ?,?, 'Stale.', ?)`,
+      )
+      .bind(newId(), s.periodId, stale, actor!.id, was, future(30), stale)
+      .run();
+
+    /*
+     * The amendment exists and describes exactly this move, but is stamped an
+     * minute earlier. Refused, so a row left over from an earlier extension
+     * cannot wave a later one through.
+     */
+    await expect(
+      db
+        .prepare(`UPDATE report_periods SET due_date = ?, updated_at = ? WHERE id = ?`)
+        .bind(future(30), nowIso(), s.periodId)
+        .run(),
+    ).rejects.toThrow(/changes through an amendment, not an update/);
+  });
+
+  it('will not let an amendment be rewritten or removed', async () => {
+    const s = await scenario();
+    await moveReportDueDate(db, s.adminCtx, s.admin, s.periodId, future(30), 'Extended.');
+    const row = (await dueDateHistory(db, s.periodId))[0]!;
+
+    await expect(
+      db
+        .prepare(`UPDATE report_period_amendments SET reason = 'Something else' WHERE id = ?`)
+        .bind(row.id)
+        .run(),
+    ).rejects.toThrow(/append-only/);
+    await expect(
+      db.prepare(`DELETE FROM report_period_amendments WHERE id = ?`).bind(row.id).run(),
+    ).rejects.toThrow(/append-only/);
+  });
+
+  it('will not record an amendment with no reason', async () => {
+    const s = await scenario();
+    const actor = await db
+      .prepare(`SELECT id FROM users WHERE role = 'admin' LIMIT 1`)
+      .first<{ id: string }>();
+    const now = nowIso();
+    await expect(
+      db
+        .prepare(
+          `INSERT INTO report_period_amendments
+             (id, report_period_id, amended_at, amended_by, field_changed,
+              old_value, new_value, reason, created_at)
+           VALUES (?,?,?,?, 'due_date', '2026-01-01','2026-02-01', '   ', ?)`,
+        )
+        .bind(newId(), s.periodId, now, actor!.id, now)
+        .run(),
+    ).rejects.toThrow(/CHECK constraint failed/);
   });
 });

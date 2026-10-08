@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { db, ctxFor, adminSession, reviewerSession, applicantSession, appErrorFrom } from './helpers';
+import { db, ctxFor, adminSession, reviewerSession, applicantSession, appErrorFrom, forceDueDatesForAward } from './helpers';
 import { seedProgram } from '../src/seed/seedProgram';
 import { INSPIRE_CHANGE } from '../src/seed/inspireChange';
 import { buildReportForm } from '../src/lib/reportForm';
@@ -331,10 +331,7 @@ describe('impact', () => {
     const a = await award(programId, 2_500_000, '2025');
     await generateReportPeriods(db, adminCtx, a);
     // Due in the new year, as a final report on a calendar-year grant is.
-    await db
-      .prepare(`UPDATE report_periods SET due_date = ? WHERE award_id = ?`)
-      .bind(day('2026-01-31'), a)
-      .run();
+    await forceDueDatesForAward(a, day('2026-01-31'));
     await acceptedReport(programId, a, 412);
 
     /*
