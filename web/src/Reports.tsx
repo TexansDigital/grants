@@ -11,17 +11,21 @@
  * into an email rather than a sequence of clicks described in prose.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { ReactElement } from 'react';
-import { ApiError, api } from './api';
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { ReactElement } from "react";
+import { ApiError, api } from "./api";
 import type {
-  BulkGenerateResult, ConfirmedReminderRun, PortfolioRow, ProgramRow,
-  ReminderPlan, StaffReport,
-} from './api';
-import { formatCents } from '../../src/lib/money';
-import { formatDay } from './reportWording';
-import { bandsFor } from './reportBands';
-import type { BandKey } from './reportBands';
+  BulkGenerateResult,
+  ConfirmedReminderRun,
+  PortfolioRow,
+  ProgramRow,
+  ReminderPlan,
+  StaffReport,
+} from "./api";
+import { formatCents } from "../../src/lib/money";
+import { formatDay } from "./reportWording";
+import { bandsFor } from "./reportBands";
+import type { BandKey } from "./reportBands";
 
 interface Props {
   programs: ProgramRow[];
@@ -32,24 +36,30 @@ interface Props {
 }
 
 const STATUSES = [
-  'scheduled',
-  'open',
-  'submitted',
-  'revisions_requested',
-  'accepted',
-  'waived',
+  "scheduled",
+  "open",
+  "submitted",
+  "revisions_requested",
+  "accepted",
+  "waived",
 ] as const;
 
 const STATUS_LABEL: Record<string, string> = {
-  scheduled: 'Scheduled',
-  open: 'Open',
-  submitted: 'Filed, awaiting us',
-  revisions_requested: 'Sent back',
-  accepted: 'Accepted',
-  waived: 'Waived',
+  scheduled: "Scheduled",
+  open: "Open",
+  submitted: "Filed, awaiting us",
+  revisions_requested: "Sent back",
+  accepted: "Accepted",
+  waived: "Waived",
 };
 
-export function Reports({ programs, isAdmin, query, onQueryChange, onNavigate }: Props): ReactElement {
+export function Reports({
+  programs,
+  isAdmin,
+  query,
+  onQueryChange,
+  onNavigate,
+}: Props): ReactElement {
   const params = useMemo(() => new URLSearchParams(query), [query]);
   const [rows, setRows] = useState<PortfolioRow[]>([]);
   const [total, setTotal] = useState(0);
@@ -66,7 +76,9 @@ export function Reports({ programs, isAdmin, query, onQueryChange, onNavigate }:
    * link. Reading it from the query also makes the report itself linkable --
    * which is what somebody forwarding "can you look at this one" needs.
    */
-  const [openId, setOpenId] = useState<string | null>(() => params.get('report'));
+  const [openId, setOpenId] = useState<string | null>(() =>
+    params.get("report"),
+  );
   const [reloadKey, setReloadKey] = useState(0);
   const detailRef = useRef<HTMLDivElement | null>(null);
   /* The row that opened the panel, so closing it puts focus back. */
@@ -75,14 +87,13 @@ export function Reports({ programs, isAdmin, query, onQueryChange, onNavigate }:
   // Follow the address when it changes under us -- a Back press, or a second
   // link arriving while this screen is already open.
   useEffect(() => {
-    setOpenId(params.get('report'));
+    setOpenId(params.get("report"));
   }, [params]);
-
 
   const set = useCallback(
     (key: string, value: string) => {
       const next = new URLSearchParams(params);
-      if (value === '') next.delete(key);
+      if (value === "") next.delete(key);
       else next.set(key, value);
       onQueryChange(next.toString());
     },
@@ -100,7 +111,7 @@ export function Reports({ programs, isAdmin, query, onQueryChange, onNavigate }:
   const openReport = useCallback(
     (id: string | null) => {
       setOpenId(id);
-      set('report', id ?? '');
+      set("report", id ?? "");
     },
     [set],
   );
@@ -122,8 +133,9 @@ export function Reports({ programs, isAdmin, query, onQueryChange, onNavigate }:
     if (!openId) return;
     const el = detailRef.current;
     if (!el) return;
-    const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
-    el.scrollIntoView({ block: 'start', behavior: reduce ? 'auto' : 'smooth' });
+    const reduce =
+      window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+    el.scrollIntoView({ block: "start", behavior: reduce ? "auto" : "smooth" });
   }, [openId]);
 
   /*
@@ -139,7 +151,9 @@ export function Reports({ programs, isAdmin, query, onQueryChange, onNavigate }:
     requestAnimationFrame(() => {
       const sel = id ? `[data-report-row="${id}"]` : null;
       const back = sel ? document.querySelector<HTMLElement>(sel) : null;
-      (back ?? document.querySelector<HTMLElement>('[data-route-heading]'))?.focus();
+      (
+        back ?? document.querySelector<HTMLElement>("[data-route-heading]")
+      )?.focus();
     });
   }, [openReport]);
 
@@ -154,8 +168,12 @@ export function Reports({ programs, isAdmin, query, onQueryChange, onNavigate }:
         setTotal(out.total);
       })
       .catch((e: unknown) => {
-        if (e instanceof DOMException && e.name === 'AbortError') return;
-        setError(e instanceof ApiError ? e : new ApiError(0, 'INTERNAL', String(e), null));
+        if (e instanceof DOMException && e.name === "AbortError") return;
+        setError(
+          e instanceof ApiError
+            ? e
+            : new ApiError(0, "INTERNAL", String(e), null),
+        );
       })
       .finally(() => {
         if (!controller.signal.aborted) setLoading(false);
@@ -173,7 +191,7 @@ export function Reports({ programs, isAdmin, query, onQueryChange, onNavigate }:
         </h2>
         <p className="meta" aria-live="polite">
           {loading
-            ? 'Loading…'
+            ? "Loading…"
             : /*
                * "13 of 118" is the only honest way to say a list is cut short,
                * and this one is: the endpoint pages and this screen does not.
@@ -181,7 +199,7 @@ export function Reports({ programs, isAdmin, query, onQueryChange, onNavigate }:
                * twice.
                */
               rows.length === total
-              ? `${total} obligation${total === 1 ? '' : 's'}`
+              ? `${total} obligation${total === 1 ? "" : "s"}`
               : `${rows.length} of ${total} obligations`}
         </p>
       </div>
@@ -201,8 +219,8 @@ export function Reports({ programs, isAdmin, query, onQueryChange, onNavigate }:
           <label htmlFor="reports-program">Program</label>
           <select
             id="reports-program"
-            value={params.get('program_id') ?? ''}
-            onChange={(e) => set('program_id', e.target.value)}
+            value={params.get("program_id") ?? ""}
+            onChange={(e) => set("program_id", e.target.value)}
           >
             <option value="">All programs</option>
             {programs.map((p) => (
@@ -216,8 +234,8 @@ export function Reports({ programs, isAdmin, query, onQueryChange, onNavigate }:
           <label htmlFor="reports-status">Status</label>
           <select
             id="reports-status"
-            value={params.get('status') ?? ''}
-            onChange={(e) => set('status', e.target.value)}
+            value={params.get("status") ?? ""}
+            onChange={(e) => set("status", e.target.value)}
           >
             <option value="">Any status</option>
             {STATUSES.map((s) => (
@@ -231,8 +249,8 @@ export function Reports({ programs, isAdmin, query, onQueryChange, onNavigate }:
           <label htmlFor="reports-overdue">Overdue only</label>
           <select
             id="reports-overdue"
-            value={params.get('overdue') ?? ''}
-            onChange={(e) => set('overdue', e.target.value)}
+            value={params.get("overdue") ?? ""}
+            onChange={(e) => set("overdue", e.target.value)}
           >
             <option value="">No</option>
             <option value="true">Yes</option>
@@ -254,7 +272,8 @@ export function Reports({ programs, isAdmin, query, onQueryChange, onNavigate }:
         <div className="table-scroll">
           <table className="banded">
             <caption className="sr-only">
-              Report obligations across every grant, grouped by who is holding them up
+              Report obligations across every grant, grouped by who is holding
+              them up
             </caption>
             <thead>
               <tr>
@@ -351,7 +370,12 @@ function ReportRow({
   return (
     <tr>
       <td>
-        <button type="button" className="rowlink" data-report-row={r.reportPeriodId} onClick={onOpen}>
+        <button
+          type="button"
+          className="rowlink"
+          data-report-row={r.reportPeriodId}
+          onClick={onOpen}
+        >
           {r.organizationName}
         </button>
         <span className="meta">{r.programName}</span>
@@ -359,12 +383,13 @@ function ReportRow({
       <td>{r.label}</td>
       <td>
         {formatDay(r.dueDate)}
-        {band === 'late' && (
+        {band === "late" && (
           <span className="meta strong" data-overdue="true">
-            {Math.abs(r.daysUntilDue)} day{Math.abs(r.daysUntilDue) === 1 ? '' : 's'} late
+            {Math.abs(r.daysUntilDue)} day
+            {Math.abs(r.daysUntilDue) === 1 ? "" : "s"} late
           </span>
         )}
-        {band === 'ours' && r.submittedAt && (
+        {band === "ours" && r.submittedAt && (
           <span className="meta">Filed {formatDay(r.submittedAt)}</span>
         )}
       </td>
@@ -384,7 +409,7 @@ function ReportRow({
           is the Foundation's problem, not the grantee's.
         */}
         {r.reminderCount === 0 ? (
-          band === 'late' ? (
+          band === "late" ? (
             <span className="meta strong" data-overdue="true">
               Not yet
             </span>
@@ -394,7 +419,9 @@ function ReportRow({
         ) : (
           <>
             {r.reminderCount}
-            {r.reminderLastSentAt && <span className="meta">{formatDay(r.reminderLastSentAt)}</span>}
+            {r.reminderLastSentAt && (
+              <span className="meta">{formatDay(r.reminderLastSentAt)}</span>
+            )}
           </>
         )}
       </td>
@@ -415,12 +442,17 @@ function ReportRow({
           {formatCents(r.awardedAmountCents)}
         </button>
       </td>
-      <td className="num">{r.fundsSpentCents === null ? '—' : formatCents(r.fundsSpentCents)}</td>
+      <td className="num">
+        {r.fundsSpentCents === null ? "—" : formatCents(r.fundsSpentCents)}
+      </td>
     </tr>
   );
 }
 
-type Decision = { kind: 'idle' } | { kind: 'working' } | { kind: 'error'; message: string };
+type Decision =
+  | { kind: "idle" }
+  | { kind: "working" }
+  | { kind: "error"; message: string };
 
 function ReportDetail({
   reportPeriodId,
@@ -435,8 +467,8 @@ function ReportDetail({
 }): ReactElement {
   const [data, setData] = useState<StaffReport | null>(null);
   const [error, setError] = useState<ApiError | null>(null);
-  const [feedback, setFeedback] = useState('');
-  const [decision, setDecision] = useState<Decision>({ kind: 'idle' });
+  const [feedback, setFeedback] = useState("");
+  const [decision, setDecision] = useState<Decision>({ kind: "idle" });
   const [fetching, setFetching] = useState<string | null>(null);
   const [downloadError, setDownloadError] = useState<string | null>(null);
   const panelRef = useRef<HTMLElement | null>(null);
@@ -478,7 +510,9 @@ function ReportDetail({
       window.location.assign(grant.url);
     } catch (e) {
       setDownloadError(
-        e instanceof ApiError ? e.message : 'That file could not be opened. Try again.',
+        e instanceof ApiError
+          ? e.message
+          : "That file could not be opened. Try again.",
       );
     } finally {
       setFetching(null);
@@ -491,22 +525,29 @@ function ReportDetail({
       .report(reportPeriodId, controller.signal)
       .then(setData)
       .catch((e: unknown) => {
-        if (e instanceof DOMException && e.name === 'AbortError') return;
-        setError(e instanceof ApiError ? e : new ApiError(0, 'INTERNAL', String(e), null));
+        if (e instanceof DOMException && e.name === "AbortError") return;
+        setError(
+          e instanceof ApiError
+            ? e
+            : new ApiError(0, "INTERNAL", String(e), null),
+        );
       });
     return () => controller.abort();
   }, [reportPeriodId]);
 
   const act = useCallback(
     async (fn: () => Promise<unknown>) => {
-      setDecision({ kind: 'working' });
+      setDecision({ kind: "working" });
       try {
         await fn();
         onDecided();
       } catch (e) {
         setDecision({
-          kind: 'error',
-          message: e instanceof ApiError ? e.message : 'That did not go through. Try again.',
+          kind: "error",
+          message:
+            e instanceof ApiError
+              ? e.message
+              : "That did not go through. Try again.",
         });
       }
     },
@@ -515,7 +556,12 @@ function ReportDetail({
 
   if (error) {
     return (
-      <section className="panel" ref={panelRef} tabIndex={-1} aria-label="Report">
+      <section
+        className="panel"
+        ref={panelRef}
+        tabIndex={-1}
+        aria-label="Report"
+      >
         <p className="banner danger" role="alert">
           {error.message}
         </p>
@@ -524,14 +570,19 @@ function ReportDetail({
   }
   if (!data) {
     return (
-      <section className="panel" ref={panelRef} tabIndex={-1} aria-label="Report">
+      <section
+        className="panel"
+        ref={panelRef}
+        tabIndex={-1}
+        aria-label="Report"
+      >
         <p className="meta">Loading…</p>
       </section>
     );
   }
 
   const latest = data.submissions[0] ?? null;
-  const canDecide = isAdmin && data.period.status === 'submitted';
+  const canDecide = isAdmin && data.period.status === "submitted";
   /*
    * A settled deadline does not move: `accepted` and `waived` are terminal and
    * their due date is part of what the grantee was held to. The server and
@@ -546,9 +597,13 @@ function ReportDetail({
    */
   const dueDateChanges = data.dueDateChanges ?? [];
   const canMove =
-    isAdmin && data.period.status !== 'accepted' && data.period.status !== 'waived';
+    isAdmin &&
+    data.period.status !== "accepted" &&
+    data.period.status !== "waived";
   const canWaive =
-    isAdmin && data.period.status !== 'accepted' && data.period.status !== 'waived';
+    isAdmin &&
+    data.period.status !== "accepted" &&
+    data.period.status !== "waived";
 
   return (
     <section
@@ -587,9 +642,9 @@ function ReportDetail({
             */}
             {dueDateChanges.length > 0 && (
               <span className="meta">
-                {' '}
-                moved {dueDateChanges.length}&times; from{' '}
-                {formatDay(dueDateChanges[0]!.oldValue ?? '')}
+                {" "}
+                moved {dueDateChanges.length}&times; from{" "}
+                {formatDay(dueDateChanges[0]!.oldValue ?? "")}
               </span>
             )}
           </dd>
@@ -620,7 +675,8 @@ function ReportDetail({
           {dueDateChanges.map((c) => (
             <li key={c.id}>
               <span className="who">
-                {formatDay(c.oldValue ?? '')} &rarr; {formatDay(c.newValue ?? '')}
+                {formatDay(c.oldValue ?? "")} &rarr;{" "}
+                {formatDay(c.newValue ?? "")}
               </span>
               <span className="what">
                 {c.reason} &mdash; {c.amendedBy}, {formatDay(c.amendedAt)}
@@ -638,11 +694,13 @@ function ReportDetail({
         <article key={s.id} className="review-section">
           <div className="review-head">
             <h4>
-              {i === 0 && data.submissions.length > 1 ? 'Latest attempt' : `Filed ${formatDay(s.submittedAt)}`}
+              {i === 0 && data.submissions.length > 1
+                ? "Latest attempt"
+                : `Filed ${formatDay(s.submittedAt)}`}
             </h4>
             <span className="meta">
-              {s.submittedBy ?? 'unknown'}
-              {s.acceptedAt && ' · accepted'}
+              {s.submittedBy ?? "unknown"}
+              {s.acceptedAt && " · accepted"}
             </span>
           </div>
 
@@ -653,19 +711,19 @@ function ReportDetail({
           )}
 
           {/*
-            * NUMBERS GET THE BIG TREATMENT. PROSE DOES NOT.
-            *
-            * Every metric used to render at display scale, so "Enriched
-            * wishes" and "Ethernet" were typeset like headline figures beside
-            * "500 people". The brand's stat tile is for an abbreviated figure
-            * under a short label; a sentence in that slot reads as a mistake,
-            * because it is one.
-            *
-            * Text metrics are not dropped -- they fall through to the list
-            * below with the narrative answers, which is where a sentence
-            * belongs.
-            */}
-          {s.metrics.some((m) => m.metricType !== 'text') && (
+           * NUMBERS GET THE BIG TREATMENT. PROSE DOES NOT.
+           *
+           * Every metric used to render at display scale, so "Enriched
+           * wishes" and "Ethernet" were typeset like headline figures beside
+           * "500 people". The brand's stat tile is for an abbreviated figure
+           * under a short label; a sentence in that slot reads as a mistake,
+           * because it is one.
+           *
+           * Text metrics are not dropped -- they fall through to the list
+           * below with the narrative answers, which is where a sentence
+           * belongs.
+           */}
+          {s.metrics.some((m) => m.metricType !== "text") && (
             /*
               ITS OWN BAND, with a rule under it.
               The tiles and the answer list ran into each other: measured in a
@@ -677,26 +735,26 @@ function ReportDetail({
             */
             <dl className="facts report-metrics">
               {s.metrics
-                .filter((m) => m.metricType !== 'text')
+                .filter((m) => m.metricType !== "text")
                 .map((m) => (
                   <div key={m.metricKey}>
                     <dt>{m.label}</dt>
-                    <dd className="bignum">{m.display ?? '—'}</dd>
+                    <dd className="bignum">{m.display ?? "—"}</dd>
                   </div>
                 ))}
             </dl>
           )}
 
           {/*
-            * Everything the grantee wrote, ONCE.
-            *
-            * A metric is also a form field, so every number appeared twice:
-            * as a tile above and again in this list. The tiles are the
-            * canonical rendering for the numeric ones, so those are dropped
-            * here. Metric-backed fields carry the METRIC_FIELD_PREFIX, which
-            * is how a field that came from a metric is told apart from one
-            * somebody wrote into the form.
-            */}
+           * Everything the grantee wrote, ONCE.
+           *
+           * A metric is also a form field, so every number appeared twice:
+           * as a tile above and again in this list. The tiles are the
+           * canonical rendering for the numeric ones, so those are dropped
+           * here. Metric-backed fields carry the METRIC_FIELD_PREFIX, which
+           * is how a field that came from a metric is told apart from one
+           * somebody wrote into the form.
+           */}
           {/*
             THE LABEL SITS ABOVE ITS ANSWER, not 405px to the left of it.
 
@@ -712,11 +770,11 @@ function ReportDetail({
           <dl className="report-answers">
             {s.answers
               .filter((a) => {
-                if (!a.fieldKey.startsWith('metric_')) return true;
-                const key = a.fieldKey.slice('metric_'.length);
+                if (!a.fieldKey.startsWith("metric_")) return true;
+                const key = a.fieldKey.slice("metric_".length);
                 const metric = s.metrics.find((m) => m.metricKey === key);
                 // Shown above as a tile, unless it is prose, which is not.
-                return !metric || metric.metricType === 'text';
+                return !metric || metric.metricType === "text";
               })
               .map((a) => (
                 <div className="report-answer" key={a.fieldKey}>
@@ -730,7 +788,7 @@ function ReportDetail({
                       label read as though it belonged to the PDF. CLAUDE.md:
                       "No dangling labels, no orphan bullets."
                     */}
-                    {a.display === null || a.display === '' ? (
+                    {a.display === null || a.display === "" ? (
                       <span className="meta">Not answered</span>
                     ) : (
                       a.display
@@ -753,14 +811,16 @@ function ReportDetail({
                 {s.attachments.map((f) => (
                   <li key={f.id}>
                     <span className="upload-name">{f.filename}</span>
-                    <span className="upload-size">{Math.round(f.sizeBytes / 1024)} KB</span>
+                    <span className="upload-size">
+                      {Math.round(f.sizeBytes / 1024)} KB
+                    </span>
                     <button
                       type="button"
                       className="btn secondary small"
                       disabled={fetching === f.id}
                       onClick={() => void download(f.id)}
                     >
-                      {fetching === f.id ? 'Preparing…' : 'Open'}
+                      {fetching === f.id ? "Preparing…" : "Open"}
                     </button>
                   </li>
                 ))}
@@ -775,7 +835,7 @@ function ReportDetail({
         </article>
       ))}
 
-      {decision.kind === 'error' && (
+      {decision.kind === "error" && (
         <p className="banner danger" role="alert">
           {decision.message}
         </p>
@@ -800,7 +860,9 @@ function ReportDetail({
           <div className="filter">
             {/* Deliberately above both buttons, and required by the server for
                 the send-back. A nonprofit cannot act on "changes requested". */}
-            <label htmlFor="report-feedback">What needs to change, if anything</label>
+            <label htmlFor="report-feedback">
+              What needs to change, if anything
+            </label>
             <textarea
               id="report-feedback"
               rows={3}
@@ -813,7 +875,7 @@ function ReportDetail({
             <button
               type="button"
               className="btn"
-              disabled={decision.kind === 'working'}
+              disabled={decision.kind === "working"}
               onClick={() => act(() => api.acceptReport(reportPeriodId))}
             >
               Accept this report
@@ -821,8 +883,12 @@ function ReportDetail({
             <button
               type="button"
               className="btn secondary"
-              disabled={decision.kind === 'working' || feedback.trim().length < 10}
-              onClick={() => act(() => api.requestReportRevisions(reportPeriodId, feedback))}
+              disabled={
+                decision.kind === "working" || feedback.trim().length < 10
+              }
+              onClick={() =>
+                act(() => api.requestReportRevisions(reportPeriodId, feedback))
+              }
             >
               Send back with these notes
             </button>
@@ -835,9 +901,9 @@ function ReportDetail({
           <button
             type="button"
             className="linklike danger"
-            disabled={decision.kind === 'working'}
+            disabled={decision.kind === "working"}
             onClick={() => {
-              const reason = window.prompt('Why is this report not required?');
+              const reason = window.prompt("Why is this report not required?");
               if (reason && reason.trim().length >= 5) {
                 void act(() => api.waiveReport(reportPeriodId, reason));
               }
@@ -871,25 +937,28 @@ function ReportDetail({
  */
 function GeneratePeriods(): ReactElement {
   const [state, setState] = useState<
-    | { kind: 'idle' }
-    | { kind: 'working' }
-    | { kind: 'done'; result: BulkGenerateResult }
-    | { kind: 'error'; message: string }
-  >({ kind: 'idle' });
+    | { kind: "idle" }
+    | { kind: "working" }
+    | { kind: "done"; result: BulkGenerateResult }
+    | { kind: "error"; message: string }
+  >({ kind: "idle" });
 
   const run = useCallback(async () => {
     const ok = window.confirm(
-      'Create report obligations for every grant that has none? ' +
-        'Grantees will be asked to file on the dates this works out.',
+      "Create report obligations for every grant that has none? " +
+        "Grantees will be asked to file on the dates this works out.",
     );
     if (!ok) return;
-    setState({ kind: 'working' });
+    setState({ kind: "working" });
     try {
-      setState({ kind: 'done', result: await api.generateReportPeriods() });
+      setState({ kind: "done", result: await api.generateReportPeriods() });
     } catch (e) {
       setState({
-        kind: 'error',
-        message: e instanceof ApiError ? e.message : 'That did not go through. Try again.',
+        kind: "error",
+        message:
+          e instanceof ApiError
+            ? e.message
+            : "That did not go through. Try again.",
       });
     }
   }, []);
@@ -900,28 +969,30 @@ function GeneratePeriods(): ReactElement {
         <button
           type="button"
           className="btn secondary small"
-          disabled={state.kind === 'working'}
+          disabled={state.kind === "working"}
           onClick={run}
         >
-          {state.kind === 'working' ? 'Working…' : 'Create missing report obligations'}
+          {state.kind === "working"
+            ? "Working…"
+            : "Create missing report obligations"}
         </button>
       </div>
 
-      {state.kind === 'error' && (
+      {state.kind === "error" && (
         <p className="banner danger" role="alert">
           {state.message}
         </p>
       )}
 
-      {state.kind === 'done' && (
+      {state.kind === "done" && (
         <div role="status">
           <p className="meta">
             {state.result.periodsCreated === 0
-              ? 'Nothing to do — every grant with a term already has its report obligations.'
+              ? "Nothing to do — every grant with a term already has its report obligations."
               : `Created ${state.result.periodsCreated} report obligation` +
-                `${state.result.periodsCreated === 1 ? '' : 's'} across ` +
+                `${state.result.periodsCreated === 1 ? "" : "s"} across ` +
                 `${state.result.generated.length} grant` +
-                `${state.result.generated.length === 1 ? '' : 's'}. Reload to see them.`}
+                `${state.result.generated.length === 1 ? "" : "s"}. Reload to see them.`}
           </p>
           {state.result.skipped.length > 0 && (
             <ul className="tally">
@@ -937,7 +1008,8 @@ function GeneratePeriods(): ReactElement {
           )}
           {state.result.more && (
             <p className="meta">
-              More grants still need obligations than one run will take. Press it again.
+              More grants still need obligations than one run will take. Press
+              it again.
             </p>
           )}
         </div>
@@ -974,11 +1046,11 @@ function MoveDueDate({
   onMoved: () => void;
 }): ReactElement {
   const [open, setOpen] = useState(false);
-  const [date, setDate] = useState('');
-  const [reason, setReason] = useState('');
+  const [date, setDate] = useState("");
+  const [reason, setReason] = useState("");
   const [state, setState] = useState<
-    { kind: 'idle' } | { kind: 'working' } | { kind: 'error'; message: string }
-  >({ kind: 'idle' });
+    { kind: "idle" } | { kind: "working" } | { kind: "error"; message: string }
+  >({ kind: "idle" });
 
   /*
    * Tomorrow, as the earliest selectable day. The server refuses today or
@@ -992,18 +1064,21 @@ function MoveDueDate({
   }, []);
 
   const submit = useCallback(async () => {
-    setState({ kind: 'working' });
+    setState({ kind: "working" });
     try {
       await api.moveReportDueDate(reportPeriodId, date, reason);
       setOpen(false);
-      setDate('');
-      setReason('');
-      setState({ kind: 'idle' });
+      setDate("");
+      setReason("");
+      setState({ kind: "idle" });
       onMoved();
     } catch (e) {
       setState({
-        kind: 'error',
-        message: e instanceof ApiError ? e.message : 'That did not go through. Try again.',
+        kind: "error",
+        message:
+          e instanceof ApiError
+            ? e.message
+            : "That did not go through. Try again.",
       });
     }
   }, [date, reason, reportPeriodId, onMoved]);
@@ -1012,7 +1087,11 @@ function MoveDueDate({
     return (
       <div className="panel-decide">
         <div className="actions">
-          <button type="button" className="btn secondary small" onClick={() => setOpen(true)}>
+          <button
+            type="button"
+            className="btn secondary small"
+            onClick={() => setOpen(true)}
+          >
             Change the due date
           </button>
         </div>
@@ -1046,7 +1125,7 @@ function MoveDueDate({
         />
       </div>
 
-      {state.kind === 'error' && (
+      {state.kind === "error" && (
         <p className="banner danger" role="alert">
           {state.message}
         </p>
@@ -1056,18 +1135,20 @@ function MoveDueDate({
         <button
           type="button"
           className="btn small"
-          disabled={state.kind === 'working' || !date || reason.trim().length < 5}
+          disabled={
+            state.kind === "working" || !date || reason.trim().length < 5
+          }
           onClick={() => void submit()}
         >
-          {state.kind === 'working' ? 'Saving\u2026' : 'Move the due date'}
+          {state.kind === "working" ? "Saving\u2026" : "Move the due date"}
         </button>
         <button
           type="button"
           className="btn secondary small"
-          disabled={state.kind === 'working'}
+          disabled={state.kind === "working"}
           onClick={() => {
             setOpen(false);
-            setState({ kind: 'idle' });
+            setState({ kind: "idle" });
           }}
         >
           Cancel
@@ -1098,22 +1179,25 @@ function MoveDueDate({
  */
 function TonightsReminders(): ReactElement {
   const [state, setState] = useState<
-    | { kind: 'idle' }
-    | { kind: 'loading' }
-    | { kind: 'plan'; plan: ReminderPlan }
-    | { kind: 'sending'; plan: ReminderPlan }
-    | { kind: 'sent'; run: ConfirmedReminderRun }
-    | { kind: 'error'; message: string }
-  >({ kind: 'idle' });
+    | { kind: "idle" }
+    | { kind: "loading" }
+    | { kind: "plan"; plan: ReminderPlan }
+    | { kind: "sending"; plan: ReminderPlan }
+    | { kind: "sent"; run: ConfirmedReminderRun }
+    | { kind: "error"; message: string }
+  >({ kind: "idle" });
 
   const load = useCallback(async () => {
-    setState({ kind: 'loading' });
+    setState({ kind: "loading" });
     try {
-      setState({ kind: 'plan', plan: await api.reminderPlan() });
+      setState({ kind: "plan", plan: await api.reminderPlan() });
     } catch (e) {
       setState({
-        kind: 'error',
-        message: e instanceof ApiError ? e.message : 'Could not work out tonight\u2019s reminders.',
+        kind: "error",
+        message:
+          e instanceof ApiError
+            ? e.message
+            : "Could not work out tonight\u2019s reminders.",
       });
     }
   }, []);
@@ -1121,24 +1205,31 @@ function TonightsReminders(): ReactElement {
   const send = useCallback(async (plan: ReminderPlan) => {
     const addresses = plan.wouldMail.flatMap((o) => o.recipients);
     const ok = window.confirm(
-      `Send ${plan.lettersWouldSend} reminder${plan.lettersWouldSend === 1 ? '' : 's'} now, to:\n\n` +
-        `${addresses.join('\n')}\n\n` +
-        'This cannot be unsent.',
+      `Send ${plan.lettersWouldSend} reminder${plan.lettersWouldSend === 1 ? "" : "s"} now, to:\n\n` +
+        `${addresses.join("\n")}\n\n` +
+        "This cannot be unsent.",
     );
     if (!ok) return;
-    setState({ kind: 'sending', plan });
+    setState({ kind: "sending", plan });
     try {
       // The count the panel DISPLAYED. See the note above.
-      setState({ kind: 'sent', run: await api.runRemindersNow(plan.lettersWouldSend) });
+      setState({
+        kind: "sent",
+        run: await api.runRemindersNow(plan.lettersWouldSend),
+      });
     } catch (e) {
       setState({
-        kind: 'error',
-        message: e instanceof ApiError ? e.message : 'That did not go through. Nothing was sent.',
+        kind: "error",
+        message:
+          e instanceof ApiError
+            ? e.message
+            : "That did not go through. Nothing was sent.",
       });
     }
   }, []);
 
-  const plan = state.kind === 'plan' || state.kind === 'sending' ? state.plan : null;
+  const plan =
+    state.kind === "plan" || state.kind === "sending" ? state.plan : null;
 
   return (
     <div className="panel-decide">
@@ -1146,26 +1237,28 @@ function TonightsReminders(): ReactElement {
         <button
           type="button"
           className="btn secondary small"
-          disabled={state.kind === 'loading' || state.kind === 'sending'}
+          disabled={state.kind === "loading" || state.kind === "sending"}
           onClick={load}
         >
-          {state.kind === 'loading' ? 'Working\u2026' : 'Show what tonight\u2019s reminders will do'}
+          {state.kind === "loading"
+            ? "Working\u2026"
+            : "Show what tonight\u2019s reminders will do"}
         </button>
         {plan && plan.lettersWouldSend > 0 && (
           <button
             type="button"
             className="btn small"
-            disabled={state.kind === 'sending'}
+            disabled={state.kind === "sending"}
             onClick={() => void send(plan)}
           >
-            {state.kind === 'sending'
-              ? 'Sending\u2026'
+            {state.kind === "sending"
+              ? "Sending\u2026"
               : `Send ${plan.lettersWouldSend} now`}
           </button>
         )}
       </div>
 
-      {state.kind === 'error' && (
+      {state.kind === "error" && (
         <p className="banner danger" role="alert">
           {state.message}
         </p>
@@ -1175,11 +1268,11 @@ function TonightsReminders(): ReactElement {
         <div role="status">
           <p className="meta">
             {plan.lettersWouldSend === 0
-              ? 'Nobody is due a reminder today. Reminders go out 14 days before a ' +
-                'report is due, 3 days before, on the day, and weekly once it is late.'
-              : `${plan.lettersWouldSend} letter${plan.lettersWouldSend === 1 ? '' : 's'} to ` +
-                `${plan.wouldMail.length} organization${plan.wouldMail.length === 1 ? '' : 's'}. ` +
-                'Nothing has been sent.'}
+              ? "Nobody is due a reminder today. Reminders go out 14 days before a " +
+                "report is due, 3 days before, on the day, and weekly once it is late."
+              : `${plan.lettersWouldSend} letter${plan.lettersWouldSend === 1 ? "" : "s"} to ` +
+                `${plan.wouldMail.length} organization${plan.wouldMail.length === 1 ? "" : "s"}. ` +
+                "Nothing has been sent."}
           </p>
 
           {/*
@@ -1189,8 +1282,8 @@ function TonightsReminders(): ReactElement {
           */}
           {!plan.transportConfigured && (
             <p className="banner" role="alert">
-              No email provider is configured, so nothing would actually arrive. Each
-              message would be recorded as suppressed.
+              No email provider is configured, so nothing would actually arrive.
+              Each message would be recorded as suppressed.
             </p>
           )}
 
@@ -1200,10 +1293,10 @@ function TonightsReminders(): ReactElement {
                 <li key={o.organizationId}>
                   <span className="who">{o.organizationName}</span>
                   <span className="what">
-                    {o.recipients.join(', ')} &mdash;{' '}
+                    {o.recipients.join(", ")} &mdash;{" "}
                     {o.reports
                       .map((r) => `${r.label} (${dueWording(r.daysUntilDue)})`)
-                      .join('; ')}
+                      .join("; ")}
                   </span>
                 </li>
               ))}
@@ -1225,7 +1318,8 @@ function TonightsReminders(): ReactElement {
                   <li key={o.organizationId}>
                     <span className="who">{o.organizationName}</span>
                     <span className="what">
-                      {o.reports.map((r) => r.label).join('; ')} &mdash; nobody can be reached
+                      {o.reports.map((r) => r.label).join("; ")} &mdash; nobody
+                      can be reached
                     </span>
                   </li>
                 ))}
@@ -1235,20 +1329,23 @@ function TonightsReminders(): ReactElement {
         </div>
       )}
 
-      {state.kind === 'sent' && (
+      {state.kind === "sent" && (
         <div role="status">
           <p className="meta">
-            {state.run.granteesMailed} sent, {state.run.suppressed} suppressed,{' '}
+            {state.run.granteesMailed} sent, {state.run.suppressed} suppressed,{" "}
             {state.run.failed} refused by the provider.
+            {state.run.deduplicated > 0 &&
+              ` ${state.run.deduplicated} had already been written to today, so nothing
+                was sent to them again.`}
             {state.run.withNoContact > 0 &&
               ` ${state.run.withNoContact} report${
-                state.run.withNoContact === 1 ? '' : 's'
+                state.run.withNoContact === 1 ? "" : "s"
               } had nobody to write to.`}
           </p>
           {state.run.failed > 0 && (
             <p className="banner danger" role="alert">
-              The provider refused {state.run.failed}. Those grantees were not reached &mdash;
-              Data health lists them under recorded errors.
+              The provider refused {state.run.failed}. Those grantees were not
+              reached &mdash; Data health lists them under recorded errors.
             </p>
           )}
         </div>
@@ -1264,8 +1361,9 @@ function TonightsReminders(): ReactElement {
  * report that is a fortnight overdue reads as a fortnight of slack.
  */
 function dueWording(daysUntilDue: number): string {
-  if (daysUntilDue === 0) return 'due today';
-  if (daysUntilDue > 0) return `due in ${daysUntilDue} day${daysUntilDue === 1 ? '' : 's'}`;
+  if (daysUntilDue === 0) return "due today";
+  if (daysUntilDue > 0)
+    return `due in ${daysUntilDue} day${daysUntilDue === 1 ? "" : "s"}`;
   const late = -daysUntilDue;
-  return `${late} day${late === 1 ? '' : 's'} late`;
+  return `${late} day${late === 1 ? "" : "s"} late`;
 }

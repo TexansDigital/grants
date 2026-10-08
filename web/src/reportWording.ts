@@ -1,5 +1,14 @@
 /**
- * How the grantee portal words a date and a deadline.
+ * How this application words a date and a deadline. Every surface, not one.
+ *
+ * NAMED FOR THE GRANTEE PORTAL, WHICH IS WHERE IT STARTED and is no longer
+ * where it is used -- twelve modules import it, most of them internal. That
+ * mattered: on 2026-10-08 four admin screens were found rendering a calendar
+ * day in the browser's time zone, a day early, and the likeliest reason is
+ * that somebody writing an admin screen had no reason to open a file called
+ * "reportWording". `npm run check:dates` now enumerates every date call site
+ * in `web/` so the next one cannot be written without classifying it, which
+ * is a better answer than a filename.
  *
  * A separate module from GranteeHome.tsx because these are pure functions with
  * tests, and the test suite runs under the Worker tsconfig, which has no JSX.
@@ -34,6 +43,34 @@ export function formatDay(iso: string | null): string {
     day: 'numeric',
     year: 'numeric',
   });
+}
+
+/**
+ * A CALENDAR DATE in a dense table: `10/31/2026`.
+ *
+ * Same UTC reasoning as formatDay, and the same bug if it is skipped. It
+ * exists because the internal tables are numeric and narrow, and the long
+ * form is three times the width -- so a correctness fix on one of those
+ * screens should not also be a layout change nobody asked for.
+ */
+export function formatDayShort(iso: string | null): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toLocaleDateString('en-US', { timeZone: 'UTC' });
+}
+
+/**
+ * An INSTANT in a dense table: `10/31/2026`, read in Central.
+ *
+ * The counterpart to formatDayShort. Central rather than the reader's zone,
+ * so two staff in different offices discussing a row see the same date.
+ */
+export function formatMomentShort(iso: string | null): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toLocaleDateString('en-US', { timeZone: 'America/Chicago' });
 }
 
 /**

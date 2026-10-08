@@ -25,6 +25,7 @@ import { ApiError, api } from './api';
 import type { AwardPaperwork as Paperwork } from './api';
 import { formatCents } from '../../src/lib/money';
 import { AwardAmendments } from './AwardAmendments';
+import { formatDayShort, formatMomentShort } from './reportWording';
 
 interface Props {
   awardId: string;
@@ -117,7 +118,7 @@ export function AwardPaperwork({ awardId }: Props): ReactElement | null {
         </p>
       ) : data.acceptedAt ? (
         <p className="meta">
-          Accepted {new Date(data.acceptedAt).toLocaleDateString('en-US')}.
+          Accepted {formatMomentShort(data.acceptedAt)}.
           {data.granteeResponseNote ? ` They said: ${data.granteeResponseNote}` : ''}
         </p>
       ) : (
@@ -157,7 +158,7 @@ export function AwardPaperwork({ awardId }: Props): ReactElement | null {
                 <th scope="row">{d.label}</th>
                 <td>
                   {d.receivedAt ? (
-                    new Date(d.receivedAt).toLocaleDateString('en-US')
+                    formatDayShort(d.receivedAt)
                   ) : (
                     <strong data-overdue="true">Not yet</strong>
                   )}

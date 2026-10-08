@@ -192,22 +192,6 @@ Owed, and named here rather than left in a commit message:
   for an executive at all. That is Phase 6.
 - **Neither the Grants nor the Organizations list paginates.** The 101st row
   is unreachable. Harmless at thirteen; it is on the clock against 2026.
-- **Two admin screens render a calendar day in the browser's time zone.**
-  The payment ledger shows a payment due `2026-11-01` as 10/31/2026, and the
-  award amendment trail shows a term starting `2026-01-01` as 12/31/2025 — the
-  wrong year, on the record of a change to a grant. Same class as the bug the
-  reminder letter had; the guard that catches it only looks at the Worker, not
-  at `web/`. Found 2026-10-08 by sweeping, not by anyone hitting it. Detail
-  under *Bugs found by sweeping* below.
-- **A deduplicated send is counted as a send.** `sendEmail` returns
-  `deduplicated: true` when an idempotency key has already been used that day
-  (`report_reminder:<user>:<day>`), and `runReportReminders` ignores the flag,
-  so pressing Send twice reports "N sent" the second time while nothing leaves
-  the building. Seen on 2026-10-08 and not yet fixed. `retention.ts` and
-  `decisionComms.ts` ignore the same flag and have not been checked. The
-  letters are not duplicated — that is the mechanism working — but the count
-  on the screen is a lie, and on a decline run that is a lie about whether
-  someone was told.
 - **`reportDue` computes the UTC day while the grantee portal uses Central.**
   A grantee opening the portal at 8pm Central on the due date sees "due
   today"; the server already counts it a day late, and under a `block`
@@ -689,59 +673,73 @@ A fourth sweep, on 2026-10-08, came out of the live email check:
   This is the second bug in that corner, which is why the guard enumerates
   rather than spot-checks. **And the sweep was too narrow** — see below.
 
-- **The same class is live in the admin screens, and the guard does not look
-  there.** `check:dates` walks `src/` — the Worker — and stops. `web/src/`
-  has a correct pair of helpers in `reportWording.ts` (`formatDay` formats in
-  UTC, `formatMoment` in Central, and its comment records this same bug being
-  found in the grantee portal earlier), and fourteen files, some of which
-  bypass them with a bare `new Date(x).toLocaleDateString('en-US')` and no
-  time zone at all — which renders in whatever zone the staff member's browser
-  is in. Two confirmed wrong, both on money and paperwork screens:
+- **The same class was live in the admin screens, and the guard did not look
+  there.** `check:dates` walked `src/` -- the Worker -- and stopped. The first
+  report of this said two screens were wrong. **It was four**, because that
+  report came from grepping and reading rather than from tracing what each
+  field stores:
 
-  - `PaymentLedger.tsx` renders `scheduledDate` and `paidDate`, which are
-    stored as `YYYY-MM-DD`. A payment due `2026-11-01` shows on the ledger as
-    **10/31/2026**.
-  - `AwardAmendments.tsx` renders the before and after of an amended
-    `term_start`, `term_end` or `announcement_date`. Those are stored by
-    `parseImportDate` as UTC midnight, so an award term starting
-    `2026-01-01` reads **12/31/2025** — the wrong year, in the audit trail of
-    a change to a grant.
+  - `PaymentLedger.tsx` -- `scheduled_date` and `paid_date` are `YYYY-MM-DD`.
+    A payment due `2026-11-01` showed on the ledger as **10/31/2026**.
+  - `AwardAmendments.tsx` -- the before and after of an amended `term_start`,
+    `term_end` or `announcement_date`, stored at UTC midnight. A term starting
+    `2026-01-01` read **12/31/2025**: the wrong YEAR, on the record of a
+    change to a grant.
+  - `Communications.tsx` -- `announcement_date`, **the embargo date**, and the
+    same field whose letter was fixed that morning. The screen the
+    administrator sets it on and the letter the grantee receives disagreed by
+    a day, which is the worst of the four: the embargo is a promise about when
+    a grantee may go public.
+  - `AwardPaperwork.tsx` -- the receipt date of a W-9, agreement or media
+    release, typed into a date field by an admin.
 
-  The rest of the fourteen are mostly real instants (`decidedAt`,
-  `declaredAt`, `purged_at`), which the bare call renders acceptably. Each
-  still has to be classified rather than assumed. **Not yet fixed**: it
-  touches a dozen components, so it is a phase, not a patch — and the guard
-  has to be extended to `web/` in the same change, or the next one lands the
-  same way.
+  Fixed, all four, by routing every date in `web/` through a named helper.
+  `formatDayShort` and `formatMomentShort` were added so the fix changed
+  correctness without changing a single column's width.
 
-- **A settled item re-opened in the document that settles it.** Claude put
-  *"add Resend to SPF"* into *Blocking right now* on 2026-10-08. Two hundred
-  lines below, under *"Finished and verified, so neither of us re-opens it"*,
-  this same file already said SPF and DKIM both pass and are aligned, and
-  `docs/BLOCKED-ON-YOU.md` recorded the DNS as done and verified on 20
-  September. The claim came from reading the root domain's SPF record and
-  reasoning from it, instead of reading either file or the message headers.
+  **The guard is a ban, not an enumeration**: `toLocaleDateString` may now be
+  called only inside `web/src/reportWording.ts`, which defines the helpers.
+  Eighteen modules in `web/` show a date and more arrive with every screen, so
+  listing them would be maintenance without judgement -- whereas what actually
+  separated the four wrong files from the fourteen right ones was that the
+  four formatted on the spot instead of calling something that had already
+  decided the question. Validated by reintroducing the payment-ledger bug and
+  confirming the check names that file.
 
-  Named the class: **a mechanism asserted from memory when the repository
-  already records the answer.** It has now happened five times in two days —
-  `--file --remote`, the missing `.dev.vars`, the navigation labels, the
-  `--json` rule, and this. Every one of them was written down somewhere in
-  this repository before it was asserted wrongly.
+  Worth recording why the right helpers went unused: they live in a module
+  called `reportWording.ts`, whose own first line said *"How the grantee
+  portal words a date"*. Twelve modules imported it, most of them internal. An
+  engineer writing an admin screen had no reason to open it. That line now
+  says what the module is.
 
-  Guarded by `npm run check:status`, which fails when *Blocking right now*
-  mentions a topic that *What is already done* has marked settled. Re-opening
-  a settled item now means moving it out of that section first, which is a
-  deliberate act rather than a lapse.
+- **A retracted claim outlived its retraction.** The `--json` rule was
+  disproved on 2026-10-08 and corrected in four places. A sweep afterwards
+  found it still asserted in four more: `scripts/apply-sql.mjs`,
+  `scripts/sql/remove-test-data.sql`, `scripts/buildMigrationApply.mjs` and
+  the file that generator emits. The commands in them ran; the explanation in
+  them was false, and `apply-sql.mjs` told the next reader that `--json` was
+  load-bearing in an argv array the command guard cannot see. All four now
+  say what is actually known: a 7403 is intermittent, the first response is a
+  retry, and `--json` only asks for machine-readable output.
 
-- **A retracted claim outlives its retraction.** The `--json` rule was
-  disproved on 2026-10-08 and corrected in four places. Swept the repository
-  for the claim afterwards and found it still asserted in two more:
-  `scripts/apply-sql.mjs` and `scripts/sql/remove-test-data.sql`, both of
-  which still tell a reader that `--json` is what makes a remote execute work,
-  plus the same reasoning carried into `scripts/sql/apply-0029.sql` and
-  `scripts/buildMigrationApply.mjs`. The commands in them still run; the
-  explanation in them is false. **Not yet corrected** — recorded here so the
-  next reader does not act on it.
+- **A count that said a letter was sent when none was.** `sendEmail` returns
+  the EARLIER message's row when an idempotency key repeats, carrying that
+  row's status -- `sent` for a letter that went out this morning -- and
+  `runReportReminders` read the status without reading `deduplicated`. Press
+  Send twice and the screen said "1 sent" with nothing in the mailbox, on the
+  one surface whose job is to say who has been contacted. The letters were
+  never duplicated; only the count was wrong, which is the more dangerous of
+  the two, because a duplicate letter is visible to somebody and a wrong count
+  is not.
+
+  Swept the two other modules that ignore the flag. `retention.ts` had the
+  same fault and is fixed. **`decisionComms.ts` does not**, and the sweep is
+  recorded rather than assumed: it refuses a second send with a CONFLICT
+  before `sendEmail` is reached, and its stamp carries
+  `WHERE decision_communicated_at IS NULL`, so even two simultaneous admins
+  cannot produce the false record. Guarded by a test that asserts the exact
+  counts on a second run and that `reminder_count` stays at one; confirmed to
+  fail against the unfixed code rather than merely to pass against the fixed.
 
 **And two tests written that day passed for the wrong reason.** A CSS check
 written as a vitest test imported the stylesheets with `?raw` — which resolves

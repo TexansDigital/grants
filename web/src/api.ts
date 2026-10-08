@@ -1,4 +1,4 @@
-import { request } from './http';
+import { request } from "./http";
 
 /**
  * The client's view of the staff API.
@@ -40,10 +40,10 @@ export interface FormSummary {
   program_id: string;
   form_key: string;
   stage_id: string | null;
-  kind: 'application' | 'report';
+  kind: "application" | "report";
   name: string;
   version: number;
-  status: 'draft' | 'published' | 'retired';
+  status: "draft" | "published" | "retired";
   published_at: string | null;
   program_name: string;
   stage_name: string | null;
@@ -82,7 +82,12 @@ export interface ApplicationDetail {
   application: ApplicationRow;
   organization: Record<string, unknown> | null;
   answers: Record<string, StoredAnswer>;
-  attachments: { id: string; filename: string; mime_type: string; size_bytes: number }[];
+  attachments: {
+    id: string;
+    filename: string;
+    mime_type: string;
+    size_bytes: number;
+  }[];
   /** The award made from this application, if one exists. Id and status only. */
   award: { id: string; status: string } | null;
 }
@@ -116,12 +121,17 @@ export interface RetentionScreen {
 /** One outstanding obligation. Mirrors TodoItem in src/lib/todo.ts. */
 export interface TodoItem {
   id: string;
-  kind: 'claim' | 'report_filed' | 'report_overdue' | 'report_due' | 'files_due';
+  kind:
+    | "claim"
+    | "report_filed"
+    | "report_overdue"
+    | "report_due"
+    | "files_due";
   title: string;
   detail: string;
   href: string | null;
   dueAt: string | null;
-  urgency: 'now' | 'soon' | 'watch';
+  urgency: "now" | "soon" | "watch";
 }
 
 export interface TodoScreen {
@@ -180,7 +190,7 @@ export interface AwardOverview {
   parent: RelatedAward | null;
   renewals: RelatedAward[];
   reports: PortfolioRow[];
-  whyNoReports: 'has_reports' | 'no_term_dates' | 'not_requested';
+  whyNoReports: "has_reports" | "no_term_dates" | "not_requested";
 }
 
 /** Mirrors the types in src/lib/organizationPage.ts. */
@@ -356,7 +366,12 @@ export interface ScoringSheet {
   applicationId: string;
   projectTitle: string | null;
   organizationName: string;
-  rubric: { id: string; name: string; version: number; maxTotalScoreBp: number };
+  rubric: {
+    id: string;
+    name: string;
+    version: number;
+    maxTotalScoreBp: number;
+  };
   criteria: ScoringCriterion[];
   totalSoFarBp: number;
   completedAt: string | null;
@@ -372,7 +387,11 @@ export interface AmendmentRow {
   amendedAt: string;
   /** The amending admin's email, or their id if the user row is gone. */
   amendedBy: string;
-  fieldChanged: 'awarded_amount_cents' | 'term_start' | 'term_end' | 'announcement_date';
+  fieldChanged:
+    | "awarded_amount_cents"
+    | "term_start"
+    | "term_end"
+    | "announcement_date";
   oldValue: string | null;
   newValue: string | null;
   reason: string;
@@ -391,7 +410,11 @@ export interface AwardPaperwork {
   acceptedAt: string | null;
   declinedByGranteeAt: string | null;
   granteeResponseNote: string | null;
-  documents: { key: 'w9' | 'agreement' | 'media_release'; label: string; receivedAt: string | null }[];
+  documents: {
+    key: "w9" | "agreement" | "media_release";
+    label: string;
+    receivedAt: string | null;
+  }[];
   outstanding: number;
   scheduledCents: number;
 }
@@ -436,7 +459,12 @@ export interface ReviewerTotal {
 /** Admin only. A reviewer must never receive this shape. */
 export interface ScoreSummary {
   applicationId: string;
-  rubric: { id: string; name: string; version: number; maxTotalScoreBp: number } | null;
+  rubric: {
+    id: string;
+    name: string;
+    version: number;
+    maxTotalScoreBp: number;
+  } | null;
   reviewers: ReviewerTotal[];
   meanCompletedBp: number | null;
   byCriterion: {
@@ -444,7 +472,11 @@ export interface ScoreSummary {
     label: string;
     maxScore: number;
     weightBp: number;
-    scores: { assignmentId: string; score: number | null; comment: string | null }[];
+    scores: {
+      assignmentId: string;
+      score: number | null;
+      comment: string | null;
+    }[];
   }[];
 }
 
@@ -632,9 +664,9 @@ export interface OrganizationHistory {
   summary: { total_applications: number; by_status: Record<string, number> };
 }
 
-export { ApiError } from './http';
+export { ApiError } from "./http";
 
-const get = <T,>(path: string, signal?: AbortSignal): Promise<T> =>
+const get = <T>(path: string, signal?: AbortSignal): Promise<T> =>
   request<T>(path, signal ? { signal } : {});
 
 export interface PortfolioRow {
@@ -686,7 +718,12 @@ export interface StaffReport {
     adminFeedback: string | null;
     acceptedAt: string | null;
     answers: { fieldKey: string; label: string; display: string | null }[];
-    metrics: { metricKey: string; label: string; display: string | null; metricType: string }[];
+    metrics: {
+      metricKey: string;
+      label: string;
+      display: string | null;
+      metricType: string;
+    }[];
     attachments: { id: string; filename: string; sizeBytes: number }[];
   }[];
   /**
@@ -722,7 +759,7 @@ export interface OrganizationSummary {
 }
 
 export interface DuplicateGroup {
-  reason: 'same_ein' | 'same_name';
+  reason: "same_ein" | "same_name";
   key: string;
   organizations: OrganizationSummary[];
 }
@@ -743,7 +780,7 @@ export interface MergePlan {
   ok: boolean;
 }
 
-export type Severity = 'blocking' | 'attention' | 'informational';
+export type Severity = "blocking" | "attention" | "informational";
 
 export interface HealthRow {
   id: string;
@@ -753,7 +790,13 @@ export interface HealthRow {
    * exhaustive branch would not have caught, because an unknown kind simply
    * fell through to printing a truncated id.
    */
-  kind: 'award' | 'organization' | 'application' | 'report_period' | 'attachment' | 'system';
+  kind:
+    | "award"
+    | "organization"
+    | "application"
+    | "report_period"
+    | "attachment"
+    | "system";
   title: string;
   detail: string;
   /** Integer cents, formatted at the display edge. Null when not about money. */
@@ -817,7 +860,7 @@ export interface ImportPreview {
     rows: {
       reference: string;
       organization: string;
-      kind: 'create' | 'skip' | 'blocked';
+      kind: "create" | "skip" | "blocked";
       reason: string | null;
       amountCents: number;
       createsOrganization: boolean;
@@ -834,19 +877,29 @@ export interface ImportRunResult {
 }
 
 export const api = {
-  session: (signal?: AbortSignal) => get<{ user: SessionUser }>('/api/session', signal),
-  programs: (signal?: AbortSignal) => get<{ programs: ProgramRow[] }>('/api/programs', signal),
-  cycles: (signal?: AbortSignal) => get<{ cycles: CycleRow[] }>('/api/cycles', signal),
-  forms: (signal?: AbortSignal) => get<{ forms: FormSummary[] }>('/api/forms', signal),
+  session: (signal?: AbortSignal) =>
+    get<{ user: SessionUser }>("/api/session", signal),
+  programs: (signal?: AbortSignal) =>
+    get<{ programs: ProgramRow[] }>("/api/programs", signal),
+  cycles: (signal?: AbortSignal) =>
+    get<{ cycles: CycleRow[] }>("/api/cycles", signal),
+  forms: (signal?: AbortSignal) =>
+    get<{ forms: FormSummary[] }>("/api/forms", signal),
   applications: (query: string, signal?: AbortSignal) =>
     get<{ applications: ApplicationRow[]; total: number }>(
-      `/api/applications${query ? `?${query}` : ''}`,
+      `/api/applications${query ? `?${query}` : ""}`,
       signal,
     ),
   application: (id: string, signal?: AbortSignal) =>
-    get<ApplicationDetail>(`/api/applications/${encodeURIComponent(id)}`, signal),
+    get<ApplicationDetail>(
+      `/api/applications/${encodeURIComponent(id)}`,
+      signal,
+    ),
   search: (q: string, signal?: AbortSignal) =>
-    get<{ query: string; hits: SearchHit[] }>(`/api/search?q=${encodeURIComponent(q)}`, signal),
+    get<{ query: string; hits: SearchHit[] }>(
+      `/api/search?q=${encodeURIComponent(q)}`,
+      signal,
+    ),
   history: (organizationId: string, signal?: AbortSignal) =>
     get<OrganizationHistory>(
       `/api/organizations/${encodeURIComponent(organizationId)}/history`,
@@ -859,26 +912,36 @@ export const api = {
    * row -- and because a GET would let a link prefetcher issue live download
    * credentials for every financial statement on a page nobody clicked.
    */
-  dashboard: (signal?: AbortSignal) => get<DashboardData>('/api/dashboard', signal),
+  dashboard: (signal?: AbortSignal) =>
+    get<DashboardData>("/api/dashboard", signal),
   payments: (awardId: string, signal?: AbortSignal) =>
-    get<AwardLedger>(`/api/awards/${encodeURIComponent(awardId)}/payments`, signal),
+    get<AwardLedger>(
+      `/api/awards/${encodeURIComponent(awardId)}/payments`,
+      signal,
+    ),
   schedulePayment: (
     awardId: string,
     body: { amountCents: number; scheduledDate: string; note?: string | null },
   ) =>
     request<PaymentRow>(`/api/awards/${encodeURIComponent(awardId)}/payments`, {
-      method: 'POST',
+      method: "POST",
       body,
     }),
-  recordPayment: (paymentId: string, body: { paidDate: string; referenceNumber: string }) =>
-    request<PaymentRow>(`/api/payments/${encodeURIComponent(paymentId)}/record`, {
-      method: 'POST',
-      body,
-    }),
+  recordPayment: (
+    paymentId: string,
+    body: { paidDate: string; referenceNumber: string },
+  ) =>
+    request<PaymentRow>(
+      `/api/payments/${encodeURIComponent(paymentId)}/record`,
+      {
+        method: "POST",
+        body,
+      },
+    ),
   cancelPayment: (paymentId: string, reason: string) =>
     request<{ paymentId: string; status: string }>(
       `/api/payments/${encodeURIComponent(paymentId)}/cancel`,
-      { method: 'POST', body: { reason } },
+      { method: "POST", body: { reason } },
     ),
   createAward: (
     applicationId: string,
@@ -891,7 +954,7 @@ export const api = {
   ) =>
     request<{ awardId: string; awardedAmountCents: number; status: string }>(
       `/api/applications/${encodeURIComponent(applicationId)}/award`,
-      { method: 'POST', body },
+      { method: "POST", body },
     ),
   cycleReviewers: (cycleId: string, signal?: AbortSignal) =>
     get<{ cycleId: string; reviewers: CycleReviewer[] }>(
@@ -899,14 +962,17 @@ export const api = {
       signal,
     ),
   previewScorecard: (cycleId: string, csv: string) =>
-    request<ScorecardPlan>(`/api/cycles/${encodeURIComponent(cycleId)}/scorecard/preview`, {
-      method: 'POST',
-      body: { csv },
-    }),
+    request<ScorecardPlan>(
+      `/api/cycles/${encodeURIComponent(cycleId)}/scorecard/preview`,
+      {
+        method: "POST",
+        body: { csv },
+      },
+    ),
   importScorecard: (cycleId: string, csv: string) =>
     request<{ applied: number; assignments: number }>(
       `/api/cycles/${encodeURIComponent(cycleId)}/scorecard/import`,
-      { method: 'POST', body: { csv } },
+      { method: "POST", body: { csv } },
     ),
   communications: (cycleId: string, signal?: AbortSignal) =>
     get<CommunicationQueue>(
@@ -916,25 +982,25 @@ export const api = {
   notifyAward: (applicationId: string) =>
     request<{ applicationId: string; communicatedAt: string }>(
       `/api/applications/${encodeURIComponent(applicationId)}/notify-award`,
-      { method: 'POST', body: {} },
+      { method: "POST", body: {} },
     ),
   notifyDeclineBatch: (cycleId: string, body: string[]) =>
     request<DeclineBatchResult>(
       `/api/cycles/${encodeURIComponent(cycleId)}/notify-declines`,
-      { method: 'POST', body: { body } },
+      { method: "POST", body: { body } },
     ),
   notifyDecline: (applicationId: string, body: string[]) =>
     request<{ applicationId: string; communicatedAt: string }>(
       `/api/applications/${encodeURIComponent(applicationId)}/notify-decline`,
-      { method: 'POST', body: { body } },
+      { method: "POST", body: { body } },
     ),
   markCommunicated: (applicationId: string, note: string) =>
     request<{ applicationId: string; communicatedAt: string }>(
       `/api/applications/${encodeURIComponent(applicationId)}/communicated`,
-      { method: 'POST', body: { note } },
+      { method: "POST", body: { note } },
     ),
   reviewQueue: (signal?: AbortSignal) =>
-    get<{ assignments: QueueRow[] }>('/api/review/queue', signal),
+    get<{ assignments: QueueRow[] }>("/api/review/queue", signal),
   scoringSheet: (assignmentId: string, signal?: AbortSignal) =>
     get<ScoringSheet>(
       `/api/review/assignments/${encodeURIComponent(assignmentId)}/sheet`,
@@ -942,21 +1008,25 @@ export const api = {
     ),
   saveScores: (
     assignmentId: string,
-    scores: { criterionId: string; score: number | null; comment: string | null }[],
+    scores: {
+      criterionId: string;
+      score: number | null;
+      comment: string | null;
+    }[],
   ) =>
     request<{ assignmentId: string; saved: number; totalSoFarBp: number }>(
       `/api/review/assignments/${encodeURIComponent(assignmentId)}/scores`,
-      { method: 'PATCH', body: { scores } },
+      { method: "PATCH", body: { scores } },
     ),
   completeReview: (assignmentId: string) =>
     request<{ assignmentId: string; completedAt: string; totalBp: number }>(
       `/api/review/assignments/${encodeURIComponent(assignmentId)}/complete`,
-      { method: 'POST', body: {} },
+      { method: "POST", body: {} },
     ),
   reopenReview: (assignmentId: string) =>
     request<{ assignmentId: string }>(
       `/api/review/assignments/${encodeURIComponent(assignmentId)}/reopen`,
-      { method: 'POST', body: {} },
+      { method: "POST", body: {} },
     ),
   amendments: (awardId: string, signal?: AbortSignal) =>
     get<{ amendments: AmendmentRow[] }>(
@@ -976,7 +1046,7 @@ export const api = {
   ) =>
     request<{ awardId: string; changed: string[]; updatedAt: string }>(
       `/api/awards/${encodeURIComponent(awardId)}`,
-      { method: 'PATCH', body },
+      { method: "PATCH", body },
     ),
   /*
    * Recording what a grant was for. A different endpoint from amendAward
@@ -996,21 +1066,27 @@ export const api = {
   ) =>
     request<{ awardId: string; changed: string[]; updatedAt: string }>(
       `/api/awards/${encodeURIComponent(awardId)}/subject`,
-      { method: 'PATCH', body },
+      { method: "PATCH", body },
     ),
   awardPaperwork: (awardId: string, signal?: AbortSignal) =>
-    get<AwardPaperwork>(`/api/awards/${encodeURIComponent(awardId)}/paperwork`, signal),
+    get<AwardPaperwork>(
+      `/api/awards/${encodeURIComponent(awardId)}/paperwork`,
+      signal,
+    ),
   recordAwardDocument: (
     awardId: string,
-    document: 'w9' | 'agreement' | 'media_release',
+    document: "w9" | "agreement" | "media_release",
     receivedAt: string | null,
   ) =>
     request<{ awardId: string; document: string; receivedAt: string | null }>(
       `/api/awards/${encodeURIComponent(awardId)}/document`,
-      { method: 'POST', body: { document, receivedAt } },
+      { method: "POST", body: { document, receivedAt } },
     ),
   reviewCoverage: (cycleId: string, signal?: AbortSignal) =>
-    get<Coverage>(`/api/cycles/${encodeURIComponent(cycleId)}/review-coverage`, signal),
+    get<Coverage>(
+      `/api/cycles/${encodeURIComponent(cycleId)}/review-coverage`,
+      signal,
+    ),
   cycleConflicts: (cycleId: string, signal?: AbortSignal) =>
     get<{ conflicts: OutstandingConflict[] }>(
       `/api/cycles/${encodeURIComponent(cycleId)}/conflicts`,
@@ -1019,20 +1095,28 @@ export const api = {
   clearConflict: (assignmentId: string, resolution: string) =>
     request<{ ok: true }>(
       `/api/review/assignments/${encodeURIComponent(assignmentId)}/conflict/clear`,
-      { method: 'POST', body: { resolution } },
+      { method: "POST", body: { resolution } },
     ),
   recuse: (assignmentId: string, reason: string) =>
     request<{ ok: true }>(
       `/api/review/assignments/${encodeURIComponent(assignmentId)}/recuse`,
-      { method: 'POST', body: { reason } },
+      { method: "POST", body: { reason } },
     ),
   scoreSummary: (applicationId: string, signal?: AbortSignal) =>
-    get<ScoreSummary>(`/api/applications/${encodeURIComponent(applicationId)}/scores`, signal),
-  decide: (applicationId: string, status: string, notes: string | null) =>
-    request<{ applicationId: string; status: string; decidedAt: string; decidedBy: string }>(
-      `/api/applications/${encodeURIComponent(applicationId)}/decision`,
-      { method: 'POST', body: { status, notes } },
+    get<ScoreSummary>(
+      `/api/applications/${encodeURIComponent(applicationId)}/scores`,
+      signal,
     ),
+  decide: (applicationId: string, status: string, notes: string | null) =>
+    request<{
+      applicationId: string;
+      status: string;
+      decidedAt: string;
+      decidedBy: string;
+    }>(`/api/applications/${encodeURIComponent(applicationId)}/decision`, {
+      method: "POST",
+      body: { status, notes },
+    }),
   rubrics: (programId: string, signal?: AbortSignal) =>
     get<{ rubrics: RubricRow[] }>(
       `/api/programs/${encodeURIComponent(programId)}/rubrics`,
@@ -1043,46 +1127,55 @@ export const api = {
   createRubric: (programId: string, name: string, rubricKey: string) =>
     request<{ rubricId: string; version: number }>(
       `/api/programs/${encodeURIComponent(programId)}/rubrics`,
-      { method: 'POST', body: { name, rubricKey } },
+      { method: "POST", body: { name, rubricKey } },
     ),
   saveRubricCriteria: (rubricId: string, criteria: CriterionInput[]) =>
     request<{ rubricId: string; criteria: number; maxTotalScoreBp: number }>(
       `/api/rubrics/${encodeURIComponent(rubricId)}/criteria`,
-      { method: 'PATCH', body: { criteria } },
+      { method: "PATCH", body: { criteria } },
     ),
   publishRubric: (rubricId: string) =>
-    request<{ rubricId: string; version: number; maxTotalScoreBp: number; retiredRubricId: string | null }>(
-      `/api/rubrics/${encodeURIComponent(rubricId)}/publish`,
-      { method: 'POST', body: {} },
-    ),
+    request<{
+      rubricId: string;
+      version: number;
+      maxTotalScoreBp: number;
+      retiredRubricId: string | null;
+    }>(`/api/rubrics/${encodeURIComponent(rubricId)}/publish`, {
+      method: "POST",
+      body: {},
+    }),
   newRubricVersion: (rubricId: string) =>
     request<{ rubricId: string; version: number }>(
       `/api/rubrics/${encodeURIComponent(rubricId)}/new-version`,
-      { method: 'POST', body: {} },
+      { method: "POST", body: {} },
     ),
   attachRubric: (cycleId: string, rubricId: string) =>
     request<{ cycleId: string; rubricId: string }>(
       `/api/cycles/${encodeURIComponent(cycleId)}/rubric`,
-      { method: 'POST', body: { rubricId } },
+      { method: "POST", body: { rubricId } },
     ),
-  retention: (signal?: AbortSignal) => get<RetentionScreen>('/api/retention', signal),
-  todo: (signal?: AbortSignal) => get<TodoScreen>('/api/todo', signal),
+  retention: (signal?: AbortSignal) =>
+    get<RetentionScreen>("/api/retention", signal),
+  todo: (signal?: AbortSignal) => get<TodoScreen>("/api/todo", signal),
   award: (id: string, signal?: AbortSignal) =>
     get<AwardOverview>(`/api/awards/${encodeURIComponent(id)}`, signal),
   impact: (year: number | null, signal?: AbortSignal) =>
-    get<Impact>(`/api/impact${year === null ? '' : `?year=${year}`}`, signal),
+    get<Impact>(`/api/impact${year === null ? "" : `?year=${year}`}`, signal),
   awards: (query: string, signal?: AbortSignal) =>
     get<{ rows: AwardListRow[]; total: number }>(
-      `/api/awards${query ? `?${query}` : ''}`,
+      `/api/awards${query ? `?${query}` : ""}`,
       signal,
     ),
   organizations: (query: string, signal?: AbortSignal) =>
     get<{ rows: OrganizationListRow[]; total: number }>(
-      `/api/organizations${query ? `?${query}` : ''}`,
+      `/api/organizations${query ? `?${query}` : ""}`,
       signal,
     ),
   organization: (id: string, signal?: AbortSignal) =>
-    get<OrganizationOverview>(`/api/organizations/${encodeURIComponent(id)}`, signal),
+    get<OrganizationOverview>(
+      `/api/organizations/${encodeURIComponent(id)}`,
+      signal,
+    ),
   /*
    * The public-listing flag. The endpoint has existed since the public grants
    * page shipped and nothing has ever called it, so an award could be made
@@ -1091,40 +1184,46 @@ export const api = {
   setAwardPublic: (id: string, isPublic: boolean) =>
     request<{ awardId: string; isPublic: boolean }>(
       `/api/awards/${encodeURIComponent(id)}/public`,
-      { method: 'POST', body: { isPublic } },
+      { method: "POST", body: { isPublic } },
     ),
   generateAwardReportPeriods: (id: string) =>
     request<{ created: number; skipped: string[] }>(
       `/api/awards/${encodeURIComponent(id)}/report-periods`,
-      { method: 'POST', body: {} },
+      { method: "POST", body: {} },
     ),
   holdAttachment: (attachmentId: string, until: string, reason: string) =>
     request<{ attachmentId: string; holdUntil: string }>(
       `/api/attachments/${encodeURIComponent(attachmentId)}/retention-hold`,
-      { method: 'POST', body: { until, reason } },
+      { method: "POST", body: { until, reason } },
     ),
   purgeAttachment: (attachmentId: string, reason: string) =>
     request<{ attachmentId: string; purgedAt: string }>(
       `/api/attachments/${encodeURIComponent(attachmentId)}/purge`,
-      { method: 'POST', body: { reason } },
+      { method: "POST", body: { reason } },
     ),
   downloadUrl: (attachmentId: string) =>
     request<DownloadGrant>(
       `/api/attachments/${encodeURIComponent(attachmentId)}/download-url`,
-      { method: 'POST', body: {} },
+      { method: "POST", body: {} },
     ),
   requestUpdates: (
     programId: string,
-    body: { awardedFrom: string; awardedTo: string; label: string; dueDate: string; dryRun: boolean },
+    body: {
+      awardedFrom: string;
+      awardedTo: string;
+      label: string;
+      dueDate: string;
+      dryRun: boolean;
+    },
   ) =>
     request<RequestUpdatesResult>(
       `/api/programs/${encodeURIComponent(programId)}/request-updates`,
-      { method: 'POST', body },
+      { method: "POST", body },
     ),
   buildReportForm: (programId: string) =>
     request<{ formDefinitionId: string; version: number; fieldCount: number }>(
       `/api/programs/${encodeURIComponent(programId)}/report-form`,
-      { method: 'POST', body: {} },
+      { method: "POST", body: {} },
     ),
   publishForm: (formDefinitionId: string) =>
     request<{
@@ -1133,7 +1232,7 @@ export const api = {
       retiredFormDefinitionId: string | null;
       periodsAttached: number;
     }>(`/api/forms/${encodeURIComponent(formDefinitionId)}/publish`, {
-      method: 'POST',
+      method: "POST",
       body: {},
     }),
   /*
@@ -1151,9 +1250,10 @@ export const api = {
     name: string;
     description?: string;
     fiscal_year?: number;
-    compliance_policy?: 'block' | 'warn' | 'ignore';
+    compliance_policy?: "block" | "warn" | "ignore";
     total_budget_cents?: number;
-  }) => request<{ program: ProgramRow }>('/api/programs', { method: 'POST', body }),
+  }) =>
+    request<{ program: ProgramRow }>("/api/programs", { method: "POST", body }),
 
   createCycle: (
     programId: string,
@@ -1165,15 +1265,27 @@ export const api = {
       draft_grace_hours?: number;
     },
   ) =>
-    request<{ cycle: CycleRow }>(`/api/programs/${encodeURIComponent(programId)}/cycles`, {
-      method: 'POST',
-      body,
-    }),
+    request<{ cycle: CycleRow }>(
+      `/api/programs/${encodeURIComponent(programId)}/cycles`,
+      {
+        method: "POST",
+        body,
+      },
+    ),
 
   updateCycle: (
     id: string,
-    body: Partial<{ name: string; opens_at: string; closes_at: string; draft_grace_hours: number }>,
-  ) => request<{ cycle: CycleRow }>(`/api/cycles/${encodeURIComponent(id)}`, { method: 'PATCH', body }),
+    body: Partial<{
+      name: string;
+      opens_at: string;
+      closes_at: string;
+      draft_grace_hours: number;
+    }>,
+  ) =>
+    request<{ cycle: CycleRow }>(`/api/cycles/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body,
+    }),
 
   /**
    * Open or close a cycle.
@@ -1183,7 +1295,7 @@ export const api = {
    * does not have to model the state machine -- only to make the press
    * deliberate.
    */
-  setCycleStatus: (id: string, next: 'open' | 'closed') => {
+  setCycleStatus: (id: string, next: "open" | "closed") => {
     /*
      * THE STATUS AND THE ENDPOINT ARE DIFFERENT VOCABULARIES.
      *
@@ -1203,23 +1315,34 @@ export const api = {
      */
     const cycle = encodeURIComponent(id);
     const url =
-      next === 'closed' ? `/api/cycles/${cycle}/close` : `/api/cycles/${cycle}/open`;
-    return request<{ cycle: CycleRow }>(url, { method: 'POST', body: {} });
+      next === "closed"
+        ? `/api/cycles/${cycle}/close`
+        : `/api/cycles/${cycle}/open`;
+    return request<{ cycle: CycleRow }>(url, { method: "POST", body: {} });
   },
 
   previewAwardImport: (csv: string) =>
-    request<ImportPreview>('/api/awards/import/preview', { method: 'POST', body: { csv } }),
+    request<ImportPreview>("/api/awards/import/preview", {
+      method: "POST",
+      body: { csv },
+    }),
   runAwardImport: (csv: string) =>
-    request<ImportRunResult>('/api/awards/import', { method: 'POST', body: { csv } }),
+    request<ImportRunResult>("/api/awards/import", {
+      method: "POST",
+      body: { csv },
+    }),
   generateReportPeriods: () =>
-    request<BulkGenerateResult>('/api/report-periods/generate', { method: 'POST', body: {} }),
+    request<BulkGenerateResult>("/api/report-periods/generate", {
+      method: "POST",
+      body: {},
+    }),
   /*
    * A GET, matching the server: the plan writes nothing. See
    * src/lib/reportReminders.ts for why it is a separate function there rather
    * than a flag on the run.
    */
   reminderPlan: (signal?: AbortSignal) =>
-    get<ReminderPlan>('/api/report-reminders/plan', signal),
+    get<ReminderPlan>("/api/report-reminders/plan", signal),
   /*
    * `expectLetters` is the count the panel was SHOWN. The server refuses the
    * run if the plan has changed since, and sends nothing. The panel must pass
@@ -1227,28 +1350,37 @@ export const api = {
    * would defeat the entire check.
    */
   runRemindersNow: (expectLetters: number) =>
-    request<ConfirmedReminderRun>('/api/report-reminders/run', {
-      method: 'POST',
+    request<ConfirmedReminderRun>("/api/report-reminders/run", {
+      method: "POST",
       body: { expectLetters },
     }),
-  dataHealth: (signal?: AbortSignal) => get<HealthReport>('/api/data-health', signal),
-  storage: (signal?: AbortSignal) => get<StorageUsage>('/api/storage', signal),
+  dataHealth: (signal?: AbortSignal) =>
+    get<HealthReport>("/api/data-health", signal),
+  storage: (signal?: AbortSignal) => get<StorageUsage>("/api/storage", signal),
   searchAwards: (q: string, signal?: AbortSignal) =>
-    get<{ awards: AwardChoice[] }>(`/api/awards/search?q=${encodeURIComponent(q)}`, signal),
-  granteeClaims: (signal?: AbortSignal) =>
-    get<{ claims: GranteeClaimRow[] }>('/api/grantee-claims', signal),
-  approveGranteeClaim: (id: string, awardId: string, note: string | null) =>
-    request<{ claimId: string; userId: string; awardId: string; periodsCreated: number }>(
-      `/api/grantee-claims/${encodeURIComponent(id)}/approve`,
-      { method: 'POST', body: { awardId, note } },
+    get<{ awards: AwardChoice[] }>(
+      `/api/awards/search?q=${encodeURIComponent(q)}`,
+      signal,
     ),
+  granteeClaims: (signal?: AbortSignal) =>
+    get<{ claims: GranteeClaimRow[] }>("/api/grantee-claims", signal),
+  approveGranteeClaim: (id: string, awardId: string, note: string | null) =>
+    request<{
+      claimId: string;
+      userId: string;
+      awardId: string;
+      periodsCreated: number;
+    }>(`/api/grantee-claims/${encodeURIComponent(id)}/approve`, {
+      method: "POST",
+      body: { awardId, note },
+    }),
   rejectGranteeClaim: (id: string, note: string) =>
     request<{ claimId: string }>(
       `/api/grantee-claims/${encodeURIComponent(id)}/reject`,
-      { method: 'POST', body: { note } },
+      { method: "POST", body: { note } },
     ),
   duplicates: (signal?: AbortSignal) =>
-    get<{ groups: DuplicateGroup[] }>('/api/organizations/duplicates', signal),
+    get<{ groups: DuplicateGroup[] }>("/api/organizations/duplicates", signal),
   mergePreview: (duplicateId: string, into: string, signal?: AbortSignal) =>
     get<MergePlan>(
       `/api/organizations/${encodeURIComponent(duplicateId)}/merge-preview` +
@@ -1258,11 +1390,11 @@ export const api = {
   merge: (duplicateId: string, into: string) =>
     request<{ survivorId: string; mergedId: string }>(
       `/api/organizations/${encodeURIComponent(duplicateId)}/merge`,
-      { method: 'POST', body: { into } },
+      { method: "POST", body: { into } },
     ),
   reports: (query: string, signal?: AbortSignal) =>
     get<{ rows: PortfolioRow[]; total: number }>(
-      `/api/reports${query ? `?${query}` : ''}`,
+      `/api/reports${query ? `?${query}` : ""}`,
       signal,
     ),
   report: (id: string, signal?: AbortSignal) =>
@@ -1270,12 +1402,12 @@ export const api = {
   acceptReport: (id: string) =>
     request<{ reportSubmissionId: string; acceptedAt: string }>(
       `/api/reports/${encodeURIComponent(id)}/accept`,
-      { method: 'POST', body: {} },
+      { method: "POST", body: {} },
     ),
   requestReportRevisions: (id: string, feedback: string) =>
     request<{ reportSubmissionId: string }>(
       `/api/reports/${encodeURIComponent(id)}/revisions`,
-      { method: 'POST', body: { feedback } },
+      { method: "POST", body: { feedback } },
     ),
   /*
    * Moving a deadline. The reason is not optional and the server refuses a
@@ -1289,16 +1421,19 @@ export const api = {
       dueDate: string;
       amendedAt: string;
     }>(`/api/reports/${encodeURIComponent(id)}/due-date`, {
-      method: 'POST',
+      method: "POST",
       body: { dueDate, reason },
     }),
   waiveReport: (id: string, reason: string) =>
-    request<{ waived: boolean }>(`/api/reports/${encodeURIComponent(id)}/waive`, {
-      method: 'POST',
-      body: { reason },
-    }),
+    request<{ waived: boolean }>(
+      `/api/reports/${encodeURIComponent(id)}/waive`,
+      {
+        method: "POST",
+        body: { reason },
+      },
+    ),
   form: (id: string, signal?: AbortSignal) =>
-    get<{ form: import('../../src/lib/forms').FormDefinition }>(
+    get<{ form: import("../../src/lib/forms").FormDefinition }>(
       `/api/forms/${encodeURIComponent(id)}`,
       signal,
     ),
@@ -1360,6 +1495,8 @@ export interface ConfirmedReminderRun {
   granteesMailed: number;
   messagesRecorded: number;
   suppressed: number;
+  /** Already written to today by an earlier run. Nothing was sent for these. */
+  deduplicated: number;
   failed: number;
   withNoContact: number;
   plan: ReminderPlan;

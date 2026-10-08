@@ -101,11 +101,17 @@ batches.forEach((batch, i) => {
         'wrangler', 'd1', 'execute', db,
         remote ? '--remote' : '--local',
         '--yes',
-        // `--json` is required on a remote execute: without it the /query
-        // endpoint answers 7403, "The given account is not valid or is not
-        // authorized to access this service", which is not an account problem.
-        // `npm run check:commands` enforces this for commands written on a
-        // line; it cannot see an argv array like this one, so it is by hand.
+        /*
+         * `--json` is machine-readable output and nothing more. It was once
+         * believed to be what made a remote execute work -- 7403, "The given
+         * account is not valid or is not authorized to access this service",
+         * appeared to follow its absence across a handful of runs. On
+         * 2026-10-08 a byte-identical command WITH `--json` failed with the
+         * same 7403 and then succeeded on an immediate retry, which disproved
+         * it. The 7403 is intermittent; the first response to one is a retry.
+         * Kept here because parsing the output is easier, not because
+         * anything depends on it.
+         */
         '--json',
         '--command', batch.join('\n'),
       ],

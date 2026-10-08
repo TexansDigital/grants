@@ -22,6 +22,7 @@ import { useCallback, useEffect, useState } from 'react';
 import type { ReactElement } from 'react';
 import { ApiError, api } from './api';
 import type { Coverage, OutstandingConflict } from './api';
+import { formatMomentShort } from './reportWording';
 
 interface Props {
   cycleId: string;
@@ -188,7 +189,7 @@ export function ReviewCoverage({ cycleId, cycleName }: Props): ReactElement {
                       {k.projectTitle && <span className="meta"> — {k.projectTitle}</span>}
                     </th>
                     <td>{k.reviewerEmail}</td>
-                    <td>{new Date(k.declaredAt).toLocaleDateString('en-US')}</td>
+                    <td>{formatMomentShort(k.declaredAt)}</td>
                     <td>{k.note ?? '—'}</td>
                     <td className="row-actions">
                       <button

@@ -22,6 +22,7 @@ import type { ReactElement } from 'react';
 import { ApiError, api } from './api';
 import type { CommunicationQueue, PendingRow, DeclineBatchResult } from './api';
 import { formatCents } from '../../src/lib/money';
+import { formatDayShort } from './reportWording';
 
 interface Props {
   cycleId: string;
@@ -251,7 +252,7 @@ export function Communications({ cycleId, onBack }: Props): ReactElement {
                     </td>
                     <td>
                       {r.announcementDate
-                        ? new Date(r.announcementDate).toLocaleDateString('en-US')
+                        ? formatDayShort(r.announcementDate)
                         : '—'}
                     </td>
                     <td className="row-actions">

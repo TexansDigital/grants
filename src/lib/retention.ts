@@ -575,6 +575,20 @@ async function sendRetentionNotices(
       },
       transport,
     );
+    /*
+     * A DEDUPLICATED OUTCOME IS NOT A NOTICE. It carries the EARLIER
+     * message's status -- `sent` for one that went out this morning -- so
+     * counting on status alone credits this run with a letter an earlier run
+     * sent. Same fault as the reminder count in reportReminders.ts, found by
+     * sweeping for it after that one.
+     *
+     * Lower stakes here, because `suppressed` is deliberately counted (see
+     * `stampNoticed`'s caller: this stamp is bookkeeping about a file, not a
+     * claim that a person was told). The number is still reported, and a
+     * number that says a notice went out today when none did is wrong whoever
+     * reads it.
+     */
+    if (outcome.deduplicated) continue;
     if (outcome.status === 'sent' || outcome.status === 'suppressed') sent += 1;
   }
   return sent;

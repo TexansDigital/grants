@@ -5,9 +5,12 @@
 --   npx wrangler d1 execute steward-production --remote --env production --yes \
 --     --json --command="$(cat scripts/sql/remove-test-data.sql)"
 --
--- `--json` is not decoration. Without it the /query endpoint answers
--- `The given account is not valid or is not authorized to access this service
--- [code: 7403]`, which reads like an account problem and is not one.
+-- `--json` only asks for machine-readable output. It was once believed to be
+-- what made a remote execute work -- 7403, `The given account is not valid or
+-- is not authorized to access this service`, seemed to follow its absence. On
+-- 2026-10-08 the same command WITH `--json` failed and then succeeded on an
+-- immediate retry, which disproved it. A 7403 here is intermittent and the
+-- first response is to run it again.
 --
 -- `--file --remote` switches to D1's bulk IMPORT endpoint, which refuses an
 -- OAuth login with `Authentication error [code: 10000]`. That is the endpoint,

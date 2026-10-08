@@ -26,6 +26,7 @@ import type { ReactElement } from 'react';
 import { ApiError, api } from './api';
 import type { AmendmentRow, AwardPaperwork } from './api';
 import { formatCents, parseCurrencyToCents, MoneyParseError } from '../../src/lib/money';
+import { formatDayShort, formatMomentShort } from './reportWording';
 
 interface Props {
   awardId: string;
@@ -53,7 +54,7 @@ function showValue(row: AmendmentRow, value: string | null): string {
     return Number.isSafeInteger(cents) && cents >= 0 ? formatCents(cents) : value;
   }
   const parsed = Date.parse(value);
-  return Number.isFinite(parsed) ? new Date(parsed).toLocaleDateString('en-US') : value;
+  return Number.isFinite(parsed) ? formatDayShort(value) : value;
 }
 
 export function AwardAmendments({ awardId, award, onAmended }: Props): ReactElement {
@@ -226,7 +227,7 @@ export function AwardAmendments({ awardId, award, onAmended }: Props): ReactElem
             <tbody>
               {history.map((h) => (
                 <tr key={h.id}>
-                  <th scope="row">{new Date(h.amendedAt).toLocaleDateString('en-US')}</th>
+                  <th scope="row">{formatMomentShort(h.amendedAt)}</th>
                   <td>{FIELD_LABEL[h.fieldChanged] ?? h.fieldChanged}</td>
                   <td>{showValue(h, h.oldValue)}</td>
                   <td>

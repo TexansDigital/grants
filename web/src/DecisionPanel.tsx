@@ -24,6 +24,7 @@ import { formatCents, parseCurrencyToCents, MoneyParseError } from '../../src/li
 import { PaymentLedger } from './PaymentLedger';
 import { AwardPaperwork } from './AwardPaperwork';
 import type { ScoreSummary } from './api';
+import { formatMomentShort } from './reportWording';
 
 const WEIGHT_ONE_BP = 10000;
 
@@ -271,7 +272,7 @@ export function DecisionPanel({
       {decidedAt ? (
         <>
           <p className="meta">
-            Decided on {new Date(decidedAt).toLocaleDateString('en-US')}. A decision is recorded
+            Decided on {formatMomentShort(decidedAt)}. A decision is recorded
             once; changing one is not something this screen can do.
           </p>
           {decidedStatus === 'awarded' && (

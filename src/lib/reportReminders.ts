@@ -38,12 +38,12 @@
  *      starts.
  */
 
-import type { Env, RequestContext, Session } from '../types';
-import { nowIso, formatCalendarDay } from './time';
-import { sendEmail, transportFor } from './email';
-import { REPORT_REMINDER, type ReminderLine } from './emailTemplates';
-import { daysUntil, GRANTEE_OWES } from './reportDue';
-import { AppError, logError } from './errors';
+import type { Env, RequestContext, Session } from "../types";
+import { nowIso, formatCalendarDay } from "./time";
+import { sendEmail, transportFor } from "./email";
+import { REPORT_REMINDER, type ReminderLine } from "./emailTemplates";
+import { daysUntil, GRANTEE_OWES } from "./reportDue";
+import { AppError, logError } from "./errors";
 
 /**
  * The ladder, in days before the due date.
@@ -110,6 +110,21 @@ export interface ReminderRun {
    * from a grantee's mail server was invisible to everybody.
    */
   failed: number;
+  /**
+   * Already written to today, so this run did nothing for them.
+   *
+   * `sendEmail` returns the EARLIER message's row when an idempotency key has
+   * been used before -- and its status, which for a letter that went out this
+   * morning is `sent`. So a second run read `status === 'sent'` and counted a
+   * letter that it had not sent. Pressing Send twice reported "2 sent" with
+   * nothing leaving the building, on the one screen whose job is to say who
+   * has been contacted.
+   *
+   * The letters were never duplicated; the unique index saw to that. Only the
+   * count was wrong, which is the more dangerous of the two, because a
+   * duplicate letter is visible to somebody and a wrong count is not.
+   */
+  deduplicated: number;
   /** Report periods with nobody to write to. The reason to look at the desk. */
   withNoContact: number;
 }
@@ -122,7 +137,8 @@ export interface ReminderRun {
  */
 export function isReminderDay(dueIso: string, nowIsoStr: string): boolean {
   const days = daysUntil(dueIso, nowIsoStr);
-  if (days >= 0) return (REMIND_BEFORE_DAYS as readonly number[]).includes(days);
+  if (days >= 0)
+    return (REMIND_BEFORE_DAYS as readonly number[]).includes(days);
   const late = -days;
   if (late > OVERDUE_STOP_AFTER_DAYS) return false;
   /*
@@ -150,8 +166,11 @@ export function isReminderDay(dueIso: string, nowIsoStr: string): boolean {
  *   - A PERIOD WITH NO FORM. Nothing to fill in yet; that is the Foundation's
  *     work, not the grantee's.
  */
-export async function reportsOwed(db: D1Database, nowIsoStr: string): Promise<DueReport[]> {
-  const owed = GRANTEE_OWES.map(() => '?').join(',');
+export async function reportsOwed(
+  db: D1Database,
+  nowIsoStr: string,
+): Promise<DueReport[]> {
+  const owed = GRANTEE_OWES.map(() => "?").join(",");
   const { results } = await db
     .prepare(
       `SELECT rp.id AS reportPeriodId, rp.award_id AS awardId, rp.label,
@@ -188,7 +207,7 @@ async function recipients(
       .prepare(
         `SELECT id, email, organization_id AS organizationId FROM users
           WHERE role = 'grantee' AND is_active = 1 AND deleted_at IS NULL
-            AND organization_id IN (${slice.map(() => '?').join(',')})
+            AND organization_id IN (${slice.map(() => "?").join(",")})
           ORDER BY email`,
       )
       .bind(...slice)
@@ -271,10 +290,10 @@ export async function planReportReminders(
   session: Session,
   opts: { now?: string } = {},
 ): Promise<ReminderPlan> {
-  if (session.role !== 'admin') {
-    throw new AppError('FORBIDDEN', 'Only an administrator can do that.', {
+  if (session.role !== "admin") {
+    throw new AppError("FORBIDDEN", "Only an administrator can do that.", {
       internalMessage: `reminder plan attempted by role ${session.role}`,
-      severity: 'warn',
+      severity: "warn",
     });
   }
 
@@ -282,7 +301,9 @@ export async function planReportReminders(
   const owed = await reportsOwed(env.DB, nowStr);
   const dueToday = owed.filter((r) => isReminderDay(r.dueDate, nowStr));
 
-  const byOrg = await recipients(env.DB, [...new Set(dueToday.map((r) => r.organizationId))]);
+  const byOrg = await recipients(env.DB, [
+    ...new Set(dueToday.map((r) => r.organizationId)),
+  ]);
 
   const grouped = new Map<string, DueReport[]>();
   for (const r of dueToday) {
@@ -374,18 +395,22 @@ export async function runReportReminders(
       granteesMailed: 0,
       messagesRecorded: 0,
       suppressed: 0,
+      deduplicated: 0,
       failed: 0,
       withNoContact: 0,
     };
   }
 
-  const byOrg = await recipients(env.DB, [...new Set(dueToday.map((r) => r.organizationId))]);
+  const byOrg = await recipients(env.DB, [
+    ...new Set(dueToday.map((r) => r.organizationId)),
+  ]);
 
   // A date, not a moment. A due date is a day, and "due 31 March at 11:04 PM
   // CDT" invites somebody to believe the minute matters.
   const day = nowStr.slice(0, 10);
-  const portalUrl = `${(env.APPLICANT_BASE_URL ?? '').trim()}/reports`;
-  const supportEmail = (env.EMAIL_REPLY_TO ?? '').trim() || 'grants@houstontexansfoundation.org';
+  const portalUrl = `${(env.APPLICANT_BASE_URL ?? "").trim()}/reports`;
+  const supportEmail =
+    (env.EMAIL_REPLY_TO ?? "").trim() || "grants@houstontexansfoundation.org";
   const transport = transportFor(env, fetcher);
 
   // Group the reports by organization once, so each grantee's letter lists
@@ -400,6 +425,7 @@ export async function runReportReminders(
   let granteesMailed = 0;
   let messagesRecorded = 0;
   let suppressed = 0;
+  let deduplicated = 0;
   let failed = 0;
   let withNoContact = 0;
   const remindedPeriods: string[] = [];
@@ -417,9 +443,10 @@ export async function runReportReminders(
        */
       withNoContact += reports.length;
       await logError(env, ctx, {
-        severity: 'warn',
-        code: 'REPORT_REMINDER_NO_CONTACT',
-        message: 'a report is due and the organization has no active grantee account',
+        severity: "warn",
+        code: "REPORT_REMINDER_NO_CONTACT",
+        message:
+          "a report is due and the organization has no active grantee account",
         context: {
           organization_id: organizationId,
           organization: reports[0]?.organizationName ?? null,
@@ -470,37 +497,50 @@ export async function runReportReminders(
           },
           transport,
         );
-        messagesRecorded += 1;
-        if (outcome.status === 'sent') {
-          granteesMailed += 1;
-          mailedHere += 1;
-        } else if (outcome.status === 'suppressed') {
-          suppressed += 1;
-        } else if (outcome.status === 'failed') {
-          failed += 1;
-          /*
-           * LOGGED, because nothing else will. sendEmail RETURNS a failure
-           * rather than throwing, so the catch below never fired for this and
-           * the grantee simply never heard from us. The report then goes
-           * overdue, tomorrow's reminder fails the same way, and the desk
-           * shows a red row nobody caused.
-           */
-          await logError(env, ctx, {
-            severity: 'error',
-            code: 'REPORT_REMINDER_NOT_DELIVERED',
-            message: 'the provider refused a reminder; this grantee was not reached',
-            context: {
-              organization_id: organizationId,
-              organization: reports[0]?.organizationName ?? null,
-              user_id: person.id,
-              report_periods: reports.length,
-            },
-          });
+        /*
+         * DEDUPLICATED FIRST, before the status branches, because a
+         * deduplicated outcome carries the earlier message's status and every
+         * branch below would read it as something this run achieved. Nothing
+         * was written, nothing was sent, and the period was already stamped by
+         * the run that did send -- so this must not reach `mailedHere` either,
+         * or one letter would raise `reminder_count` twice.
+         */
+        if (outcome.deduplicated) {
+          deduplicated += 1;
+        } else {
+          messagesRecorded += 1;
+          if (outcome.status === "sent") {
+            granteesMailed += 1;
+            mailedHere += 1;
+          } else if (outcome.status === "suppressed") {
+            suppressed += 1;
+          } else if (outcome.status === "failed") {
+            failed += 1;
+            /*
+             * LOGGED, because nothing else will. sendEmail RETURNS a failure
+             * rather than throwing, so the catch below never fired for this and
+             * the grantee simply never heard from us. The report then goes
+             * overdue, tomorrow's reminder fails the same way, and the desk
+             * shows a red row nobody caused.
+             */
+            await logError(env, ctx, {
+              severity: "error",
+              code: "REPORT_REMINDER_NOT_DELIVERED",
+              message:
+                "the provider refused a reminder; this grantee was not reached",
+              context: {
+                organization_id: organizationId,
+                organization: reports[0]?.organizationName ?? null,
+                user_id: person.id,
+                report_periods: reports.length,
+              },
+            });
+          }
         }
       } catch (err) {
         await logError(env, ctx, {
-          severity: 'error',
-          code: 'REPORT_REMINDER_FAILED',
+          severity: "error",
+          code: "REPORT_REMINDER_FAILED",
           message: err instanceof Error ? err.message : String(err),
           stack: err instanceof Error ? (err.stack ?? null) : null,
           context: { organization_id: organizationId, user_id: person.id },
@@ -515,7 +555,8 @@ export async function runReportReminders(
      * organizations whose own send was suppressed or refused. Counting what
      * this organization achieved is the only thing that can gate its stamp.
      */
-    if (mailedHere > 0) remindedPeriods.push(...reports.map((r) => r.reportPeriodId));
+    if (mailedHere > 0)
+      remindedPeriods.push(...reports.map((r) => r.reportPeriodId));
   }
 
   /*
@@ -530,13 +571,15 @@ export async function runReportReminders(
    * own bookkeeping -- "this file has been named in a notice that was due" --
    * and nothing renders it as a statement about anybody having been told.
    */
-  if (remindedPeriods.length > 0) await stampReminded(env.DB, remindedPeriods, nowStr);
+  if (remindedPeriods.length > 0)
+    await stampReminded(env.DB, remindedPeriods, nowStr);
 
   return {
     outstanding: owed.length,
     granteesMailed,
     messagesRecorded,
     suppressed,
+    deduplicated,
     failed,
     withNoContact,
   };
@@ -577,17 +620,17 @@ export async function runRemindersNow(
   // check is repeated rather than inherited because this is the writing path,
   // and a future refactor that stops calling the plan first must not quietly
   // open it.
-  if (session.role !== 'admin') {
-    throw new AppError('FORBIDDEN', 'Only an administrator can do that.', {
+  if (session.role !== "admin") {
+    throw new AppError("FORBIDDEN", "Only an administrator can do that.", {
       internalMessage: `reminder run attempted by role ${session.role}`,
-      severity: 'warn',
+      severity: "warn",
     });
   }
 
   if (!Number.isInteger(opts.expectLetters) || opts.expectLetters < 0) {
-    throw new AppError('VALIDATION_FAILED', 'Review the plan before sending.', {
+    throw new AppError("VALIDATION_FAILED", "Review the plan before sending.", {
       internalMessage: `runRemindersNow called with expectLetters ${String(opts.expectLetters)}`,
-      severity: 'warn',
+      severity: "warn",
     });
   }
 
@@ -596,15 +639,15 @@ export async function runRemindersNow(
 
   if (plan.lettersWouldSend !== opts.expectLetters) {
     throw new AppError(
-      'VALIDATION_FAILED',
+      "VALIDATION_FAILED",
       `This would now send ${plan.lettersWouldSend} ${
-        plan.lettersWouldSend === 1 ? 'letter' : 'letters'
+        plan.lettersWouldSend === 1 ? "letter" : "letters"
       }, not ${opts.expectLetters}. Nothing was sent. Review the plan again.`,
       {
         internalMessage:
           `reminder run refused: plan says ${plan.lettersWouldSend}, ` +
           `caller expected ${opts.expectLetters}`,
-        severity: 'warn',
+        severity: "warn",
       },
     );
   }
@@ -614,7 +657,12 @@ export async function runRemindersNow(
    * before any obligation exists. Returning the zeroed run keeps the screen
    * able to say "nobody was due" rather than showing an error.
    */
-  const run = await runReportReminders(env, ctx, new Date(nowStr), opts.fetcher ?? fetch);
+  const run = await runReportReminders(
+    env,
+    ctx,
+    new Date(nowStr),
+    opts.fetcher ?? fetch,
+  );
   return { ...run, plan };
 }
 
@@ -630,7 +678,11 @@ export async function runRemindersNow(
  * Chunked, because a cycle's worth of reports can exceed a comfortable number
  * of bound parameters in one statement.
  */
-async function stampReminded(db: D1Database, ids: string[], nowIsoStr: string): Promise<void> {
+async function stampReminded(
+  db: D1Database,
+  ids: string[],
+  nowIsoStr: string,
+): Promise<void> {
   const CHUNK = 50;
   const unique = [...new Set(ids)];
   for (let i = 0; i < unique.length; i += CHUNK) {
@@ -639,7 +691,7 @@ async function stampReminded(db: D1Database, ids: string[], nowIsoStr: string): 
       .prepare(
         `UPDATE report_periods
             SET reminder_last_sent_at = ?, reminder_count = reminder_count + 1
-          WHERE id IN (${slice.map(() => '?').join(',')}) AND deleted_at IS NULL`,
+          WHERE id IN (${slice.map(() => "?").join(",")}) AND deleted_at IS NULL`,
       )
       .bind(nowIsoStr, ...slice)
       .run();

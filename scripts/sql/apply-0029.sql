@@ -7,9 +7,12 @@
 --   npx wrangler d1 execute steward-production --remote --env production --yes \
 --     --json --command="$(cat scripts/sql/apply-0029.sql)"
 --
--- WHY NOT `npm run migrate:production`. It fails here with 7403 and, unlike
--- `d1 execute`, takes no --json, so the working code path is unreachable. See
--- the generator for the whole story.
+-- TRY `npm run migrate:production:native` FIRST, and retry it once if it
+-- answers 7403: that error is intermittent, not a property of the command. It
+-- was once believed that --json was what made a remote execute work and that
+-- `migrations apply`, which has no such flag, could never succeed; a --json
+-- command failed and then succeeded on a retry on 2026-10-08, which disproved
+-- that. This file is the fallback for when the retry does not help.
 --
 -- EVERY STATEMENT IS IDEMPOTENT and the ledger row is written in the SAME run.
 -- 0028's DDL was applied without its ledger row and golive then read 27 of 28;

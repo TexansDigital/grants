@@ -416,6 +416,39 @@ describe('running it twice', () => {
     expect(await mailCount(g.granteeEmail!)).toBe(1);
   });
 
+  it('does not report a letter as sent when an earlier run already sent it', async () => {
+    /*
+     * THE SECOND BUG IN THIS CORNER, found on 2026-10-08 by pressing Send
+     * twice on the Reports screen and reading "1 sent" with nothing in the
+     * mailbox. `sendEmail` returns the EARLIER row when an idempotency key
+     * repeats, carrying that row's status -- `sent` -- and this function read
+     * the status without reading `deduplicated`. The letter was correctly not
+     * duplicated; the count was a lie, on the one screen whose job is to say
+     * who has been contacted.
+     *
+     * Asserting the specific numbers, not just "fewer", because the shape of
+     * the fault was a number that looked plausible.
+     */
+    const g = await granteeOwing({ dueInDays: 3 });
+
+    const first = await runReportReminders(liveEnv(), ctx(), new Date(), accepts);
+    expect(first.granteesMailed).toBe(1);
+    expect(first.deduplicated).toBe(0);
+
+    const second = await runReportReminders(liveEnv(), ctx(), new Date(), accepts);
+    expect(second.granteesMailed).toBe(0);
+    expect(second.deduplicated).toBe(1);
+    expect(second.messagesRecorded).toBe(0);
+
+    // And the chase count stays at one, because one letter was sent.
+    const row = await db
+      .prepare(`SELECT reminder_count AS n FROM report_periods WHERE id = ?`)
+      .bind(g.periodId)
+      .first<{ n: number }>();
+    expect(row?.n).toBe(1);
+    expect(await mailCount(g.granteeEmail!)).toBe(1);
+  });
+
   it('records how many times a report has been chased, and when', async () => {
     /*
      * NOT THE IDEMPOTENCY MECHANISM. This answers what a program officer asks

@@ -28,6 +28,23 @@
  * This lives in a script rather than a test because the suite runs in the
  * Workers pool, where `?raw` imports come back as an empty string -- the way
  * the CSS check passed against nothing before it moved out here.
+ *
+ * AND IT COVERS `web/` TOO, since 2026-10-08, because the first version of
+ * this check did not and that was how it got caught being too narrow. The
+ * Worker was swept, the admin screens were not, and FOUR of them were
+ * rendering a calendar day in whatever zone the staff member's browser was
+ * in: the payment ledger (a payment due the 1st shown as the 31st), the award
+ * amendment trail (a term starting 2026-01-01 shown as 12/31/2025, the wrong
+ * YEAR, on the record of a change to a grant), the decision desk (the embargo
+ * date, which is the one the letter quotes) and the paperwork panel.
+ *
+ * The web rule is a ban rather than an enumeration. `web/src/` has eighteen
+ * modules that show a date and gains one whenever a screen does; listing them
+ * all would be maintenance without judgement. What actually distinguishes the
+ * four bugs from the fourteen correct files is simple and mechanical: the
+ * bugs called `toLocaleDateString` directly instead of going through a helper
+ * that had already decided the question. So that call is banned outside the
+ * module that defines the helpers.
  */
 
 import { readFileSync, readdirSync, statSync } from 'node:fs';
@@ -146,10 +163,48 @@ for (const site of SITES) {
   }
 }
 
+/*
+ * THE WEB HALF. One rule: a date is formatted through a named helper, never
+ * by calling toLocaleDateString on the spot.
+ *
+ * `web/src/reportWording.ts` defines them -- formatDay and formatDayShort for
+ * a calendar day (UTC), formatMoment, formatMomentShort and formatWhen for an
+ * instant (Central) -- and is the one file allowed to make the call itself.
+ *
+ * toLocaleTimeString is NOT banned: the "saved at 9:30" stamps in
+ * FormRenderer and draftSync are a clock for the person typing, which is
+ * correctly their own, and has nothing to do with this bug.
+ */
+const WEB_HELPERS = 'web/src/reportWording.ts';
+const BARE_DATE = /\.toLocaleDateString\s*\(/;
+
+const webFiles = walk(join(root, 'web', 'src')).map((f) => relative(root, f));
+let webUsing = 0;
+
+for (const file of webFiles) {
+  const text = readFileSync(join(root, file), 'utf8');
+  const code = text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  if (/\bformat(Day|Moment|When)\w*\s*\(/.test(code)) webUsing += 1;
+  if (file === WEB_HELPERS || !BARE_DATE.test(code)) continue;
+  problems.push(
+    `${file} calls toLocaleDateString directly.\n` +
+      '    Formatting a date on the spot is how four admin screens came to render a\n' +
+      '    calendar day a day early. Use a helper from ' +
+      `${WEB_HELPERS}, which\n` +
+      '    has already decided whether the value is a calendar day or an instant:\n' +
+      '      formatDay / formatDayShort      a day somebody chose     (UTC)\n' +
+      '      formatMoment / formatMomentShort / formatWhen  a moment  (Central)\n' +
+      '    If the value is neither, add a helper there rather than an exception here.',
+  );
+}
+
 if (problems.length > 0) {
   console.error(`check:dates — ${problems.length} problem(s):\n`);
   for (const p of problems) console.error(`  - ${p}\n`);
   process.exit(1);
 }
 
-console.log(`check:dates — ok, ${SITES.length} call site(s) classified.`);
+console.log(
+  `check:dates — ok, ${SITES.length} worker call site(s) classified, ` +
+    `${webUsing} web module(s) formatting dates through a helper.`,
+);

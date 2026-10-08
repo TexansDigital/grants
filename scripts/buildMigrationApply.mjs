@@ -3,11 +3,16 @@
  *
  *   node scripts/buildMigrationApply.mjs 0029
  *
- * WHY THIS EXISTS. `wrangler d1 migrations apply --remote` fails on this
+ * WHY THIS EXISTS. `wrangler d1 migrations apply --remote` has failed on this
  * account with `The given account is not valid or is not authorized to access
- * this service [code: 7403]`, and unlike `d1 execute` it has no `--json` flag,
- * so there is no way to take the one code path that works. The only route to
- * production D1 here is:
+ * this service [code: 7403]`. It was once believed that `--json` was what
+ * avoided that, and that `migrations apply` -- which has no such flag -- could
+ * therefore never work. THAT WAS WRONG: on 2026-10-08 a `d1 execute --json`
+ * failed with the same 7403 and succeeded on an immediate retry. The 7403 is
+ * intermittent, so try `npm run migrate:production:native` first and retry it
+ * once before falling back to this file.
+ *
+ * What remains true is that the fallback has to carry the ledger row itself:
  *
  *   wrangler d1 execute <db> --remote --env production --yes --json --command=...
  *
@@ -77,9 +82,12 @@ export function buildApply(number) {
 --   npx wrangler d1 execute steward-production --remote --env production --yes \\
 --     --json --command="$(cat scripts/sql/apply-${number}.sql)"
 --
--- WHY NOT \`npm run migrate:production\`. It fails here with 7403 and, unlike
--- \`d1 execute\`, takes no --json, so the working code path is unreachable. See
--- the generator for the whole story.
+-- TRY \`npm run migrate:production:native\` FIRST, and retry it once if it
+-- answers 7403: that error is intermittent, not a property of the command. It
+-- was once believed that --json was what made a remote execute work and that
+-- \`migrations apply\`, which has no such flag, could never succeed; a --json
+-- command failed and then succeeded on a retry on 2026-10-08, which disproved
+-- that. This file is the fallback for when the retry does not help.
 --
 -- EVERY STATEMENT IS IDEMPOTENT and the ledger row is written in the SAME run.
 -- 0028's DDL was applied without its ledger row and golive then read 27 of 28;

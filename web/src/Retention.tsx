@@ -16,6 +16,7 @@ import { useCallback, useEffect, useState } from 'react';
 import type { ReactElement } from 'react';
 import { ApiError, api } from './api';
 import type { RetentionScreen } from './api';
+import { formatMomentShort } from './reportWording';
 
 interface Props {
   isAdmin: boolean;
@@ -272,7 +273,7 @@ export function Retention({ isAdmin }: Props): ReactElement {
                   <tr key={String(f.id)}>
                     <th scope="row">{String(f.organization_name ?? '')}</th>
                     <td>{String(f.filename ?? '')}</td>
-                    <td>{new Date(String(f.purged_at)).toLocaleDateString('en-US')}</td>
+                    <td>{formatMomentShort(String(f.purged_at))}</td>
                   </tr>
                 ))}
               </tbody>

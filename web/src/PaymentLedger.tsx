@@ -17,6 +17,7 @@ import type { ReactElement } from 'react';
 import { ApiError, api } from './api';
 import type { AwardLedger } from './api';
 import { formatCents, parseCurrencyToCents, MoneyParseError } from '../../src/lib/money';
+import { formatDayShort } from './reportWording';
 
 interface Props {
   awardId: string;
@@ -169,14 +170,14 @@ export function PaymentLedger({ awardId }: Props): ReactElement | null {
             <tbody>
               {ledger.payments.map((p) => (
                 <tr key={p.id}>
-                  <th scope="row">{new Date(p.scheduledDate).toLocaleDateString('en-US')}</th>
+                  <th scope="row">{formatDayShort(p.scheduledDate)}</th>
                   <td className="num">{formatCents(p.amountCents)}</td>
                   <td>
                     <span className={`badge badge-${p.status}`}>{p.status}</span>
                     {p.paidDate && (
                       <span className="meta">
                         {' '}
-                        {new Date(p.paidDate).toLocaleDateString('en-US')}
+                        {formatDayShort(p.paidDate)}
                       </span>
                     )}
                     {p.status === 'cancelled' && p.note && (
@@ -200,7 +201,7 @@ export function PaymentLedger({ awardId }: Props): ReactElement | null {
                           <span className="sr-only">
                             {' '}
                             &mdash; {formatCents(p.amountCents)} due{' '}
-                            {new Date(p.scheduledDate).toLocaleDateString('en-US')}
+                            {formatDayShort(p.scheduledDate)}
                           </span>
                         </button>
                         <button
@@ -213,7 +214,7 @@ export function PaymentLedger({ awardId }: Props): ReactElement | null {
                           <span className="sr-only">
                             {' '}
                             &mdash; {formatCents(p.amountCents)} due{' '}
-                            {new Date(p.scheduledDate).toLocaleDateString('en-US')}
+                            {formatDayShort(p.scheduledDate)}
                           </span>
                         </button>
                       </>
@@ -240,7 +241,7 @@ export function PaymentLedger({ awardId }: Props): ReactElement | null {
             Record {formatCents(recordingRow.amountCents)} as paid
           </h3>
           <p className="meta">
-            Due {new Date(recordingRow.scheduledDate).toLocaleDateString('en-US')} to{' '}
+            Due {formatDayShort(recordingRow.scheduledDate)} to{' '}
             {ledger.organizationName}. This cannot be changed afterwards; a correction is a new
             payment.
           </p>
@@ -293,7 +294,7 @@ export function PaymentLedger({ awardId }: Props): ReactElement | null {
             Cancel {formatCents(cancellingRow.amountCents)}
           </h3>
           <p className="meta">
-            Due {new Date(cancellingRow.scheduledDate).toLocaleDateString('en-US')}. The payment
+            Due {formatDayShort(cancellingRow.scheduledDate)}. The payment
             stays on the record with your reason, and the amount becomes available to schedule
             again.
           </p>

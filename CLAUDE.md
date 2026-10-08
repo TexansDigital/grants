@@ -103,6 +103,43 @@ returned an empty string under the Worker pool, and a trigger test refused by
 a different trigger than the one under test. Assert on the specific message,
 the specific count, the specific value.
 
+### 4b. A claim about a system you did not run is a hypothesis
+
+Claims about **code** get checked, because running code is cheap and habitual.
+Claims about **everything around the code** — wrangler, DNS, mail delivery, the
+deployed UI, the dev environment, a dashboard's menu labels — get asserted,
+because checking those is awkward or needs a human. That asymmetry is where
+every wrong answer in this project has come from.
+
+So before stating why something external behaved as it did:
+
+1. **Say which artifact the claim rests on**, and confirm it is an artifact
+   about *this* question. The root domain's SPF record is a real fact and has
+   nothing to do with whether Resend's mail passes SPF.
+2. **Name the check that would settle it**, and run it, or ask for it to be
+   run, before asserting rather than after. If it cannot be run, say "I think"
+   and say why it cannot.
+3. **Search the repository first.** Every wrong answer so far was already
+   written down here before it was asserted differently.
+
+**A coherent story is not evidence.** The strongest pull toward a wrong answer
+is a failure that demands an explanation: mail that vanishes with no bounce, a
+command that fails with an opaque code. A tidy cause fitted to a symptom feels
+like a finding and suppresses the check. Treat the tidiness as the warning.
+
+Examples this rule came from, all within two days:
+
+- `wrangler d1 execute --file --remote` fails with 10000 → the reason was in
+  `scripts/apply-sql.mjs`, unread.
+- Eight harnesses "cannot run here" → `.dev.vars` was missing;
+  `.dev.vars.example` was beside it.
+- Navigation labels given from memory → `Shell.tsx` has them.
+- `--json` is required or a remote execute 7403s → a coincidence over a handful
+  of samples, disproved by one retry.
+- Resend is missing from SPF → it is published on the sending subdomain, which
+  is the envelope sender and the only one receivers check. `spf=pass` was in
+  the headers, and the same file already recorded it as settled.
+
 ### 5. Phase discipline
 - Anything over ~200 lines or touching 3+ components gets a phase proposal first.
 - Each phase: clear deliverable, verification method, stated dependencies.
