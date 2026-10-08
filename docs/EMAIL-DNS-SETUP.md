@@ -29,6 +29,8 @@ how you publish, in DNS, the rules a receiving mail server should apply.
 **SPF** — *"these servers are allowed to send as me."* A list, published at your
 domain, of who may send on your behalf. Resend's servers have to be on it or
 Gmail sees mail claiming to be you from a machine you never authorised.
+Published at *which* domain is the part that trips people, including Claude —
+see §5a.
 
 **DKIM** — *"this message really came from me and was not altered."* Resend
 signs each message with a private key; you publish the matching public key in
@@ -86,7 +88,9 @@ config already expects `grants@houstontexansfoundation.org`.
 
 If you ever put staff mailboxes (Google Workspace, Microsoft 365) on this same
 domain, come back and re-read step 4 — you will need to merge SPF records rather
-than add a second one.
+than add a second one **on the same name**. Resend's own SPF lands on a sending
+subdomain it creates, not on the root, and does not collide with anything; §5a
+has the detail and the evidence.
 
 ---
 
@@ -216,6 +220,44 @@ in the config file, but the guard is a backstop, not permission to try.
 Setting this key is the single action that makes an environment able to email
 real people. With no key the system records every send as `suppressed` and calls
 nothing — which is why preview and staging deliberately have none.
+
+---
+
+## 5a. Where SPF actually ends up — read this before touching it
+
+Done and confirmed on 2026-10-08, from the headers of a message that arrived.
+Recorded here because reasoning about it from the root domain's record alone
+produced a wrong answer once already.
+
+When Resend verifies a root domain it does **not** put its SPF on that root. It
+creates a sending subdomain — here `rsend.houstontexansfoundation.org` — and
+publishes SPF there. That subdomain is the **envelope sender**, the address in
+`Return-Path`, and **SPF is checked against the envelope sender, never against
+the `From:` a human reads.**
+
+So the domain correctly carries two SPF records on two different names:
+
+| Name | Record | Who uses it |
+|---|---|---|
+| `houstontexansfoundation.org` | `v=spf1 include:_spf.mx.cloudflare.net ~all` | Cloudflare Email Routing, for inbound forwarding |
+| `rsend.houstontexansfoundation.org` | issued and managed by Resend | every message Steward sends |
+
+That is not the "two SPF records" fault in Troubleshooting below. **That fault
+is two records on the same name.** Two records on two different names is normal
+and required.
+
+**The root record is not consulted for anything Steward sends**, so adding
+Resend to it would change nothing. If it looks like Resend is missing from SPF,
+look at the sending subdomain before concluding anything, and look at a real
+message's headers before touching DNS:
+
+```
+dig +short TXT rsend.houstontexansfoundation.org
+```
+
+DMARC still passes on the root, because alignment is relaxed by default and
+`rsend.houstontexansfoundation.org` and `houstontexansfoundation.org` share an
+organizational domain.
 
 ---
 

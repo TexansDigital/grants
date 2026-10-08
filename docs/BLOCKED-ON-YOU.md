@@ -91,8 +91,8 @@ Eloqua has its own document: `docs/ELOQUA-SETUP.md`.
 |---|---|
 | `grants.` — staff | Live, behind Cloudflare Access. |
 | `apply.` — applicants and grantees | Live, **not** behind Access. Verified by `curl`. |
-| SPF | One record, Cloudflare Email Routing's. |
-| DKIM | `resend._domainkey`, verified in Resend. |
+| SPF | Two records, on different names, and both are correct. The root carries Cloudflare Email Routing's; Resend's is on `rsend.houstontexansfoundation.org`, which is the envelope sender and the one receivers actually check. Confirmed `spf=pass` in a delivered message's headers, 2026-10-08. |
+| DKIM | `resend._domainkey`, verified in Resend. Confirmed `dkim=pass` and aligned to the From domain, 2026-10-08. |
 | DMARC | `p=none`, reporting to `dmarc@houstontexansfoundation.org`. |
 | MX | Cloudflare Email Routing, forwarding only. See `DECISIONS.md` §29. |
 

@@ -58,10 +58,31 @@ company's name into the corporate domain being the shape of a phish. **It does
 not touch the thirteen**, who are all on their own domains. One for the mail
 admins, through an Exchange message trace.
 
-Worth doing before the real send regardless: **add Resend to SPF.** The record
-on `houstontexansfoundation.org` is `v=spf1 include:_spf.mx.cloudflare.net
-~all`, which does not include Resend, so every message softfails SPF and leans
-entirely on DKIM. DNS, not code — `docs/EMAIL-DNS-SETUP.md`.
+**There is nothing to fix in DNS, and this file said so already.** The Gmail
+message's own headers, read on 2026-10-08:
+
+```
+spf=pass    smtp.mailfrom=...@rsend.houstontexansfoundation.org
+dkim=pass   header.i=@houstontexansfoundation.org header.s=resend
+dmarc=pass  header.from=houstontexansfoundation.org
+```
+
+All three pass, and both DKIM signatures align to the From domain. **SPF for
+Resend is published on `rsend.houstontexansfoundation.org`**, not on the root —
+that subdomain is the envelope sender (`Return-Path`), and SPF is checked
+against the envelope sender, never against the `From:` a human reads. The root
+domain's `v=spf1 include:_spf.mx.cloudflare.net ~all` belongs to Cloudflare
+Email Routing and is not consulted for anything Steward sends.
+
+Claude claimed on 2026-10-08 that Resend was missing from SPF and that every
+message softfailed. That was asserted from the root record alone, was never
+checked, and was **wrong** — see *Bugs found by sweeping* below, where the
+class is named.
+
+So a message from this system passes SPF, passes DKIM twice, passes DMARC and
+lands in a Gmail inbox, and the Texans' tenant drops it silently. Nothing in
+DNS will change that; it needs an allow entry from whoever administers that
+tenant.
 
 ### Cleared since the last revision
 
@@ -692,6 +713,25 @@ A fourth sweep, on 2026-10-08, came out of the live email check:
   touches a dozen components, so it is a phase, not a patch — and the guard
   has to be extended to `web/` in the same change, or the next one lands the
   same way.
+
+- **A settled item re-opened in the document that settles it.** Claude put
+  *"add Resend to SPF"* into *Blocking right now* on 2026-10-08. Two hundred
+  lines below, under *"Finished and verified, so neither of us re-opens it"*,
+  this same file already said SPF and DKIM both pass and are aligned, and
+  `docs/BLOCKED-ON-YOU.md` recorded the DNS as done and verified on 20
+  September. The claim came from reading the root domain's SPF record and
+  reasoning from it, instead of reading either file or the message headers.
+
+  Named the class: **a mechanism asserted from memory when the repository
+  already records the answer.** It has now happened five times in two days —
+  `--file --remote`, the missing `.dev.vars`, the navigation labels, the
+  `--json` rule, and this. Every one of them was written down somewhere in
+  this repository before it was asserted wrongly.
+
+  Guarded by `npm run check:status`, which fails when *Blocking right now*
+  mentions a topic that *What is already done* has marked settled. Re-opening
+  a settled item now means moving it out of that section first, which is a
+  deliberate act rather than a lapse.
 
 - **A retracted claim outlives its retraction.** The `--json` rule was
   disproved on 2026-10-08 and corrected in four places. Swept the repository
