@@ -91,8 +91,15 @@ enabled = true
 # rather than every mistyped URL silently returning the app shell.
 #
 # The directory is committed with only public/.assetsignore in it, so a fresh
-# clone can run `wrangler dev` and the test suite before anything has been
-# built. Wrangler never uploads .assetsignore, so nothing extra is served.
+# clone can run `wrangler dev` before anything has been built. Wrangler never
+# uploads .assetsignore, so nothing extra is served.
+#
+# IT IS NOT TRUE OF THE TEST SUITE, which this comment claimed until 2026-10-08.
+# Three tests assert that the page shell is served -- publicRoutes, granteeRoutes
+# and authRoutes -- and they 404 against an empty ./public. On a rebuilt
+# container that reads as three real failures in code that nothing had touched.
+# `npm run verify` therefore runs `build:web` before the tests, so the suite
+# does not depend on whether somebody happened to build first.
 [assets]
 directory = "./public"
 binding = "ASSETS"

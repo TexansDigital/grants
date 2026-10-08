@@ -94,11 +94,18 @@ second non-negotiable is that production is never written to by a script.
 **Against production**, which is always a deliberate thing a human runs:
 
 ```
-npx wrangler d1 execute steward-production --remote --env production --yes --command="$(cat scripts/sql/remove-test-data.sql)"
+npx wrangler d1 execute steward-production --remote --env production --yes --json --command="$(cat scripts/sql/remove-test-data.sql)"
 ```
 
-Two details, both learned by getting them wrong:
+Three details, every one of them learned by getting it wrong:
 
+- **`--json`, always.** Without it the /query endpoint answers
+  `The given account is not valid or is not authorized to access this service
+  [code: 7403]`. That reads like the account lacks permission and it does not —
+  the same command with `--json` succeeds, on a Super Administrator token with
+  `d1 (write)`. `d1 migrations apply --remote` does **not** need it, which is
+  why `migrate:production` has always worked and is why the check below is
+  scoped to `d1 execute`.
 - **`--command=`, with the equals sign.** Every .sql file here opens with a
   `--` comment, and an unbound `--command "$(cat …)"` makes yargs read those
   leading dashes as the next flag: it exits with *"You must provide either
@@ -109,9 +116,16 @@ Two details, both learned by getting them wrong:
   the recovery from a half-applied run is to run it again.
 
 `npm run check:commands` fails on any invocation in this repository that
-combines `--remote` with `--file`, or that writes `--command` unbound. The rule
-above was documented in two places before that check existed and was still
-walked into, against production, on 2026-10-07.
+combines `--remote` with `--file`, writes `--command` unbound, or omits
+`--json` from a remote execute. Each of those three was already written down
+somewhere in this repository before the check existed, and each was still
+walked into against production — the first two on 2026-10-07, the third on
+2026-10-08, after a check existed that did not yet cover it.
+
+The check reads commands written on a line, joining `\` continuations. It
+**cannot** see a command assembled as an argv array, which is how
+`scripts/apply-sql.mjs` builds its own call — that one carries `--json` by
+hand, with a comment saying why.
 
 ## The self-test: proving an upload reaches R2
 

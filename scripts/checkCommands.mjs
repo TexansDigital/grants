@@ -70,6 +70,33 @@ const RULES = [
       'multi-statement file, `--command="$(cat <file>)"`.',
   },
   {
+    id: 'remote-needs-json',
+    /*
+     * On this account a `d1 execute --remote` without `--json` is refused by
+     * the /query endpoint:
+     *
+     *   The given account is not valid or is not authorized to access this
+     *   service [code: 7403]
+     *
+     * Which reads like an account problem and is not one -- the same command
+     * with `--json` succeeds. This was written down in docs/STATUS.md and
+     * docs/PRODUCTION-CUTOVER.md before this check existed, and a command
+     * without it was still handed over and still run against production.
+     *
+     * Scoped to `d1 execute`. `d1 migrations apply --remote` does not need it
+     * -- npm run migrate:production works without -- so widening this to every
+     * remote D1 command would be wrong.
+     */
+    hit: (cmd) =>
+      cmd.includes('d1 execute') &&
+      /(^|\s)--remote(\s|$|=)/.test(cmd) &&
+      !/(^|\s)--json(\s|$|=)/.test(cmd),
+    say:
+      'a `d1 execute --remote` without `--json` is refused with 7403 ("The given ' +
+      'account is not valid or is not authorized to access this service"), which is ' +
+      'not an account problem. Add --json.',
+  },
+  {
     id: 'command-unbound',
     /*
      * `--command "$(cat f.sql)"` loses the value when the file opens with a
@@ -94,10 +121,44 @@ for (const file of tracked) {
     continue;
   }
   if (!text.includes('wrangler')) continue;
-  text.split('\n').forEach((line, i) => {
+  /*
+   * Join shell line continuations before scanning. A command written across
+   * two lines with a trailing `\` was half-read: the first line carried the
+   * invocation and the flag that makes it work sat on the second, so the check
+   * reported a problem that the file did not have -- and, the other way round,
+   * would have passed a broken command whose bad flag was on line two.
+   *
+   * The reported line number stays that of the line the command starts on.
+   */
+  const raw = text.split('\n');
+  const logical = [];
+  for (let i = 0; i < raw.length; i += 1) {
+    let line = raw[i];
+    const start = i;
+    /*
+     * A comment prefix repeats on the continuation line, so it is stripped --
+     * but ONLY when the command itself is inside a comment. In a shell block
+     * the continuation line legitimately begins with `--json` or `--command`,
+     * and stripping a leading `--` there both hid a bad flag and falsely
+     * flagged a good one. The marker is taken from the line the command starts
+     * on, and only that marker is removed.
+     */
+    const marker = (/^\s*(--|#|\*)/.exec(raw[start]) ?? [])[1];
+    const strip = marker
+      ? new RegExp(`^\\s*${marker.replace(/[*]/g, '\\*')}[ \\t]*`)
+      : null;
+    while (/\\\s*$/.test(line) && i + 1 < raw.length) {
+      i += 1;
+      const cont = strip ? raw[i].replace(strip, '') : raw[i];
+      line = line.replace(/\\\s*$/, ' ') + cont;
+    }
+    logical.push({ line, no: start + 1 });
+  }
+
+  logical.forEach(({ line, no: lineNo }) => {
     for (const cmd of invocations(line)) {
       for (const rule of RULES) {
-        if (rule.hit(cmd)) problems.push({ file, line: i + 1, rule, cmd });
+        if (rule.hit(cmd)) problems.push({ file, line: lineNo, rule, cmd });
       }
     }
   });

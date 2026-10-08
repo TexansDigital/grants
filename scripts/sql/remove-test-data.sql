@@ -3,7 +3,11 @@
 -- APPLY IT WITH --command=, NOT --file:
 --
 --   npx wrangler d1 execute steward-production --remote --env production --yes \
---     --command="$(cat scripts/sql/remove-test-data.sql)"
+--     --json --command="$(cat scripts/sql/remove-test-data.sql)"
+--
+-- `--json` is not decoration. Without it the /query endpoint answers
+-- `The given account is not valid or is not authorized to access this service
+-- [code: 7403]`, which reads like an account problem and is not one.
 --
 -- `--file --remote` switches to D1's bulk IMPORT endpoint, which refuses an
 -- OAuth login with `Authentication error [code: 10000]`. That is the endpoint,

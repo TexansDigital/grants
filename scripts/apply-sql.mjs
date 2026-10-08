@@ -101,6 +101,12 @@ batches.forEach((batch, i) => {
         'wrangler', 'd1', 'execute', db,
         remote ? '--remote' : '--local',
         '--yes',
+        // `--json` is required on a remote execute: without it the /query
+        // endpoint answers 7403, "The given account is not valid or is not
+        // authorized to access this service", which is not an account problem.
+        // `npm run check:commands` enforces this for commands written on a
+        // line; it cannot see an argv array like this one, so it is by hand.
+        '--json',
         '--command', batch.join('\n'),
       ],
       { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] },

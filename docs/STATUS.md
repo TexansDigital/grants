@@ -35,18 +35,29 @@ reporting-coverage figure.
 **Fix:** `scripts/sql/remove-test-data.sql`, applied with
 
 ```
-npx wrangler d1 execute steward-production --remote --env production --yes --command="$(cat scripts/sql/remove-test-data.sql)"
+npx wrangler d1 execute steward-production --remote --env production --yes --json --command="$(cat scripts/sql/remove-test-data.sql)"
 ```
 
-**Not `--file`.** That path switches to D1's bulk IMPORT endpoint, which
-refuses an OAuth login with `Authentication error [code: 10000]` — the failure
-`scripts/apply-sql.mjs` and `docs/RUNNING-COMMANDS.md` both already describe,
-and which this file told you to walk into on 2026-10-07. `--command=` with the
-equals sign, because the file opens with a `--` comment and yargs reads the
-leading dashes of an unbound value as the next flag.
+Three flags in that command are load-bearing, and all three were got wrong
+first, each time by handing over a command whose failure this repository had
+already recorded somewhere:
 
-`npm run check:commands` now fails on any invocation in this repository that
-combines `--remote` with `--file`.
+- **Not `--file`.** That path switches to D1's bulk IMPORT endpoint, which
+  refuses an OAuth login with `Authentication error [code: 10000]`. Described
+  in `scripts/apply-sql.mjs` and `docs/RUNNING-COMMANDS.md`; walked into on
+  2026-10-07.
+- **`--json`.** Without it the /query endpoint answers 7403, *"The given
+  account is not valid or is not authorized to access this service"* — which is
+  not an account problem. Recorded in this file and in
+  `docs/PRODUCTION-CUTOVER.md`; walked into on 2026-10-08.
+- **`--command=` with the equals sign.** The file opens with a `--` comment, so
+  yargs reads the leading dashes of an unbound value as the next flag and exits
+  with *"You must provide either --command or --file"*.
+
+`npm run check:commands` now fails on all three, anywhere in the repository,
+and joins `\` continuations so a flag on the second line still counts. It
+cannot see a command built as an argv array; `scripts/apply-sql.mjs` is the one
+of those and carries `--json` by hand.
 Soft-delete only, scoped through `source_reference`, re-runnable, one audit row
 per award. Verified against a throwaway database built from all 28 migrations:
 real rows untouched, re-run a no-op. Expect **13 / 46900000 / 13 / 0** from the
