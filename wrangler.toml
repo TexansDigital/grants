@@ -223,7 +223,9 @@ preview_id = "212f8367ee404685853a0125b8c9f46d"
 # destructive script against real EINs and audited financial statements is the
 # spirit of non-negotiable #2 inverted, even though that rule names production.
 #
-# Deployed deliberately:  wrangler deploy --env staging
+# Deployed deliberately:  npm run deploy:staging
+#   (not a bare `wrangler deploy` -- that uploads whatever is already in
+#    ./public, so a stale bundle ships the old interface with the new API)
 # Migrated deliberately:  wrangler d1 migrations apply steward-staging --remote --env staging
 #
 # The ids below are placeholders until a human creates the resources. They fail
@@ -293,7 +295,11 @@ id = "a7b016bfcca94300be98cf3f992ba9c8"
 # ==============================================================================
 # PRODUCTION — deliberate, human-run deploy step only.
 #
-#   wrangler deploy --env production
+#   npm run deploy:production
+#
+# It builds the web app first. A bare `wrangler deploy` does not, and wrangler
+# then says "No updated asset files to upload" on a deploy that was meant to
+# change the screen -- new API, old interface, no button for the feature.
 #
 # The placeholder ids below are intentionally invalid. Filling them in is a
 # conscious act by a human who has decided to touch production. Never run

@@ -17,6 +17,8 @@
     "admin:sql": "esbuild scripts/buildAdmins.ts --bundle --platform=node --format=esm --outfile=.adminbuild.mjs --log-level=warning && node .adminbuild.mjs",
     "admin:apply": "node scripts/apply-sql.mjs --file=seeds/admins.sql --remote",
     "deploy:preview": "npm run build:web && wrangler deploy --env=\"\"",
+    "deploy:production": "npm run build:web && wrangler deploy --env production",
+    "deploy:staging": "npm run build:web && wrangler deploy --env staging",
     "check:css": "esbuild scripts/checkCss.ts --bundle --platform=node --format=esm --outfile=.csscheck.mjs --log-level=warning && node .csscheck.mjs && rm -f .csscheck.mjs",
     "check:config": "esbuild scripts/checkConfig.ts --bundle --platform=node --format=esm --outfile=.cfgcheck.mjs --log-level=warning && node .cfgcheck.mjs && rm -f .cfgcheck.mjs",
     "check:commands": "node scripts/checkCommands.mjs",

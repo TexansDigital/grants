@@ -49,6 +49,17 @@ function invocations(line) {
     if (next === bare) break;
     bare = next;
   }
+  /*
+   * A BACKTICK LEFT IN THE MIDDLE MEANS THIS IS PROSE, not a command.
+   *
+   * `* \`wrangler deploy --env staging\` would reassign ...` in a JSDoc
+   * comment normalises to a string that starts with `wrangler`, because the
+   * comment marker and the opening backtick are both stripped -- and it was
+   * then reported as an unrunnable invocation in a file that only talks about
+   * one. A real command line in this repository contains no backtick; an
+   * inline-code span inside a sentence always leaves its closing one behind.
+   */
+  if (bare.includes('`')) return out;
   if (/^(npx\s+)?wrangler\s/.test(bare)) out.push(bare);
   for (const m of line.matchAll(/"[^"]*":\s*"((?:npx\s+)?wrangler\s[^"]*)"/g)) {
     out.push(m[1]);
@@ -99,6 +110,36 @@ const RULES = [
       'a `d1 execute --remote` without `--json` is refused with 7403 ("The given ' +
       'account is not valid or is not authorized to access this service"), which is ' +
       'not an account problem. Add --json.',
+  },
+  {
+    id: 'deploy-without-build',
+    /*
+     * `wrangler deploy` DOES NOT BUILD THE WEB APP. It uploads whatever is
+     * sitting in ./public, and if that was built from older source the new
+     * Worker ships with the old interface -- an API that has the feature and a
+     * page that has no button for it, which reads as "the deploy did nothing".
+     * The tell is wrangler printing "No updated asset files to upload" on a
+     * deploy that was supposed to change the screen.
+     *
+     * `deploy:preview` always built first; production and staging were raw
+     * wrangler commands in docs, so the trap only existed for the two
+     * environments where it matters. There are npm scripts for all three now.
+     *
+     * Scoped to the environments declared in THIS wrangler.toml, which are the
+     * deployments that serve a bundle. `integrations/houstontexans-proxy` is a
+     * separate Worker with no web app and deploys with a bare `wrangler
+     * deploy`; it is exempt by having no --env, not by an exception.
+     */
+    // `block` is the enclosing fenced block where there is one, so a procedure
+    // that builds on the line above passes.
+    hit: (cmd, block) =>
+      /\bwrangler\s+deploy\b/.test(cmd) &&
+      /--env(\s+|=)("")?(production|staging)|--env=""/.test(cmd) &&
+      !/build:web/.test(block ?? cmd),
+    say:
+      '`wrangler deploy` does not build the web app -- it uploads whatever is in ' +
+      './public, so a stale bundle ships the old interface with the new API. Use ' +
+      '`npm run deploy:production` or `npm run deploy:staging`, which build first.',
   },
   {
     id: 'command-unbound',
@@ -159,10 +200,38 @@ for (const file of tracked) {
     logical.push({ line, no: start + 1 });
   }
 
+  /*
+   * THE ENCLOSING FENCED BLOCK, for rules that are about a PROCEDURE rather
+   * than a single command.
+   *
+   * docs/PRODUCTION-CUTOVER.md writes the deploy as two lines in one block --
+   * `npm run build:web`, then the deploy -- which is correct, and a line-based
+   * rule called it broken. A fenced block is one thing somebody pastes, so
+   * for those rules the block is the unit.
+   */
+  const fenceOf = new Map();
+  let fenceStart = null;
+  let fenceLines = [];
+  raw.forEach((l, i) => {
+    if (/^\s*```/.test(l)) {
+      if (fenceStart === null) {
+        fenceStart = i;
+        fenceLines = [];
+      } else {
+        const text = fenceLines.join('\n');
+        for (let n = fenceStart + 1; n < i; n += 1) fenceOf.set(n + 1, text);
+        fenceStart = null;
+      }
+      return;
+    }
+    if (fenceStart !== null) fenceLines.push(l);
+  });
+
   logical.forEach(({ line, no: lineNo }) => {
+    const block = fenceOf.get(lineNo) ?? line;
     for (const cmd of invocations(line)) {
       for (const rule of RULES) {
-        if (rule.hit(cmd)) problems.push({ file, line: lineNo, rule, cmd });
+        if (rule.hit(cmd, block)) problems.push({ file, line: lineNo, rule, cmd });
       }
     }
   });

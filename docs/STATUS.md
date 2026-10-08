@@ -12,53 +12,49 @@ is the assistant. Where it says **unknown**, neither of us has checked.
 
 ## Blocking right now
 
-**One thing: migration 0029 is not applied to production, and wrangler cannot
-apply it.**
+**Nothing in the database. One deploy, and it must build first.**
 
-`npm run migrate:production` ran the official command and failed:
+Migration `0029` is **applied** — `npm run golive` reads 29 applied, 29 on
+disk, confirmed 2026-10-08. The two test rows are gone: 13 awards, $469,000,
+13 organizations, 0 report periods.
 
-```
-wrangler d1 migrations apply steward-production --remote --env production
--> The given account is not valid or is not authorized to access this service [code: 7403]
-```
+### The deploy has to build the web app
 
-The same 7403 that `d1 execute --remote` gives without `--json`, on a Super
-Administrator token carrying `d1 (write)`. `d1 execute` has `--json` to reach
-the code path that works. **`d1 migrations apply` has no such flag**, so there
-is no way to reach it at all.
+Version `f504fe56` is live and was built from `c2dcbb0`: the old code, which
+reads nothing from `report_period_amendments`, and which only ever sets
+`form_definition_id`, `reminder_last_sent_at` and `status` on
+`report_periods` — never `due_date`. So the new triggers cannot fire against
+it and the live Worker is safe under the new schema.
 
-**The route that works**, generated so the ledger row cannot be forgotten the
-way it was for 0028:
+The new code is pulled but not deployed. Deploy with:
 
 ```
-npx wrangler d1 execute steward-production --remote --env production --yes --json --command="$(cat scripts/sql/apply-0029.sql)"
+npm run deploy:production
 ```
 
-```
-npm run golive
-```
+**Not a bare `npx wrangler deploy --env production`.** That does not build the
+web app — it uploads whatever is already in `./public`. Straight after a pull,
+that is the OLD interface, so the new API ships with a page that has no button
+for any of it, and wrangler says *"No updated asset files to upload"* on a
+deploy meant to change the screen. `npm run check:commands` now fails on a bare
+one anywhere in the repository.
 
-Expect **29 applied, 29 on disk**. Every statement in that file is idempotent
-and the `d1_migrations` row is written in the same run; a half-applied run is
-fixed by running it again.
+### Then the live check
 
-### Do not pull and deploy before applying it
-
-Version `f504fe56` is deployed and is **fine**: it was built from `c2dcbb0`,
-which contains neither 0029 nor any code that reads
-`report_period_amendments`. Confirmed by inspecting that commit.
-
-The new code does read it, on **every report detail page**. Pulling `f49bb91`
-or later and deploying without 0029 applied would turn the compliance desk into
-a 500. Migration first, deploy second.
+`docs/RUNNING-COMMANDS.md` carries the sequence. In short: import one test
+grant on a mailbox you control, ask for an update due exactly 14 days out,
+read the plan on Reports, send it, confirm it arrives, then clear the test rows
+with `scripts/sql/remove-test-data.sql`.
 
 ### Cleared since the last revision
 
-- The two test rows are **gone**. Production reads 13 awards, $469,000, 13
-  organizations, 0 report periods — confirmed 2026-10-08.
-- `npm run migrate:production` now prints the working route instead of running
-  a command that fails. The native one is kept as
-  `migrate:production:native` in case Cloudflare's end changes.
+- `0029` applied, via `scripts/sql/apply-0029.sql` — the DDL and the
+  `d1_migrations` row in one command, which is what `0028` got wrong.
+- `npm run migrate:production` prints the working route instead of running
+  wrangler's migration command, which fails here with 7403 and has no `--json`
+  to escape with. The native one survives as `migrate:production:native`.
+- `npm run deploy:production` and `deploy:staging` now exist and build first.
+  Only `deploy:preview` did.
 
 ---
 

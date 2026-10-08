@@ -132,6 +132,27 @@ The check reads commands written on a line, joining `\` continuations. It
 `scripts/apply-sql.mjs` builds its own call — that one carries `--json` by
 hand, with a comment saying why.
 
+## Deploying
+
+```
+npm run deploy:production
+```
+
+**It builds the web app first, and that is the whole reason it exists.**
+`wrangler deploy` uploads whatever is already in `./public`; it does not build.
+Deploy straight after a `git pull` and you ship the new Worker with the *old*
+interface — an API that has the feature and a page with no button for it, which
+reads as "the deploy did nothing". The tell is wrangler printing
+*"No updated asset files to upload"* on a deploy meant to change the screen.
+
+`npm run deploy:staging` is the same for staging. `npm run check:commands`
+fails on a bare `wrangler deploy --env production|staging` anywhere in the
+repository that does not build first.
+
+The proxy in `integrations/houstontexans-proxy` is a separate Worker with no web
+app, and deploys with a bare `npx wrangler deploy` from its own directory. It is
+exempt by having no `--env`, not by an exception.
+
 ## Applying a migration to production
 
 `npm run migrate:production` no longer runs anything. It prints the route,
