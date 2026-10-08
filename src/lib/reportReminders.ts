@@ -39,7 +39,7 @@
  */
 
 import type { Env, RequestContext, Session } from '../types';
-import { nowIso, formatDayInZone } from './time';
+import { nowIso, formatCalendarDay } from './time';
 import { sendEmail, transportFor } from './email';
 import { REPORT_REMINDER, type ReminderLine } from './emailTemplates';
 import { daysUntil, GRANTEE_OWES } from './reportDue';
@@ -432,7 +432,14 @@ export async function runReportReminders(
     const lines: ReminderLine[] = reports.map((r) => ({
       label: r.label,
       programName: r.programName,
-      dueDisplay: formatDayInZone(r.dueDate, env.DISPLAY_TIMEZONE),
+      /*
+       * A CALENDAR DAY, not an instant. `report_periods.due_date` is a plain
+       * YYYY-MM-DD somebody typed into a date field; converting it to Central
+       * rendered it a day early, and a grantee was emailed "October 21" about
+       * a report due the 22nd -- in the same sentence as "due in 14 days",
+       * which counted to the 22nd.
+       */
+      dueDisplay: formatCalendarDay(r.dueDate),
       daysUntilDue: daysUntil(r.dueDate, nowStr),
     }));
 

@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { formatInZone, formatDayInZone, isCycleAcceptingSubmission } from '../src/lib/time';
+import {
+  formatInZone, formatDayInZone, formatCalendarDay, isCycleAcceptingSubmission,
+} from '../src/lib/time';
 
 describe('deadlines', () => {
   it('renders a UTC instant in Central time', () => {
@@ -146,5 +148,68 @@ describe('a date that is a day, not a moment', () => {
     });
     expect(asked).toMatch(/\bPM\b/);
     expect(formatDayInZone('2026-11-05T18:00:00.000Z', CENTRAL)).not.toMatch(/\bPM\b/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+/*
+ * A DAY ON A CALENDAR versus A MOMENT IN TIME.
+ *
+ * These two look interchangeable and are not. `2026-10-22` is a day somebody
+ * typed into a date field; `2026-11-05T18:00:00.000Z` is an instant. Reading
+ * the first in Central moves it to October 21, because JavaScript parses a
+ * date-only string as UTC midnight and UTC midnight in Central is the previous
+ * evening.
+ *
+ * THIS REACHED A REAL MAILBOX. On 2026-10-08 a grantee was sent "October 21,
+ * 2026. Due in 14 days." about a report due 2026-10-22 -- the date and the
+ * day-count contradicting each other inside one sentence, and both
+ * contradicting the compliance desk, which said October 22.
+ */
+describe('a calendar day is not an instant', () => {
+  const CENTRAL = 'America/Chicago';
+
+  it('renders a plain YYYY-MM-DD as that day, not the evening before', () => {
+    expect(formatCalendarDay('2026-10-22')).toBe('October 22, 2026');
+    // The exact string that went out, and the exact one that should have.
+    expect(formatDayInZone('2026-10-22', CENTRAL)).toBe('October 21, 2026');
+  });
+
+  it('does the same for a date stored as UTC midnight, which is what the importer writes', () => {
+    // parseImportDate returns d.toISOString(), so announcement_date looks like
+    // this. The embargo date on an award letter is this shape.
+    expect(formatCalendarDay('2026-10-22T00:00:00.000Z')).toBe('October 22, 2026');
+  });
+
+  it('is wrong in winter too, so this is not a daylight-saving edge', () => {
+    // CST, not CDT. The shift is six hours rather than five and lands in the
+    // previous day either way.
+    expect(formatCalendarDay('2026-01-15')).toBe('January 15, 2026');
+    expect(formatDayInZone('2026-01-15', CENTRAL)).toBe('January 14, 2026');
+  });
+
+  it('leaves a genuine instant to formatDayInZone, which still converts it', () => {
+    /*
+     * The other half of the split, and the reason this is two functions rather
+     * than one fix. `purge_due_at` is computed from a real moment and the
+     * Foundation should read it in their own zone: 1am UTC on the 6th IS the
+     * evening of the 5th in Houston, and saying "November 6" would be wrong.
+     */
+    expect(formatDayInZone('2026-11-06T01:00:00.000Z', CENTRAL)).toBe('November 5, 2026');
+    // formatCalendarDay would answer the other question, correctly for its own
+    // question and wrongly for this one.
+    expect(formatCalendarDay('2026-11-06T01:00:00.000Z')).toBe('November 6, 2026');
+  });
+
+  it('agrees with the screen, which was right all along', () => {
+    /*
+     * web/src/reportWording.ts formats with timeZone: 'UTC' and has always
+     * shown October 22. The email disagreeing with the compliance desk is how
+     * this was noticed at all.
+     */
+    const screen = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'UTC', month: 'long', day: 'numeric', year: 'numeric',
+    }).format(new Date('2026-10-22'));
+    expect(formatCalendarDay('2026-10-22')).toBe(screen);
   });
 });

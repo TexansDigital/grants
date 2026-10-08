@@ -20,7 +20,9 @@
 
 import { env as testEnv } from 'cloudflare:test';
 import { describe, it, expect, beforeEach } from 'vitest';
-import { db, ctxFor, adminSession, reviewerSession, applicantSession, appErrorFrom } from './helpers';
+import {
+  db, ctxFor, adminSession, reviewerSession, applicantSession, appErrorFrom, forceDueDate,
+} from './helpers';
 import { seedProgram } from '../src/seed/seedProgram';
 import { INSPIRE_CHANGE } from '../src/seed/inspireChange';
 import { newId } from '../src/lib/ids';
@@ -748,5 +750,79 @@ describe('running the reminders now', () => {
     expect(e.code).toBe('FORBIDDEN');
     expect(e.httpStatus).toBe(403);
     expect(await mailCount(g.granteeEmail!)).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+/*
+ * THE DATE IN THE LETTER.
+ *
+ * On 2026-10-08 a grantee was sent "October 21, 2026. Due in 14 days." about a
+ * report due 2026-10-22. The date and the day-count disagreed inside one
+ * sentence, and both disagreed with the compliance desk, which said October
+ * 22. `formatDayInZone` converted a plain YYYY-MM-DD to Central, and UTC
+ * midnight in Central is the previous evening.
+ *
+ * Nothing caught it, because every test here asserted WHO was mailed and
+ * WHETHER, never WHAT the letter said. The provider's payload is the last
+ * place the text exists before it reaches somebody, so that is what this reads.
+ */
+describe('what the letter actually says', () => {
+  /** A provider that accepts and keeps the payload it was given. */
+  const capturing = () => {
+    const sent: { subject: string; html: string; text: string }[] = [];
+    const fetcher: typeof fetch = async (_url, init) => {
+      const body = JSON.parse(String((init as RequestInit).body ?? '{}'));
+      sent.push({ subject: body.subject ?? '', html: body.html ?? '', text: body.text ?? '' });
+      return new Response(JSON.stringify({ id: 'msg_capture' }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    };
+    return { sent, fetcher };
+  };
+
+  it('names the due date the record holds, not the day before', async () => {
+    const g = await granteeOwing({ dueInDays: 14 });
+    /*
+     * The plain YYYY-MM-DD a human typed, which is what requestUpdates writes.
+     * Through forceDueDate because 0029 refuses a bare UPDATE of due_date --
+     * that trigger caught this very test when it was written with one.
+     */
+    await forceDueDate(g.periodId, '2026-10-22');
+
+    const { sent, fetcher } = capturing();
+    await runReportReminders(
+      liveEnv(),
+      ctx(),
+      new Date('2026-10-08T17:12:00.000Z'),
+      fetcher,
+    );
+
+    expect(sent).toHaveLength(1);
+    const letter = sent[0]!;
+    expect(letter.html).toContain('October 22, 2026');
+    expect(letter.text).toContain('October 22, 2026');
+    // The exact string that went out on 2026-10-08.
+    expect(letter.html).not.toContain('October 21, 2026');
+    expect(letter.text).not.toContain('October 21, 2026');
+  });
+
+  it('agrees with its own day-count, which is how the bug announced itself', async () => {
+    const g = await granteeOwing({ dueInDays: 14 });
+    await forceDueDate(g.periodId, '2026-10-22');
+
+    const { sent, fetcher } = capturing();
+    await runReportReminders(liveEnv(), ctx(), new Date('2026-10-08T17:12:00.000Z'), fetcher);
+
+    /*
+     * "October 22, 2026. Due in 14 days." Both halves are generated from the
+     * same due_date by different code -- the date by a formatter, the count by
+     * daysUntil -- so a disagreement between them is the signature of exactly
+     * this class of fault.
+     */
+    const text = sent[0]!.text;
+    expect(text).toContain('October 22, 2026');
+    expect(text).toContain('14 days');
   });
 });

@@ -29,7 +29,7 @@
 
 import type { Env, RequestContext, Session } from '../types';
 import { AppError, notFound, logError } from './errors';
-import { nowIso, formatInZone, formatDayInZone } from './time';
+import { nowIso, formatInZone, formatCalendarDay } from './time';
 import { auditStatement } from './audit';
 import { sendEmail, transportFor } from './email';
 import { AWARD_NOTIFICATION, DECLINE_NOTIFICATION } from './emailTemplates';
@@ -285,7 +285,7 @@ export async function sendAwardNotification(
          * parts never removed it.
          */
         announcementDisplay: row.announcementDate
-          ? formatDayInZone(row.announcementDate, env.DISPLAY_TIMEZONE)
+          ? formatCalendarDay(row.announcementDate)
           : null,
         portalUrl: `${(env.APPLICANT_BASE_URL ?? '').trim()}/reports`,
         supportEmail: (env.EMAIL_REPLY_TO ?? '').trim(),

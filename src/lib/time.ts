@@ -87,6 +87,46 @@ export function formatDayInZone(iso: string, timeZone: string): string {
 }
 
 /**
+ * A DATE THAT IS A DAY ON A CALENDAR, NOT A MOMENT IN TIME.
+ *
+ * `2026-10-22` through `formatDayInZone(.., 'America/Chicago')` renders as
+ * **October 21**. JavaScript parses a date-only string as UTC midnight, and
+ * UTC midnight in Central is the previous evening. The same happens to a
+ * stored `2026-10-22T00:00:00.000Z`, which is what `parseImportDate` writes.
+ * It is not a daylight-saving edge: it is wrong every day of the year, CST
+ * and CDT alike.
+ *
+ * FOUND IN PRODUCTION, 2026-10-08. A grantee was emailed "October 21, 2026.
+ * Due in 14 days." about a report due `2026-10-22`. The date and the
+ * day-count in the same sentence disagreed, and both disagreed with the
+ * compliance desk, which showed October 22 -- because `web/src/reportWording`
+ * formats with `timeZone: 'UTC'` and has been right all along.
+ *
+ * WHY A SECOND FUNCTION RATHER THAN A FIX INSIDE THE FIRST. The two are
+ * genuinely different questions, and only the caller knows which it is
+ * asking. `purge_due_at` is an instant computed from a real moment, and the
+ * Foundation should read it in their own zone; `due_date` is a day somebody
+ * typed into a date field, and it means that day everywhere on earth. A
+ * function that guessed from the string's shape would be right by accident
+ * and wrong the first time a day was stored as a timestamp.
+ *
+ * This is the second bug in this corner. `formatDayInZone` was itself written
+ * because callers wanting a date were getting "October 3, 2026 at 11:04 PM
+ * CDT" -- it removed the time and kept the timezone conversion, which is half
+ * the problem. The other half is here.
+ */
+export function formatCalendarDay(iso: string): string {
+  return new Intl.DateTimeFormat('en-US', {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+    // UTC, deliberately: it renders the year, month and day as written rather
+    // than asking what instant they name. Matches web/src/reportWording.ts.
+    timeZone: 'UTC',
+  }).format(new Date(iso));
+}
+
+/**
  * Whether a cycle is accepting submissions right now.
  *
  * `graceHours` is the per-cycle grace rule for drafts started before close.
