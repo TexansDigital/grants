@@ -4,24 +4,48 @@ One list, kept current. Everything here blocks work that is otherwise ready to
 start, or blocks the platform going live. Nothing here is something I can do
 myself, decide on your behalf, or work around.
 
-Last updated: 23 September 2026.
+Last updated: 9 October 2026.
 
 ---
 
-## 0. Deploy state — CURRENT as of 25 September 2026
+## 0. Do these, in this order — 9 October 2026
 
-Migrations 0001-0027 applied to preview. Deployed and **verified on the live
-hostnames** by `npm run golive`:
+**Do not set a due date for the 2025 update until §3.10 is decided.** That was
+the top of this list yesterday and it is now the one thing to hold. See §3.10.
 
-- The file picker fix, so a HEIC photo off an iPhone can actually be chosen.
-- The upload refusal reads like English.
-- Word and Excel files the browser declines to name are no longer refused.
-- The root of `apply.houstontexansfoundation.org` now redirects to `/apply`
-  rather than to `/sign-in`. It was serving a login page to nonprofits who
-  have no account and were never emailed a link.
-- A storage panel on Data Health, so the R2 cost promise is one you can see.
+| # | Action | Who | Blocking? |
+|---|---|---|---|
+| 1 | Decide **§3.10 — does the nightly cron mail grantees by itself?** | You | **Yes.** Everything waits on it. |
+| 2 | Confirm or replace **§3.12 — the five report questions** | You, in writing | **Yes.** Free to change today, permanent after the first real answer. |
+| 3 | Clear the test rows (command in §0.1) | You, one command | Yes — and dated, see §0.1 |
+| 4 | Deploy: `npm run deploy:production` | You, one command | Yes |
+| 5 | Decide **§3.5 — who holds the second admin account** | You | Before the first cycle |
+| 6 | Add `np=reject` to DMARC | You, one DNS edit | No, but cheap |
+| 7 | Re-paste `CLAUDE.md` into the Claude Project prompt | You | No |
+| 8 | `houstontexans.com` message trace | Your mail admins | No — does not affect the thirteen |
 
-Nothing is pending a deploy. Two items below need a human, not a terminal.
+Production right now, read from it rather than remembered: **14 awards,
+$469,001.00, 14 organizations, 1 live report period, 29 migrations, 13 real
+grantee logins on 13 distinct domains plus 3 test logins.**
+
+### 0.1 The test rows have a dated consequence
+
+`TEST-2026-001` still carries an **open** report period due **2026-10-22**, and
+the reminder ladder is 14, 3 and 0 days before, then weekly for ever
+(`src/lib/reportReminders.ts:56-59`). The 14-day rung fired on 8 October. So
+unless the rows are cleared, the nightly cron will mail the three test logins
+again on **19 October**, **22 October**, and every week after that, with nobody
+pressing anything.
+
+That is harmless — they are all mailboxes you control — and it is also the
+proof that §3.10 is real rather than theoretical.
+
+```
+npx wrangler d1 execute steward-production --remote --env production --yes \
+  --json --command="$(cat scripts/sql/remove-test-data.sql)"
+```
+
+It prints what is left. Expect `13 / 46900000 / 13 / 0`.
 
 ---
 
@@ -461,6 +485,11 @@ decided by whichever behaviour I happened to build first.
 | 3.7 | **The 200 MB ceiling on a grantee's video.** | A phone shoots roughly 60 MB a minute at 1080p, so 200 MB is about three minutes. Lower it and long clips fail at the end of an upload, which is the worst place to fail. Raise it and R2 fills with footage nobody watches. | Keep 200 MB and six files. Revisit once there is real usage to look at rather than a guess. |
 | 3.8 | **Is report media ever deleted?** | **Right now: never.** Retention covers application attachments only — financial statements get a purge date once an application is decided. Report photos and videos have no retention path at all, and they are the files that will actually fill the bucket. See §4 on cost. | A long window, five years or the award term plus some, then deletion — but this needs a decision, not a default. Deciding it late means deciding it about real footage of real children. |
 | 3.9 | **Approving a claim requires an admin to name the award.** | Deliberate: the system offers matches and refuses to guess, because attaching the wrong organization to an award exposes one nonprofit's grant to another. It means claims cannot be bulk-approved. | Keep it. The volume is tens a year, not thousands, and the failure it prevents is the unrecoverable kind. |
+
+| 3.10 | **Does the nightly cron mail grantees by itself?** | `wrangler.toml:392` runs `0 7 * * *` on production, about 2am Central, and `src/index.ts:2511` calls `runReportReminders` with **no count guard and no human** — that guard, `runRemindersNow`, is on the manual path only. The awards importer created an active grantee login from each CSV row (`src/import/importAwards.ts:406`), so **all thirteen are mailable now**: thirteen logins, thirteen distinct domains, none blank. `docs/ONBOARDING.md` said the opposite until 9 October and that sentence is what the plan for the human note rested on. Set a due date and walk away, and fourteen days before it the thirteen are mailed overnight with nobody having read the letter. | **Turn the automatic chase off for the 2025 ask.** Make the first contact manual, from the Reports screen, where the plan names every address and the run refuses if the count moves. Re-enable the cron once you have seen one real round go out. The addresses came from a spreadsheet and have never been confirmed to be current — that is a different question from whether the code works, and only the first letter can answer it. |
+| 3.11 | **Is a report due "today" in Central or in UTC?** | `reportDue.today()` is the UTC day while the grantee portal shows Central (`src/lib/reportDue.ts:29`). A grantee opening the portal at 8pm Central on the due date reads "due today"; the server already counts them a day late, and under a `block` compliance policy that can **refuse their next application** for a report that is not late. Flagged four times and never fixed, because it moves a boundary that refuses people money and that is not a decision to slip into a commit. | **Central, everywhere.** It is the zone the deadline was communicated in, and the one the grantee is standing in. The cost is one shared helper and a check that bans the other form; the cost of leaving it is refusing a nonprofit money over six hours. |
+
+| 3.12 | **The five questions the thirteen will be asked.** | They are a **placeholder set with no author at the Foundation.** §2.1a of this document says so in its own words: *"a plausible starter set that I made up. It is not confirmed by anyone and must not be treated as your metrics."* Production now holds those five, byte for byte, and the report form is published. A published form is immutable by design and the metric key is the series identity — change the key later and the series splits in two, silently. Right now **no real grantee has answered**: one submission exists and it is the end-to-end test. So this is free to change today and permanent the moment the first real report lands. The second question, *"What were you counting?"*, is free **text**, so the Impact screen's people-served total sums organizations that may be counting meals, visits and households, and the basis cannot be grouped or filtered. | **Write the five yourself, this week, even if you keep four of mine.** The 2025 answers become the baseline every future board and league report is measured against, and a baseline nobody chose is worse than a baseline that is merely imperfect. At minimum, replace the free-text basis with a fixed list of options so the totals mean something. |
 
 ---
 

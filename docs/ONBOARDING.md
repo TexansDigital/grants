@@ -23,11 +23,29 @@ morning; three or four weeks out leaves room to send the human note first.
 
 **2. Who sends the human note, and when?**
 
-The system cannot chase an organization that has never claimed its grant --
-reminders only reach addresses that already have an account. Until a nonprofit
-comes through `/tell-us` and an admin connects them, they are invisible to
-every automated nudge. Somebody has to write to the thirteen, and somebody has
-to watch the Past grantees queue and notice who has not appeared in it.
+**This answer was wrong, and was corrected on 2026-10-09. Read the new one.**
+
+It used to say the thirteen were "invisible to every automated nudge" until a
+nonprofit came through `/tell-us` and an admin connected them. **They are not.**
+The awards importer creates an active grantee login from each CSV row's contact
+email -- `src/import/importAwards.ts:406` writes `role='grantee', is_active=1`
+-- and the reminder job selects exactly those rows
+(`src/lib/reportReminders.ts:208`). Production holds **thirteen active grantee
+logins on thirteen distinct domains, none of them blank**, and not one of them
+arrived through `/tell-us`.
+
+So the safety this answer promised does not exist. The nightly cron
+(`wrangler.toml:392`, `0 7 * * *`, about 2am Central) calls
+`runReportReminders` with no count guard and no human
+(`src/index.ts:2511`) -- that guard, `runRemindersNow`, is on the **manual**
+path only. Set a due date and walk away, and fourteen days before it the
+thirteen are mailed automatically, overnight, with nobody having read the
+letter.
+
+Somebody still has to write the human note, and somebody still has to watch the
+Past grantees queue. What has changed is that the automated chase is **not**
+waiting for them. Decide §3.10 in `docs/BLOCKED-ON-YOU.md` before any due date
+is set.
 
 **3. Who holds the second admin account, and what happens if the primary
 owner is away during an open cycle?**
