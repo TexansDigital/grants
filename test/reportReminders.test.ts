@@ -714,6 +714,7 @@ describe('running the reminders now', () => {
 
     const run = await runRemindersNow(liveEnv(), ctx(), admin, {
       expectLetters: plan.lettersWouldSend,
+      expectDigest: plan.digest,
       fetcher: accepts,
     });
 
@@ -725,7 +726,16 @@ describe('running the reminders now', () => {
     const g = await granteeOwing({ dueInDays: 3 });
 
     const e = await appErrorFrom(
-      runRemindersNow(liveEnv(), ctx(), admin, { expectLetters: 0, fetcher: accepts }),
+      /*
+        * A digest is supplied so this still exercises the COUNT guard. With an
+        * empty one the run would refuse earlier, for a different reason, and
+        * this test would pass without testing what it names.
+        */
+      runRemindersNow(liveEnv(), ctx(), admin, {
+        expectLetters: 0,
+        expectDigest: (await planReportReminders(liveEnv(), admin)).digest,
+        fetcher: accepts,
+      }),
     );
 
     expect(e.code).toBe('VALIDATION_FAILED');
@@ -747,6 +757,7 @@ describe('running the reminders now', () => {
     const e = await appErrorFrom(
       runRemindersNow(liveEnv(), ctx(), admin, {
         expectLetters: Number.NaN,
+        expectDigest: (await planReportReminders(liveEnv(), admin)).digest,
         fetcher: accepts,
       }),
     );
@@ -763,6 +774,7 @@ describe('running the reminders now', () => {
 
     const run = await runRemindersNow(liveEnv(), ctx(), admin, {
       expectLetters: 0,
+      expectDigest: (await planReportReminders(liveEnv(), admin)).digest,
       fetcher: accepts,
     });
 
@@ -777,6 +789,9 @@ describe('running the reminders now', () => {
     const e = await appErrorFrom(
       runRemindersNow(liveEnv(), ctx(), reviewerSession(), {
         expectLetters: 1,
+        // Non-empty, so the refusal under test is the ROLE check and not the
+        // digest check that now precedes the plan.
+        expectDigest: 'not-checked-for-a-reviewer',
         fetcher: accepts,
       }),
     );
@@ -801,20 +816,27 @@ describe('running the reminders now', () => {
  * WHETHER, never WHAT the letter said. The provider's payload is the last
  * place the text exists before it reaches somebody, so that is what this reads.
  */
-describe('what the letter actually says', () => {
-  /** A provider that accepts and keeps the payload it was given. */
-  const capturing = () => {
-    const sent: { subject: string; html: string; text: string }[] = [];
-    const fetcher: typeof fetch = async (_url, init) => {
-      const body = JSON.parse(String((init as RequestInit).body ?? '{}'));
-      sent.push({ subject: body.subject ?? '', html: body.html ?? '', text: body.text ?? '' });
-      return new Response(JSON.stringify({ id: 'msg_capture' }), {
-        status: 200,
-        headers: { 'content-type': 'application/json' },
-      });
-    };
-    return { sent, fetcher };
+/**
+ * A provider that accepts and keeps the payload it was given.
+ *
+ * MODULE SCOPE, because two describe blocks need it: what the letter says,
+ * and whether the Foundation's note survives into the letter that left. The
+ * second was asserting against `email_messages`, which stores no body.
+ */
+const capturing = () => {
+  const sent: { subject: string; html: string; text: string }[] = [];
+  const fetcher: typeof fetch = async (_url, init) => {
+    const body = JSON.parse(String((init as RequestInit).body ?? '{}'));
+    sent.push({ subject: body.subject ?? '', html: body.html ?? '', text: body.text ?? '' });
+    return new Response(JSON.stringify({ id: 'msg_capture' }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    });
   };
+  return { sent, fetcher };
+};
+
+describe('what the letter actually says', () => {
 
   it('names the due date the record holds, not the day before', async () => {
     const g = await granteeOwing({ dueInDays: 14 });
@@ -945,6 +967,7 @@ describe("previewing and editing the letter before it goes", () => {
   it("carries the Foundation's note, and the note reaches the grantee", async () => {
     const g = await granteeOwing({ dueInDays: 3 });
     const NOTE = "If the date is a problem, reply and we will move it.";
+    const { sent, fetcher } = capturing();
 
     const plan = await planReportReminders(mailEnv(), admin, { note: NOTE });
     expect(plan.note).toBe(NOTE);
@@ -954,15 +977,28 @@ describe("previewing and editing the letter before it goes", () => {
       expectLetters: plan.lettersWouldSend,
       note: NOTE,
       expectDigest: plan.digest,
-      fetcher: accepts,
+      fetcher,
     });
 
-    // Not just that a letter was sent -- that THIS text was in it.
-    const row = await db
-      .prepare(`SELECT subject FROM email_messages WHERE to_email = ?`)
-      .bind(g.granteeEmail!)
-      .first<{ subject: string }>();
-    expect(row).not.toBeNull();
+    /*
+     * THE LETTER THAT ACTUALLY LEFT, captured from the provider payload.
+     *
+     * This assertion used to read `SELECT subject FROM email_messages` and
+     * check the row was not null, under a comment claiming it proved the note
+     * was in the letter. It proved nothing: 0007_email.sql deliberately stores
+     * no body, and the note never reaches the subject. Dropping `note` from
+     * the send would have left every letter without it while this stayed
+     * green and the preview still showed it -- a test passing for the wrong
+     * reason, in the exact corner CLAUDE.md warns about, written hours after
+     * that rule. Found by an adversarial review.
+     */
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.text).toContain(NOTE);
+    expect(sent[0]!.html).toContain(NOTE);
+
+    // And the preview the administrator read is the letter that was sent.
+    expect(sent[0]!.text).toBe(plan.wouldMail[0]!.letters[0]!.text);
+    expect(sent[0]!.subject).toBe(plan.wouldMail[0]!.letters[0]!.subject);
   });
 
   it("refuses the send when the note changed after the preview", async () => {
@@ -1016,6 +1052,68 @@ describe("previewing and editing the letter before it goes", () => {
     );
     expect(e.publicMessage).toContain("not what was on screen");
     expect(await mailCount(`moved-${g.granteeEmail}`)).toBe(0);
+  });
+
+  it("refuses when a due date moved after the preview", async () => {
+    /*
+     * THE HOLE THE FIRST VERSION OF THIS FEATURE HAD, found by an adversarial
+     * review of it. The digest covered the note, the addresses and the count
+     * -- and a moved due date changes none of those. One letter, one address,
+     * same note, different date. The administrator approved one letter and a
+     * nonprofit would have received another.
+     *
+     * The Reports screen has a "Change the due date" control, so this is not
+     * a hypothetical sequence: it is two staff doing their jobs in two tabs.
+     */
+    const g = await granteeOwing({ dueInDays: 14 });
+    const plan = await planReportReminders(mailEnv(), admin);
+    expect(plan.lettersWouldSend).toBe(1);
+
+    const inThreeDays = new Date(Date.now() + 3 * 86_400_000)
+      .toISOString()
+      .slice(0, 10);
+    // Through forceDueDate because 0029 refuses a bare UPDATE of due_date.
+    await forceDueDate(g.periodId, inThreeDays);
+
+    const after = await planReportReminders(mailEnv(), admin);
+    // The things the old digest covered are all unchanged ...
+    expect(after.lettersWouldSend).toBe(plan.lettersWouldSend);
+    expect(after.wouldMail[0]!.recipients).toEqual(plan.wouldMail[0]!.recipients);
+    expect(after.note).toBe(plan.note);
+    // ... and the letter is different, so the digest must be too.
+    expect(after.digest).not.toBe(plan.digest);
+
+    const e = await appErrorFrom(
+      runRemindersNow(liveEnv(), ctx(), admin, {
+        expectLetters: plan.lettersWouldSend,
+        note: plan.note,
+        expectDigest: plan.digest,
+        fetcher: accepts,
+      }),
+    );
+    expect(e.publicMessage).toContain("not what was on screen");
+    expect(await mailCount(g.granteeEmail!)).toBe(0);
+  });
+
+  it("refuses a send that offers no digest at all", async () => {
+    /*
+     * The digest used to be optional, so a POST carrying a count and a note
+     * and nothing else mailed every grantee arbitrary text with no preview.
+     * A guard that can be skipped by omitting a field is not a guard.
+     */
+    const g = await granteeOwing({ dueInDays: 3 });
+    const plan = await planReportReminders(mailEnv(), admin);
+
+    const e = await appErrorFrom(
+      runRemindersNow(liveEnv(), ctx(), admin, {
+        expectLetters: plan.lettersWouldSend,
+        note: "Text nobody previewed.",
+        expectDigest: "",
+        fetcher: accepts,
+      }),
+    );
+    expect(e.publicMessage).toContain("Preview the letters before sending");
+    expect(await mailCount(g.granteeEmail!)).toBe(0);
   });
 
   it("sends no note at all from the nightly cron", async () => {

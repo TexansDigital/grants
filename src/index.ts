@@ -853,11 +853,12 @@ const routes: readonly Route[] = [
             typeof body.expectLetters === 'number' ? body.expectLetters : Number.NaN,
           note: typeof body.note === 'string' ? body.note : null,
           /*
-           * Only passed on when the client actually sent one. Undefined means
-           * "no digest offered", which runRemindersNow treats as the older
-           * count-only guard rather than as a mismatch.
+           * An empty string when absent, which runRemindersNow refuses. It
+           * used to pass `undefined` and have the guard skip itself -- so a
+           * bare POST carrying a count and a note bypassed the preview
+           * entirely and mailed thirteen nonprofits text nobody had read.
            */
-          expectDigest: typeof body.digest === 'string' ? body.digest : undefined,
+          expectDigest: typeof body.digest === 'string' ? body.digest : '',
         }),
         ctx,
       );

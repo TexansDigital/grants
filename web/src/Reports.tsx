@@ -1277,6 +1277,11 @@ function TonightsReminders(): ReactElement {
           onChange={(e) => setNote(e.target.value)}
         />
         <p className="meta">{600 - note.length} characters left</p>
+        <p className="help">
+          Sentences, not links. A bare URL here stays plain text in the letter,
+          but most mail clients turn one into a link &mdash; and this letter&rsquo;s
+          whole design is that it carries no token and exactly one button.
+        </p>
       </div>
 
       <div className="actions">
@@ -1390,6 +1395,17 @@ function TonightsReminders(): ReactElement {
                               <strong>Subject:</strong> {letter.subject}
                             </p>
                             <pre className="letter-body">{letter.text}</pre>
+                            {/*
+                              SAID, BECAUSE IT IS NOT OBVIOUS. This is the
+                              plain-text part. The HTML part carries the same
+                              words through the same template, so the WORDING
+                              shown here is the wording sent -- but a defect
+                              in the HTML layout alone would not appear here.
+                            */}
+                            <p className="meta">
+                              The plain-text version. The same words go out in the
+                              branded HTML letter.
+                            </p>
                           </div>
                         ))}
                     </>

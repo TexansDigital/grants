@@ -359,23 +359,40 @@ export function cleanNote(note: string | null | undefined): string {
 /**
  * A fingerprint of what the screen showed.
  *
- * Over the NOTE, every RECIPIENT ADDRESS and the LETTER COUNT -- the three
- * things an administrator is being asked to approve. Not over the rendered
- * bodies, which contain a countdown that changes at midnight: a plan read at
- * 23:59 and confirmed at 00:01 would otherwise refuse for a reason nobody
- * could act on, and the count guard already catches a changed rung.
+ * Over the NOTE, every RECIPIENT ADDRESS, the LETTER COUNT, and THE IDENTITY
+ * OF EVERY REPORT NAMED IN A LETTER -- its period id, its due date and its
+ * label.
  *
- * Addresses are sorted so two runs over the same set agree.
+ * THE REPORTS WERE MISSING UNTIL 2026-10-09, and that hole was the whole
+ * guard. Note, addresses and count are unchanged when a due date moves: the
+ * Reports screen's own "Change the due date" control, or a second obligation
+ * generated against the same award, alters which report the letter names and
+ * what day it gives, while the count stays at one letter to one address. An
+ * administrator approved "Final report, November 15"; a nonprofit received
+ * "Final report, November 2". That is the same wrong-letter class this whole
+ * feature exists to prevent, found by an adversarial review of it.
+ *
+ * NOT the rendered bodies, and not the countdown. "Due in 14 days" becomes
+ * "Due in 13 days" at midnight while naming the same date, so hashing the
+ * body would refuse a plan read at 23:59 and confirmed at 00:01 -- a refusal
+ * nobody could act on, about a letter that had not meaningfully changed. The
+ * FACTS are pinned; the relative phrasing around them is not.
+ *
+ * Both lists are sorted so two runs over the same set agree.
  */
 export async function reminderDigest(
   note: string,
   addresses: string[],
   letters: number,
+  reports: { reportPeriodId: string; dueDate: string; label: string }[],
 ): Promise<string> {
   const payload = JSON.stringify({
     note,
     to: [...addresses].sort(),
     letters,
+    reports: reports
+      .map((r) => `${r.reportPeriodId}|${r.dueDate}|${r.label}`)
+      .sort(),
   });
   const bytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(payload));
   return [...new Uint8Array(bytes)]
@@ -472,6 +489,7 @@ export async function planReportReminders(
       note,
       wouldMail.flatMap((o) => o.recipients),
       lettersWouldSend,
+      wouldMail.flatMap((o) => o.reports),
     ),
   };
 }
@@ -740,8 +758,8 @@ export async function runRemindersNow(
     fetcher?: typeof fetch;
     /** The Foundation's note, exactly as it was previewed. */
     note?: string | null;
-    /** The plan's digest, as the screen was shown it. */
-    expectDigest?: string;
+    /** The plan's digest, as the screen was shown it. REQUIRED. */
+    expectDigest: string;
   },
 ): Promise<ConfirmedReminderRun> {
   // planReportReminders refuses a non-admin, which covers this path too. The
@@ -794,7 +812,18 @@ export async function runRemindersNow(
    * guard rather than a refusal it cannot explain. A client that DOES send
    * one is held to it.
    */
-  if (opts.expectDigest !== undefined && opts.expectDigest !== plan.digest) {
+  if (typeof opts.expectDigest !== "string" || opts.expectDigest.length === 0) {
+    throw new AppError(
+      "VALIDATION_FAILED",
+      "Preview the letters before sending. Nothing was sent.",
+      {
+        internalMessage: "reminder run refused: no digest offered",
+        severity: "warn",
+      },
+    );
+  }
+
+  if (opts.expectDigest !== plan.digest) {
     throw new AppError(
       "VALIDATION_FAILED",
       "Something changed since you read the plan \u2014 the recipients or the note " +
