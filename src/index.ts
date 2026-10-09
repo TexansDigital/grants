@@ -823,8 +823,17 @@ const routes: readonly Route[] = [
     method: 'GET',
     path: '/api/report-reminders/plan',
     roles: ADMIN_ONLY,
-    handler: async ({ env, ctx, session }) =>
-      json(await planReportReminders(env, session), ctx),
+    /*
+     * `note` is a query parameter rather than a body because this is a GET and
+     * it stays a GET: re-reading the plan with a different note still writes
+     * nothing, and the method saying so is worth more than the tidiness of a
+     * POST. The note is capped where it is rendered, not here.
+     */
+    handler: async ({ url, env, ctx, session }) =>
+      json(
+        await planReportReminders(env, session, { note: url.searchParams.get('note') }),
+        ctx,
+      ),
   },
   /*
    * SENDING THEM, NOW. The body must carry the letter count the admin was
@@ -842,6 +851,13 @@ const routes: readonly Route[] = [
         await runRemindersNow(env, ctx, session, {
           expectLetters:
             typeof body.expectLetters === 'number' ? body.expectLetters : Number.NaN,
+          note: typeof body.note === 'string' ? body.note : null,
+          /*
+           * Only passed on when the client actually sent one. Undefined means
+           * "no digest offered", which runRemindersNow treats as the older
+           * count-only guard rather than as a mismatch.
+           */
+          expectDigest: typeof body.digest === 'string' ? body.digest : undefined,
         }),
         ctx,
       );

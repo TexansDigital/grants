@@ -141,17 +141,37 @@ rows, status `open`, your due date.
 
 ## Step 6 — Read the letter before anyone gets it
 
-On `/reporting`, open **"Show what tonight's reminders will do."**
+On `/reporting`, press **Preview the letters**.
 
 This is the safety rail, and it is the best thing on the screen. It shows:
 
 - every organization that would be written to,
 - **every email address**, spelled out,
+- **the letter itself** — press *Read the letter* on any organization to see
+  the exact subject and body that address would receive,
 - how many letters would leave the building,
 - whether a mail provider is even configured.
 
-**Read the addresses.** This is the only moment before thirteen nonprofits are
-contacted where a wrong address is cheap to fix.
+**Read the addresses, and read one letter.** This is the only moment before
+thirteen nonprofits are contacted where a mistake is cheap to fix.
+
+### Adding a note
+
+Above the button is **A note from the Foundation**, optional, one paragraph.
+Whatever you write there appears in every letter in this send, between the list
+of reports and the sign-in instructions. For example: *"We know several of you
+are mid-season. If the date is a problem, reply and we will move it."*
+
+Three things about it:
+
+- **It is not saved.** Write it again next time, on purpose. A note written for
+  one round that quietly went out with the next would be worse than no note.
+- **It cannot reach the dates.** The report name, the programme, the due date
+  and the sign-in wording are generated. A letter has already gone out of this
+  system with a hand-computed date that was wrong by a day, which is why.
+- **Edit it and the Send button greys out** until you press Preview again. The
+  letters on screen were rendered with the old note, and the server refuses a
+  send whose note does not match what was previewed.
 
 ---
 
@@ -159,9 +179,11 @@ contacted where a wrong address is cheap to fix.
 
 Press **"Send N now."**
 
-It carries the number you were shown. If anything changed between reading the
-plan and pressing the button, **the run refuses rather than sending a different
-number of letters than you approved.** That is intended.
+It carries the number you were shown, the note you previewed, and a
+fingerprint of both plus every recipient address. If anything moved between
+reading the plan and pressing the button — a letter more, a different address,
+an edited note — **the run refuses and sends nothing.** That is intended: what
+you read is what leaves, or nothing does.
 
 Afterwards the panel reports sent, suppressed, refused by the provider, and how
 many had already been written to today.

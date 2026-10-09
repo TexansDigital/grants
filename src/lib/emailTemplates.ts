@@ -997,7 +997,30 @@ export interface ReportReminderVars {
   /** The reporting page. A plain URL, never a token. */
   portalUrl: string;
   supportEmail: string;
+  /**
+   * One optional paragraph the Foundation writes for THIS run.
+   *
+   * WHAT IT IS FOR. "We know several of you are mid-season; if the date is a
+   * problem, reply and we will move it." A reminder that cannot say anything
+   * human reads as a machine, and the Foundation is not a machine.
+   *
+   * PLAIN TEXT, ESCAPED, AND IT CANNOT REACH THE DATES. It is rendered after
+   * the report lines and before the sign-in instructions, so the facts in the
+   * letter -- which report, which programme, which day -- stay machine-
+   * generated. A human typing "October 22" is exactly how this system got a
+   * letter wrong once already.
+   *
+   * NOT STORED BETWEEN RUNS. A note written for one round that quietly goes
+   * out with the next is a worse failure than having no note at all.
+   */
+  note?: string | null;
 }
+
+/**
+ * The most a note may be. Long enough for a real paragraph, short enough that
+ * nobody pastes a newsletter into a reminder.
+ */
+export const MAX_REMINDER_NOTE = 600;
 
 /**
  * "Your grant report is due."
@@ -1073,12 +1096,21 @@ export const REPORT_REMINDER: EmailTemplate<ReportReminderVars> = {
       `If a report is not yours to file, or the dates look wrong, reply to this message ` +
       `or write to ${v.supportEmail} and we will sort it out.`;
 
+    /*
+     * The note, trimmed and capped. Capping here rather than trusting the
+     * caller: this function is the last thing between a value and a letter,
+     * and every other guard in this file is in the same place for the same
+     * reason.
+     */
+    const note = (v.note ?? '').trim().slice(0, MAX_REMINDER_NOTE);
+
     return {
       subject,
       text: textBlock([
         lead,
         '',
         ...v.lines.map((l) => `  ${line(l)}`),
+        ...(note ? ['', note] : []),
         '',
         howTo,
         '',
@@ -1111,6 +1143,14 @@ export const REPORT_REMINDER: EmailTemplate<ReportReminderVars> = {
               )
               .join('') +
             `</table>`,
+          /*
+           * ESCAPED, and line breaks become <br> rather than being honoured
+           * as markup. Somebody will paste a paragraph with a blank line in
+           * it; that must render as a break, not as an opportunity.
+           */
+          ...(note
+            ? [escapeHtml(note).replace(/\r?\n/g, '<br>')]
+            : []),
           escapeHtml(howTo),
           ...(consequence ? [escapeHtml(consequence)] : []),
         ],

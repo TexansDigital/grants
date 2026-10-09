@@ -1814,3 +1814,36 @@ tbody tr.band:hover {
     min-width: 0;
   }
 }
+
+/*
+ * THE LETTER PREVIEW on the reminders panel.
+ *
+ * The body is rendered by the same call the send makes, so this is the letter
+ * and not a description of it. It is shown as preformatted TEXT rather than as
+ * the HTML version on purpose: the plain-text part is what survives a grantee
+ * reading it in a client that blocks images, and reading the words is the job
+ * here -- the brand treatment has already been seen and is not what anybody
+ * needs to check before pressing send.
+ */
+.letter-preview {
+  flex-basis: 100%;
+  margin: var(--space-2) 0 var(--space-3);
+  padding: var(--space-3);
+  background: var(--surface-3);
+  border-left: 3px solid var(--blue);
+}
+.letter-subject {
+  margin: 0 0 var(--space-2);
+  font-size: 0.8125rem;
+  color: var(--ink);
+}
+.letter-body {
+  margin: 0;
+  /* The letter wraps as the recipient will see it, rather than scrolling. */
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--mono, ui-monospace, Menlo, Consolas, monospace);
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  color: var(--ink-2);
+}

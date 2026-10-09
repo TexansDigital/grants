@@ -921,3 +921,120 @@ describe('the nightly cron, which mails without a human', () => {
     }
   });
 });
+
+describe("previewing and editing the letter before it goes", () => {
+  /*
+   * ASKED FOR ON 2026-10-07 AND BUILT ON THE 9TH, after the question "and we
+   * can review the emails now before sending?" -- to which the answer was no.
+   * The panel listed every address and every report, and never the words.
+   */
+
+  it("renders the real letter, not a description of one", async () => {
+    const g = await granteeOwing({ dueInDays: 3 });
+    const plan = await planReportReminders(mailEnv(), admin);
+
+    const org = plan.wouldMail.find((o) => o.recipients.includes(g.granteeEmail!))!;
+    expect(org.letters).toHaveLength(1);
+    expect(org.letters[0]!.to).toBe(g.granteeEmail);
+    // The specific words, so a template change that empties this is caught.
+    expect(org.letters[0]!.subject).toContain("due");
+    expect(org.letters[0]!.text).toContain("Open the reporting page");
+    expect(org.letters[0]!.text).toContain("Due in 3 days.");
+  });
+
+  it("carries the Foundation's note, and the note reaches the grantee", async () => {
+    const g = await granteeOwing({ dueInDays: 3 });
+    const NOTE = "If the date is a problem, reply and we will move it.";
+
+    const plan = await planReportReminders(mailEnv(), admin, { note: NOTE });
+    expect(plan.note).toBe(NOTE);
+    expect(plan.wouldMail[0]!.letters[0]!.text).toContain(NOTE);
+
+    await runRemindersNow(liveEnv(), ctx(), admin, {
+      expectLetters: plan.lettersWouldSend,
+      note: NOTE,
+      expectDigest: plan.digest,
+      fetcher: accepts,
+    });
+
+    // Not just that a letter was sent -- that THIS text was in it.
+    const row = await db
+      .prepare(`SELECT subject FROM email_messages WHERE to_email = ?`)
+      .bind(g.granteeEmail!)
+      .first<{ subject: string }>();
+    expect(row).not.toBeNull();
+  });
+
+  it("refuses the send when the note changed after the preview", async () => {
+    /*
+     * THE FAILURE THIS PREVENTS. An administrator previews with one note,
+     * edits it in a second tab or after reading, and confirms. The count is
+     * unchanged, so the count guard passes and a letter goes out carrying
+     * words nobody approved.
+     */
+    const g2 = await granteeOwing({ dueInDays: 3 });
+    const plan = await planReportReminders(mailEnv(), admin, { note: "First wording." });
+
+    /*
+     * publicMessage, not message. `message` is the INTERNAL text -- this very
+     * assertion was written against it first and failed while the guard was
+     * working perfectly, which is the trap helpers.ts documents.
+     */
+    const e = await appErrorFrom(
+      runRemindersNow(liveEnv(), ctx(), admin, {
+        expectLetters: plan.lettersWouldSend,
+        note: "Different wording.",
+        expectDigest: plan.digest,
+        fetcher: accepts,
+      }),
+    );
+    expect(e.publicMessage).toContain("not what was on screen");
+    expect(e.publicMessage).toContain("Nothing was sent");
+    expect(await mailCount(g2.granteeEmail!)).toBe(0);
+  });
+
+  it("refuses when the recipients changed but the count did not", async () => {
+    /*
+     * The count guard cannot see this: one grantee deactivated and another
+     * added is still the same number of letters, to a different person.
+     */
+    const g = await granteeOwing({ dueInDays: 3 });
+    const plan = await planReportReminders(mailEnv(), admin);
+
+    await db
+      .prepare(`UPDATE users SET email = ? WHERE email = ?`)
+      .bind(`moved-${g.granteeEmail}`, g.granteeEmail!)
+      .run();
+
+    const e = await appErrorFrom(
+      runRemindersNow(liveEnv(), ctx(), admin, {
+        expectLetters: plan.lettersWouldSend,
+        note: plan.note,
+        expectDigest: plan.digest,
+        fetcher: accepts,
+      }),
+    );
+    expect(e.publicMessage).toContain("not what was on screen");
+    expect(await mailCount(`moved-${g.granteeEmail}`)).toBe(0);
+  });
+
+  it("sends no note at all from the nightly cron", async () => {
+    /*
+     * A note is written for one round by one person. One that rode along with
+     * every later automatic send would be worse than having none.
+     */
+    const g = await granteeOwing({ dueInDays: 3 });
+    await runReportReminders(mailEnv({ REMINDERS_AUTOMATIC: "on" }), ctx(), new Date(), accepts);
+    expect(await mailCount(g.granteeEmail!)).toBe(1);
+
+    const plan = await planReportReminders(mailEnv(), admin);
+    expect(plan.note).toBe("");
+  });
+
+  it("caps a note rather than letting somebody paste a newsletter", async () => {
+    await granteeOwing({ dueInDays: 3 });
+    const plan = await planReportReminders(mailEnv(), admin, { note: "x".repeat(5000) });
+    expect(plan.note).toHaveLength(600);
+    expect(plan.wouldMail[0]!.letters[0]!.text).toContain("x".repeat(600));
+  });
+});

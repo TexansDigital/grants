@@ -41,7 +41,11 @@
 import type { Env, RequestContext, Session } from "../types";
 import { nowIso, formatCalendarDay } from "./time";
 import { sendEmail, transportFor } from "./email";
-import { REPORT_REMINDER, type ReminderLine } from "./emailTemplates";
+import {
+  REPORT_REMINDER,
+  MAX_REMINDER_NOTE,
+  type ReminderLine,
+} from "./emailTemplates";
 import { daysUntil, GRANTEE_OWES } from "./reportDue";
 import { AppError, logError } from "./errors";
 
@@ -260,6 +264,18 @@ export interface ReminderPlanOrg {
     daysUntilDue: number;
     status: string;
   }[];
+  /**
+   * The actual letters, one per recipient address, as they would be sent.
+   *
+   * RENDERED BY THE SAME CALL THE SEND MAKES -- `REPORT_REMINDER.render` on
+   * the same vars -- rather than reconstructed for display. A preview that
+   * can diverge from the send is worse than no preview, because it is
+   * believed.
+   *
+   * Empty for an organization with nobody to write to: there is no recipient,
+   * so there is no letter to show.
+   */
+  letters: { to: string; subject: string; text: string }[];
 }
 
 export interface ReminderPlan {
@@ -283,12 +299,95 @@ export interface ReminderPlan {
    * an empty inbox after a confirmed run is unexplainable.
    */
   transportConfigured: boolean;
+  /**
+   * The note this plan was rendered with, echoed back so the screen and the
+   * letters cannot disagree about what was previewed.
+   */
+  note: string;
+  /**
+   * A fingerprint of exactly what was shown: the note, every recipient
+   * address, and the letter count.
+   *
+   * The confirm sends it back, the server recomputes it, and a mismatch
+   * REFUSES the run. The existing count guard catches "thirteen became
+   * fourteen"; this also catches "the same number of letters, to a different
+   * address" and "somebody edited the note in another tab". What you read is
+   * what leaves, or nothing does.
+   */
+  digest: string;
+}
+
+/**
+ * The letter's variables, built ONCE and used by both the plan and the send.
+ *
+ * This function exists so the preview cannot drift from what is sent. Before
+ * it, the run built these inline and the plan showed a summary; anybody adding
+ * a field would have had to remember to add it twice, and the failure would
+ * have been a preview that quietly lied.
+ */
+export function reminderVars(
+  reports: DueReport[],
+  nowStr: string,
+  portalUrl: string,
+  supportEmail: string,
+  note: string,
+): Parameters<typeof REPORT_REMINDER.render>[0] {
+  return {
+    organizationName: reports[0]!.organizationName,
+    lines: reports.map((r) => ({
+      label: r.label,
+      programName: r.programName,
+      /*
+       * A calendar day, formatted in UTC. Rendering this in Central put
+       * "October 21" in a letter about a report due the 22nd, in the same
+       * sentence as a countdown that said 14 days. See src/lib/time.ts.
+       */
+      dueDisplay: formatCalendarDay(r.dueDate),
+      daysUntilDue: daysUntil(r.dueDate, nowStr),
+    })),
+    portalUrl,
+    supportEmail,
+    note,
+  };
+}
+
+/** A note, trimmed and capped the same way the template will cap it. */
+export function cleanNote(note: string | null | undefined): string {
+  return (note ?? "").trim().slice(0, MAX_REMINDER_NOTE);
+}
+
+/**
+ * A fingerprint of what the screen showed.
+ *
+ * Over the NOTE, every RECIPIENT ADDRESS and the LETTER COUNT -- the three
+ * things an administrator is being asked to approve. Not over the rendered
+ * bodies, which contain a countdown that changes at midnight: a plan read at
+ * 23:59 and confirmed at 00:01 would otherwise refuse for a reason nobody
+ * could act on, and the count guard already catches a changed rung.
+ *
+ * Addresses are sorted so two runs over the same set agree.
+ */
+export async function reminderDigest(
+  note: string,
+  addresses: string[],
+  letters: number,
+): Promise<string> {
+  const payload = JSON.stringify({
+    note,
+    to: [...addresses].sort(),
+    letters,
+  });
+  const bytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(payload));
+  return [...new Uint8Array(bytes)]
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("")
+    .slice(0, 32);
 }
 
 export async function planReportReminders(
   env: Env,
   session: Session,
-  opts: { now?: string } = {},
+  opts: { now?: string; note?: string | null } = {},
 ): Promise<ReminderPlan> {
   if (session.role !== "admin") {
     throw new AppError("FORBIDDEN", "Only an administrator can do that.", {
@@ -298,6 +397,10 @@ export async function planReportReminders(
   }
 
   const nowStr = opts.now ?? nowIso();
+  const note = cleanNote(opts.note);
+  const portalUrl = `${(env.APPLICANT_BASE_URL ?? "").trim()}/reports`;
+  const supportEmail =
+    (env.EMAIL_REPLY_TO ?? "").trim() || "grants@houstontexansfoundation.org";
   const owed = await reportsOwed(env.DB, nowStr);
   const dueToday = owed.filter((r) => isReminderDay(r.dueDate, nowStr));
 
@@ -330,6 +433,17 @@ export async function planReportReminders(
         daysUntilDue: daysUntil(r.dueDate, nowStr),
         status: r.status,
       })),
+      /*
+       * THE REAL LETTERS. Rendered here, by the same call the send makes, on
+       * vars from the same builder -- so this is not a description of the
+       * letter, it is the letter.
+       */
+      letters: people.map((person) => {
+        const rendered = REPORT_REMINDER.render(
+          reminderVars(reports, nowStr, portalUrl, supportEmail, note),
+        );
+        return { to: person.email, subject: rendered.subject, text: rendered.text };
+      }),
     };
     if (people.length === 0) {
       withNoContact.push(entry);
@@ -353,6 +467,12 @@ export async function planReportReminders(
     withNoContact,
     lettersWouldSend,
     transportConfigured: transportFor(env) !== null,
+    note,
+    digest: await reminderDigest(
+      note,
+      wouldMail.flatMap((o) => o.recipients),
+      lettersWouldSend,
+    ),
   };
 }
 
@@ -384,6 +504,15 @@ export async function runReportReminders(
    * `transport` argument, which exists so no production path is untestable.
    */
   fetcher: typeof fetch = fetch,
+  /*
+   * The Foundation's note for THIS run, or none.
+   *
+   * Defaulted to empty so the NIGHTLY CRON carries no note: a note is written
+   * for a particular round by a particular person, and one that silently rode
+   * along with every later automatic send would be worse than no note at all.
+   * Only the confirmed manual send passes one.
+   */
+  note = "",
 ): Promise<ReminderRun> {
   const nowStr = now.toISOString();
   const owed = await reportsOwed(env.DB, nowStr);
@@ -456,19 +585,15 @@ export async function runReportReminders(
       continue;
     }
 
-    const lines: ReminderLine[] = reports.map((r) => ({
-      label: r.label,
-      programName: r.programName,
-      /*
-       * A CALENDAR DAY, not an instant. `report_periods.due_date` is a plain
-       * YYYY-MM-DD somebody typed into a date field; converting it to Central
-       * rendered it a day early, and a grantee was emailed "October 21" about
-       * a report due the 22nd -- in the same sentence as "due in 14 days",
-       * which counted to the 22nd.
-       */
-      dueDisplay: formatCalendarDay(r.dueDate),
-      daysUntilDue: daysUntil(r.dueDate, nowStr),
-    }));
+    /*
+     * BUILT BY THE SAME FUNCTION THE PREVIEW USES, so what an administrator
+     * reads on the Reports screen and what a grantee receives cannot drift
+     * apart. Before that shared builder these were two copies of the same
+     * mapping, and a field added to one would silently have been missing from
+     * the other.
+     */
+    const vars = reminderVars(reports, nowStr, portalUrl, supportEmail, note);
+    const lines: ReminderLine[] = vars.lines;
 
     for (const person of people) {
       try {
@@ -483,12 +608,7 @@ export async function runReportReminders(
             // guarantee is the unique index rather than an assumption about
             // how often the scheduler runs.
             idempotencyKey: `report_reminder:${person.id}:${day}`,
-            vars: {
-              organizationName: reports[0]!.organizationName,
-              lines,
-              portalUrl,
-              supportEmail,
-            },
+            vars,
             context: {
               day,
               organization_id: organizationId,
@@ -614,7 +734,15 @@ export async function runRemindersNow(
   env: Env,
   ctx: RequestContext,
   session: Session,
-  opts: { expectLetters: number; now?: string; fetcher?: typeof fetch },
+  opts: {
+    expectLetters: number;
+    now?: string;
+    fetcher?: typeof fetch;
+    /** The Foundation's note, exactly as it was previewed. */
+    note?: string | null;
+    /** The plan's digest, as the screen was shown it. */
+    expectDigest?: string;
+  },
 ): Promise<ConfirmedReminderRun> {
   // planReportReminders refuses a non-admin, which covers this path too. The
   // check is repeated rather than inherited because this is the writing path,
@@ -635,7 +763,8 @@ export async function runRemindersNow(
   }
 
   const nowStr = opts.now ?? nowIso();
-  const plan = await planReportReminders(env, session, { now: nowStr });
+  const note = cleanNote(opts.note);
+  const plan = await planReportReminders(env, session, { now: nowStr, note });
 
   if (plan.lettersWouldSend !== opts.expectLetters) {
     throw new AppError(
@@ -653,6 +782,33 @@ export async function runRemindersNow(
   }
 
   /*
+   * THE DIGEST, which is the count guard's stronger sibling.
+   *
+   * The count catches "thirteen became fourteen". It does NOT catch the same
+   * number of letters going somewhere else -- a grantee account deactivated
+   * and another added between reading and confirming -- nor a note edited in
+   * a second tab after this one rendered. The digest covers the note, every
+   * address and the count, so what was read is what leaves, or nothing does.
+   *
+   * Optional, so an older client that sends no digest still gets the count
+   * guard rather than a refusal it cannot explain. A client that DOES send
+   * one is held to it.
+   */
+  if (opts.expectDigest !== undefined && opts.expectDigest !== plan.digest) {
+    throw new AppError(
+      "VALIDATION_FAILED",
+      "Something changed since you read the plan \u2014 the recipients or the note " +
+        "are not what was on screen. Nothing was sent. Read the plan again.",
+      {
+        internalMessage:
+          `reminder run refused on digest: plan ${plan.digest}, ` +
+          `caller ${opts.expectDigest}`,
+        severity: "warn",
+      },
+    );
+  }
+
+  /*
    * NOTHING TO DO IS NOT A FAILURE, and it is the state production is in
    * before any obligation exists. Returning the zeroed run keeps the screen
    * able to say "nobody was due" rather than showing an error.
@@ -662,6 +818,7 @@ export async function runRemindersNow(
     ctx,
     new Date(nowStr),
     opts.fetcher ?? fetch,
+    note,
   );
   return { ...run, plan };
 }

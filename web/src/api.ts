@@ -1341,18 +1341,27 @@ export const api = {
    * src/lib/reportReminders.ts for why it is a separate function there rather
    * than a flag on the run.
    */
-  reminderPlan: (signal?: AbortSignal) =>
-    get<ReminderPlan>("/api/report-reminders/plan", signal),
+  reminderPlan: (note?: string, signal?: AbortSignal) =>
+    get<ReminderPlan>(
+      `/api/report-reminders/plan${note ? `?note=${encodeURIComponent(note)}` : ""}`,
+      signal,
+    ),
   /*
    * `expectLetters` is the count the panel was SHOWN. The server refuses the
    * run if the plan has changed since, and sends nothing. The panel must pass
    * what it displayed, never a freshly fetched number -- passing a fresh one
    * would defeat the entire check.
    */
-  runRemindersNow: (expectLetters: number) =>
+  /*
+   * `digest` and `note` come from the plan the panel DISPLAYED, never from a
+   * fresh fetch. The whole point is that the server re-derives them and
+   * refuses if they moved; handing it current values would defeat the check
+   * exactly as passing a fresh count would.
+   */
+  runRemindersNow: (expectLetters: number, note: string, digest: string) =>
     request<ConfirmedReminderRun>("/api/report-reminders/run", {
       method: "POST",
-      body: { expectLetters },
+      body: { expectLetters, note, digest },
     }),
   dataHealth: (signal?: AbortSignal) =>
     get<HealthReport>("/api/data-health", signal),
@@ -1478,6 +1487,12 @@ export interface ReminderPlanOrg {
     daysUntilDue: number;
     status: string;
   }[];
+  /**
+   * The letters themselves, one per recipient, exactly as they would be sent.
+   * Rendered server-side by the same call the send makes, so the preview and
+   * the letter cannot diverge.
+   */
+  letters: { to: string; subject: string; text: string }[];
 }
 
 export interface ReminderPlan {
@@ -1488,6 +1503,13 @@ export interface ReminderPlan {
   lettersWouldSend: number;
   /** False means nothing would actually arrive: no provider is configured. */
   transportConfigured: boolean;
+  /** The note these letters were rendered with. */
+  note: string;
+  /**
+   * A fingerprint of the note, the recipients and the count. Send it back with
+   * the confirm; the server refuses if anything moved since this was read.
+   */
+  digest: string;
 }
 
 export interface ConfirmedReminderRun {

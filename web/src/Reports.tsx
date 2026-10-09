@@ -1178,6 +1178,14 @@ function MoveDueDate({
  * checked against intent; "one letter, to the mailbox I control" can.
  */
 function TonightsReminders(): ReactElement {
+  /*
+   * THE NOTE IS NOT SAVED ANYWHERE. It lives in this component's state for as
+   * long as the panel is open and goes nowhere else. A note written for one
+   * round that quietly rode along with the next would be a worse failure than
+   * having no note at all, so there is deliberately nothing to persist it.
+   */
+  const [note, setNote] = useState("");
+  const [open, setOpen] = useState<string | null>(null);
   const [state, setState] = useState<
     | { kind: "idle" }
     | { kind: "loading" }
@@ -1190,7 +1198,7 @@ function TonightsReminders(): ReactElement {
   const load = useCallback(async () => {
     setState({ kind: "loading" });
     try {
-      setState({ kind: "plan", plan: await api.reminderPlan() });
+      setState({ kind: "plan", plan: await api.reminderPlan(note) });
     } catch (e) {
       setState({
         kind: "error",
@@ -1200,13 +1208,16 @@ function TonightsReminders(): ReactElement {
             : "Could not work out tonight\u2019s reminders.",
       });
     }
-  }, []);
+  }, [note]);
 
   const send = useCallback(async (plan: ReminderPlan) => {
     const addresses = plan.wouldMail.flatMap((o) => o.recipients);
     const ok = window.confirm(
       `Send ${plan.lettersWouldSend} reminder${plan.lettersWouldSend === 1 ? "" : "s"} now, to:\n\n` +
         `${addresses.join("\n")}\n\n` +
+        (plan.note
+          ? `Each letter carries your note:\n\n"${plan.note}"\n\n`
+          : "No note is attached.\n\n") +
         "This cannot be unsent.",
     );
     if (!ok) return;
@@ -1215,7 +1226,17 @@ function TonightsReminders(): ReactElement {
       // The count the panel DISPLAYED. See the note above.
       setState({
         kind: "sent",
-        run: await api.runRemindersNow(plan.lettersWouldSend),
+        /*
+         * All three come from the plan THIS PANEL DISPLAYED. The note too:
+         * `plan.note` is what the letters on screen were rendered with, which
+         * is not necessarily what is in the textarea right now if somebody
+         * typed after previewing. The server refuses on the digest if so.
+         */
+        run: await api.runRemindersNow(
+          plan.lettersWouldSend,
+          plan.note,
+          plan.digest,
+        ),
       });
     } catch (e) {
       setState({
@@ -1231,8 +1252,33 @@ function TonightsReminders(): ReactElement {
   const plan =
     state.kind === "plan" || state.kind === "sending" ? state.plan : null;
 
+  /* The textarea has been edited since the letters on screen were rendered. */
+  const stale = plan !== null && plan.note !== note.trim().slice(0, 600);
+
   return (
     <div className="panel-decide">
+      <div className="field">
+        <label htmlFor="reminder-note">
+          A note from the Foundation <span className="meta">(optional)</span>
+        </label>
+        <p className="help">
+          One paragraph, added to every letter in this send, between the list of
+          reports and the sign-in instructions. It is not saved: write it again
+          next time, on purpose. The dates and the sign-in wording are generated
+          and cannot be edited here &mdash; a letter has already gone out with a
+          hand-typed date that was wrong by a day.
+        </p>
+        <textarea
+          id="reminder-note"
+          rows={3}
+          maxLength={600}
+          value={note}
+          placeholder="We know several of you are mid-season. If the date is a problem, reply and we will move it."
+          onChange={(e) => setNote(e.target.value)}
+        />
+        <p className="meta">{600 - note.length} characters left</p>
+      </div>
+
       <div className="actions">
         <button
           type="button"
@@ -1242,13 +1288,22 @@ function TonightsReminders(): ReactElement {
         >
           {state.kind === "loading"
             ? "Working\u2026"
-            : "Show what tonight\u2019s reminders will do"}
+            : plan
+              ? "Preview again"
+              : "Preview the letters"}
         </button>
         {plan && plan.lettersWouldSend > 0 && (
           <button
             type="button"
             className="btn small"
-            disabled={state.kind === "sending"}
+            /*
+             * REFUSED WHILE THE NOTE HAS BEEN EDITED SINCE THE PREVIEW. The
+             * server would refuse this anyway, on the digest -- this just
+             * means the administrator finds out before pressing rather than
+             * after, and the message is "preview it again" rather than an
+             * error about a fingerprint.
+             */
+            disabled={state.kind === "sending" || stale}
             onClick={() => void send(plan)}
           >
             {state.kind === "sending"
@@ -1287,6 +1342,13 @@ function TonightsReminders(): ReactElement {
             </p>
           )}
 
+          {stale && (
+            <p className="banner" role="alert">
+              The note has changed since these letters were rendered. Press
+              Preview again to see what would actually be sent.
+            </p>
+          )}
+
           {plan.wouldMail.length > 0 && (
             <ul className="findings">
               {plan.wouldMail.map((o) => (
@@ -1298,6 +1360,40 @@ function TonightsReminders(): ReactElement {
                       .map((r) => `${r.label} (${dueWording(r.daysUntilDue)})`)
                       .join("; ")}
                   </span>
+                  {/*
+                    THE LETTER ITSELF, rendered by the same call the send
+                    makes. Collapsed by default: thirteen letters expanded is
+                    a wall nobody reads, and a preview nobody reads is the
+                    thing this panel exists to prevent.
+                  */}
+                  {o.letters.length > 0 && (
+                    <>
+                      <button
+                        type="button"
+                        className="btn link small"
+                        aria-expanded={open === o.organizationId}
+                        onClick={() =>
+                          setOpen(open === o.organizationId ? null : o.organizationId)
+                        }
+                      >
+                        {open === o.organizationId
+                          ? "Hide the letter"
+                          : o.letters.length === 1
+                            ? "Read the letter"
+                            : `Read the ${o.letters.length} letters`}
+                      </button>
+                      {open === o.organizationId &&
+                        o.letters.map((letter) => (
+                          <div className="letter-preview" key={letter.to}>
+                            <p className="meta">To: {letter.to}</p>
+                            <p className="letter-subject">
+                              <strong>Subject:</strong> {letter.subject}
+                            </p>
+                            <pre className="letter-body">{letter.text}</pre>
+                          </div>
+                        ))}
+                    </>
+                  )}
                 </li>
               ))}
             </ul>
