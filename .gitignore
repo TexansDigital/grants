@@ -40,3 +40,6 @@ seeds/admins.sql
 export-prod/
 export-preview/
 demo-award.csv
+
+# Generated deliverables (Word exports of docs/). Not source.
+out/
