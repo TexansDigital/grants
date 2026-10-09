@@ -62,9 +62,12 @@ Know these before you press anything at 3am.
 
 ## Who to call
 
-- **Second admin:** *not yet decided.* `docs/BLOCKED-ON-YOU.md` §3.5. If you
-  are reading this because the primary owner is unreachable, this gap is the
-  reason, and it should be filled before the next cycle opens.
+- **The other admins:** Adam Cann, Allie Gentile and Amanda Grosdidier. All
+  three can do anything in this system, including everything on this page. If
+  you are reading this because one of them is unreachable, try the other two.
+  Verify at any time with `npm run golive`, which names every active admin who
+  has never signed in — an account nobody has used is an assumption about
+  Cloudflare Access, not a continuity plan.
 - **Mail delivery into `houstontexans.com`:** the Texans' own mail admins.
   Messages from the Foundation domain authenticate correctly (SPF, DKIM and
   DMARC all pass — confirmed by Google's own DMARC report) and are still

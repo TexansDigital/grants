@@ -71,6 +71,22 @@ const LABEL = { ok: 'READY ', blocked: 'BLOCK ', warn: 'WATCH ', open: 'OPEN  ',
  * for a diagnostic.
  */
 function record(state, name, detail) {
+  /*
+   * A STATE THAT IS NOT ONE OF THE FIVE PRINTS `undefined` AND READS AS A
+   * PASS. Two were introduced on 2026-10-09 -- 'ready' and 'watch', both
+   * plausible guesses, neither real: the state is 'ok' and 'warn', and 'warn'
+   * is what PRINTS as WATCH. Caught by reading the label table, which is not
+   * a reliable way to catch the third one.
+   *
+   * Throwing is right here. This script exists to be believed, and a check
+   * whose verdict renders as `undefined` is worse than a check that is absent.
+   */
+  if (!(state in LABEL)) {
+    throw new Error(
+      `golive: "${state}" is not a verdict. Use one of: ${Object.keys(LABEL).join(', ')} ` +
+      `(note: 'warn' is the one that prints as WATCH). Offending check: ${name}`,
+    );
+  }
   RESULTS.push({ state, name, detail });
   console.log(`  ${COLOUR[state]}${LABEL[state]}\x1b[0m ${name}`);
   console.log(`         ${detail}`);
@@ -353,6 +369,35 @@ if (!openQuery.ok) {
       : `${admins} active — one admin is a continuity failure if they are unavailable mid-cycle`);
 
   /*
+   * AN ADMIN WHO HAS NEVER SIGNED IN IS NOT A SECOND ADMIN.
+   *
+   * The count above asks whether the rows exist. It does not ask whether
+   * anybody can actually get in, and those are different questions: a staff
+   * admin reaches this system through Cloudflare Access, so the row being
+   * present proves nothing about whether Access admits them. The failure this
+   * catches is the one the count cannot: the emergency arrives, the backup
+   * admin tries for the first time, and finds out then.
+   *
+   * Found on 2026-10-09. Two admins had signed in and a third, added two days
+   * earlier as the continuity answer, never had.
+   */
+  const unused = sql(`SELECT email FROM users
+                       WHERE role='admin' AND is_active=1 AND deleted_at IS NULL
+                         AND last_login_at IS NULL
+                       ORDER BY email`);
+  if (!unused.ok) {
+    record('unknown', 'every admin has proved they can sign in', unused.error ?? 'could not read users');
+  } else if (unused.rows.length === 0) {
+    record('ok', 'every admin has proved they can sign in',
+      'every active admin has signed in at least once');
+  } else {
+    const who = unused.rows.map((r) => r.email).join(', ');
+    record('warn', 'every admin has proved they can sign in',
+      `${who} has never signed in — an admin account nobody has used is an ` +
+      'assumption about Cloudflare Access, not a continuity plan');
+  }
+
+  /*
    * Every migration on disk has been applied to THIS database. A missing one
    * is a table or a column that is not there, and it surfaces later as
    * something unrelated -- which is exactly how the first run of this script
@@ -439,7 +484,7 @@ if (LAST_SECURITY_REVIEW === null) {
       `last one was ${LAST_SECURITY_REVIEW}, ${days} days ago; the agreed interval is ` +
       `${REVIEW_EVERY_DAYS} days, and this system changes weekly`);
   } else {
-    record('ready', 'a security review by somebody who did not write this',
+    record('ok', 'a security review by somebody who did not write this',
       `completed ${LAST_SECURITY_REVIEW}; due again in ${REVIEW_EVERY_DAYS - days} days`);
   }
 }
