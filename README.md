@@ -35,6 +35,17 @@ anywhere by path:
 
     bash ~/grants/scripts/preflight.sh
 
+## If you are here to do a job, not to build one
+
+Start with **`docs/COLLECT-2025-REPORTS.md`** — the procedure for asking the
+thirteen 2025 grantees for an update, screen by screen, with the URL and the
+expected result at every step.
+
+If something is wrong right now: **`docs/IF-SOMETHING-IS-WRONG.md`**.
+
+What a person still has to decide or fetch: **`docs/BLOCKED-ON-YOU.md` §0**,
+which is the only dated, ordered, owner-assigned list in the repository.
+
 ## Status
 
 **The applicant path is complete end to end** — eligibility, sign-in,

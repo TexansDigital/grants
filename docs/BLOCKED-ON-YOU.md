@@ -431,7 +431,7 @@ by design** — that freeze is what stops a form edited this March changing the
 question a grantee answered last October. So the new field cannot appear on the
 old form. A new one has to be built.
 
-Configuration → Inspire Change → **Build a report form from this program's
+**More ▾ → Programs** → Inspire Change → **Build a report form from this program's
 metrics**, read the generated wording, change anything you want, **Publish**.
 
 Do this after §2.1a if the metrics CSV is close, so you build once rather than

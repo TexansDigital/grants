@@ -20,7 +20,7 @@ leaves behind. See "What this leaves behind".
 
 ### 1. Make the demo grant
 
-A one-row CSV, imported through Configuration -> import grants. The columns
+A one-row CSV, imported through **More > Programs** -> import grants. The columns
 the importer requires:
 
     external_reference,organization_name,ein,program_slug,awarded_amount,awarded_date,grantee_contact_name,grantee_contact_email

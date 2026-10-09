@@ -294,7 +294,7 @@ Only after Phase E is verified.
 1. **Import the thirteen 2025 grantees.** Awards → Import,
    `docs/inspire-change-2025-grants.csv`. Read the preview, confirm the
    organization count reads 13, then commit.
-2. **Request updates.** Configuration → Ask past grantees for an update. Set
+2. **Request updates.** **More ▾ → Programs** → Ask past grantees for an update. Set
    the awarded-date window and a due date. **Dry run first** and check the
    matched count before running it for real.
 3. **Email the thirteen**, pointing at `/tell-us`. Send four, check

@@ -254,10 +254,10 @@ they go into Inspire Change, which this leaves untouched.
    npm run metrics -- --program=community-futures-fund --file=docs/selftest-metrics.csv --preview --apply
    ```
 
-3. **Build and publish the report form.** Configuration → *Build a report form
+3. **Build and publish the report form.** **More ▾ → Programs** → *Build a report form
    from this program's metrics* → read it → **Publish**.
 
-4. **Import the award.** Configuration → *Import grants from a spreadsheet* →
+4. **Import the award.** **More ▾ → Programs** → *Import grants from a spreadsheet* →
    `docs/selftest-award.csv` → Check → Import.
 
    Its term ran to **31 August 2026**, which is deliberate: a report opens on
@@ -274,7 +274,7 @@ they go into Inspire Change, which this leaves untouched.
    If you have not run the `TEST-0001` import, this creates the organization
    instead, and the preview will say so before anything is written.
 
-5. **Create the obligation.** Reporting → *Create missing report obligations*.
+5. **Create the obligation.** **Grants → Reporting** (`/reporting`) → *Create missing report obligations*.
    Expect one final report, open, due late November 2026.
 
 6. **File it as the grantee.** Sign in at `apply.houstontexansfoundation.org`
