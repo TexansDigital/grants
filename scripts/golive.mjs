@@ -409,8 +409,40 @@ if (!openQuery.ok) {
 // ---------------------------------------------------------------------------
 // The four that cannot be closed from here
 // ---------------------------------------------------------------------------
-record('open', 'a security review by somebody who did not write this',
-  'holds other organizations EINs, audited accounts and operating budgets');
+/*
+ * THE SECURITY REVIEW IS A RECURRING ITEM, not a one-off gate.
+ *
+ * A review certifies the system as it was on the day it was read. This one
+ * changes weekly -- in the two days to 2026-10-09 alone it gained a cron
+ * switch, a corrected overdue predicate and four date fixes -- so a review
+ * from six months ago is a statement about software that no longer exists.
+ *
+ * Adam asked on 2026-10-09 for a re-review every three months. A line in a
+ * document would not have survived the quarter, so the date lives here and
+ * this check does the remembering: enter the date of the last completed
+ * review below and golive counts the days itself.
+ *
+ * null means none has been completed. Set it to the ISO date when one is.
+ */
+const LAST_SECURITY_REVIEW = null;
+const REVIEW_EVERY_DAYS = 92;
+
+if (LAST_SECURITY_REVIEW === null) {
+  record('open', 'a security review by somebody who did not write this',
+    'holds other organizations EINs, audited accounts and operating budgets; none completed yet');
+} else {
+  const days = Math.floor(
+    (Date.now() - Date.parse(`${LAST_SECURITY_REVIEW}T00:00:00Z`)) / 86_400_000,
+  );
+  if (days >= REVIEW_EVERY_DAYS) {
+    record('open', 'a security review, due again',
+      `last one was ${LAST_SECURITY_REVIEW}, ${days} days ago; the agreed interval is ` +
+      `${REVIEW_EVERY_DAYS} days, and this system changes weekly`);
+  } else {
+    record('ready', 'a security review by somebody who did not write this',
+      `completed ${LAST_SECURITY_REVIEW}; due again in ${REVIEW_EVERY_DAYS - days} days`);
+  }
+}
 record('open', 'email actually delivered to a real grantee',
   'SPF, DKIM and DMARC published is not the same as a message accepted');
 record('open', 'an upload proven against the real bucket, recently',

@@ -504,6 +504,111 @@ decided by whichever behaviour I happened to build first.
 
 ---
 
+## 3b. The 2026 cycle — what the Foundation has to produce
+
+Engineering cannot start most of these. They are content, decisions and
+bookings, and each one blocks a module that is otherwise built.
+
+Verified against production on 2026-10-09: **0 rubrics, 0 rubric criteria,
+0 public awards, 13 awards with no application, 0 awards with a focus area.**
+
+### 3b.1 The scoring rubric — blocks review entirely
+
+**The machinery is built.** `src/lib/rubrics.ts`, the upload and parse routes,
+versioning per cycle, in-app scoring, the offline scorecard export and a
+matching import that refuses a file made for a different rubric version. All
+of it exists and none of it has ever been used, because **production holds
+zero rubrics**.
+
+| Who | What |
+|---|---|
+| **Executive Director** | Decide what the Foundation actually scores on, and the weight of each. Four to seven criteria is normal; more than ten and reviewers stop discriminating between them. |
+| **Senior Director** | Write each criterion as a sentence a reviewer can score without asking what it means, and set a max score per criterion. |
+| **Either** | Hand over a CSV or XLSX: criterion label, description, weight, max score. An admin confirms the parse in-app; it versions per cycle. |
+
+Until this exists, "why was X funded and not Y" has no answer but one person's
+prose, and no consultant can be given anything to score.
+
+### 3b.2 The executive product — there is currently nothing
+
+Executives never log in, so the export **is** the product for them. Today the
+only one is `/api/dashboard.csv`: aggregate totals by program, cycle and fiscal
+year. No grant-level list, no impact export, no PDF. It also carries a
+"Not included" caveat row that never prints, because the field feeding it is
+set to empty unconditionally (`src/lib/dashboard.ts:336`).
+
+| Who | What |
+|---|---|
+| **Executive Director** | Name the three or four numbers that actually go in a board paper, and say which ones the NFL requires in a set format (open decision 3.6 — this is a question to ask the league, not a decision to make). Building exports before that answer is waste. |
+| **Executive Director** | Decide whether the deliverable is a CSV somebody pastes into a deck, or a PDF that stands alone. The PDF is more work and is the one an executive actually forwards. |
+| **Senior Director** | Produce last year's board report and last year's league submission, as files. They are the specification; nothing else states what these outputs have to contain. |
+
+### 3b.3 The public grants page — a data problem, not a code one
+
+The page is built and is structurally empty. `src/lib/publicGrants.ts` inner-
+joins `applications` on purpose: publishing is gated on
+`decision_communicated_at`, an imported award has no application and therefore
+no such stamp, so the condition cannot be evaluated. `setPublic` refuses with
+*"This award was imported and cannot be published here."* All thirteen 2025
+grants are in exactly that state.
+
+Two ways out, and the choice is the Foundation's:
+
+1. **Publish 2026 onward only.** Zero work. The page fills as the first real
+   cycle completes, and 2025 is simply not on it.
+2. **Make the thirteen publishable.** Needs a deliberate change — a publish
+   path for imported awards that does not depend on a communication stamp,
+   plus the Foundation confirming that each of the thirteen may be named
+   publicly with its amount.
+
+| Who | What |
+|---|---|
+| **Executive Director** | Choose 1 or 2. If 2, confirm the Foundation is content to publish organization, amount and purpose for each of the thirteen. |
+| **Senior Director** | If 2: one line per grant describing what it funded, in language fit for a public page. See 3b.4 — it is the same sentence. |
+
+### 3b.4 Portfolio and equity analysis — one missing field, one missing index
+
+Two separate causes, and both need the Foundation, not a developer:
+
+**Focus area never leaves the answers table.** `area_of_focus` in the Inspire
+Change form has no `mapsTo` (`src/seed/inspireChange.ts:422`), so it stays in
+`application_answers` and cannot be filtered, grouped or counted. **Counties
+do map** (`counties_served`), so county analysis is reachable; focus area is
+not. Adding `mapsTo` is a small change — but it needs a **fixed list of focus
+areas the Foundation actually uses**, because a free-text or ad-hoc list
+produces categories nothing can be grouped by. That list is the blocker.
+
+**The thirteen describe nothing.** `focus_area`, `purpose` and counties are
+blank on all thirteen (0 of 13 have a focus area). Nothing can be searched or
+analysed about 2025 regardless of the above.
+
+| Who | What |
+|---|---|
+| **Executive Director** | Agree the fixed list of focus areas — the categories the board thinks in. Six to ten. Once applications are submitted against them, changing the list splits the data. |
+| **Senior Director** | For each of the thirteen 2025 grants: one focus area from that list, the counties reached, and one sentence on what it funded. Thirteen rows in a spreadsheet. This single sheet unblocks search, the public page and portfolio analysis at once. |
+
+### 3b.5 DMARC enforcement
+
+The domain publishes `p=none`: forgery is monitored and nothing is done about
+it. Anyone can send as `grants@houstontexansfoundation.org`, which matters most
+during announcement week, when grantees are expecting mail from exactly that
+address.
+
+Google's aggregate report for 2026-10-08 shows every observed message passing
+SPF and DKIM, both aligned. So tightening costs nothing **that we can see from
+one day of data**.
+
+| Who | What |
+|---|---|
+| **You, now** | Add `np=reject` to the DMARC record. It covers non-existent subdomains only, cannot affect `rsend.`, and blocks a whole class of forgery today. |
+| **You, in 2–4 weeks** | Read the accumulated reports. If no legitimate sender other than Resend appears, move to `p=quarantine`, then to `p=reject` a few weeks later. |
+
+**Do not jump straight to `p=reject`.** One day of reports cannot tell you
+whether some other system — a marketing platform, a vendor, Eloqua — also sends
+as this domain. If one does, enforcement silently destroys its mail.
+
+---
+
 ## 4. Things you will need to do, but not yet
 
 - Apply the fourteen migrations to staging: `npm run migrate:staging`.
