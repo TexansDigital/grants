@@ -45,6 +45,24 @@ const RETIRED = {
 const shell = readFileSync(join(root, 'web/src/Shell.tsx'), 'utf8');
 const labels = new Set([...shell.matchAll(/label:\s*'([^']+)'/g)].map((m) => m[1]));
 
+/*
+ * THE SUB-VIEWS, which this check did not cover until 2026-10-09 and should
+ * have. Grants and Organizations each own a second screen -- the compliance
+ * desk and the claims queue -- listed in App.tsx rather than Shell.tsx.
+ *
+ * Three documents said "Grants -> Reporting". The screen says REPORTS. The
+ * route is /reporting, which is where the wrong label came from, and the
+ * mistake was made by the same person who had just written this file to
+ * prevent exactly this. A guard that covers the top level and not the level
+ * below it is a guard with the shape of the problem and half its coverage.
+ */
+const app = readFileSync(join(root, 'web/src/App.tsx'), 'utf8');
+const subLabels = new Set(
+  [...app.matchAll(/\{\s*path:\s*'\/[^']*',\s*label:\s*'([^']+)',\s*route:/g)].map(
+    (m) => m[1],
+  ),
+);
+
 const problems = [];
 
 /* The map must stay honest: every replacement has to still be on the screen. */
@@ -85,6 +103,38 @@ for (const file of readdirSync(join(root, 'docs')).filter((f) => f.endsWith('.md
   });
 }
 
+/*
+ * A SUB-VIEW NAMED UNDER ITS SECTION. "Grants -> Reports" is right; "Grants ->
+ * Reporting" is the route wearing the label's clothes.
+ *
+ * The target must start with a capital for this to fire, so ordinary prose --
+ * "Grants -> the compliance desk" -- is not a nav reference and is left alone.
+ * That is the narrowing the first version of this file needed and did not
+ * have.
+ */
+const SECTIONS = ['Grants', 'Organizations'];
+const SUBNAV = new RegExp(
+  `\\b(${SECTIONS.join('|')})\\b\\s*(?:→|->)\\s*\\*{0,2}([A-Z][A-Za-z]*)`,
+  'g',
+);
+
+for (const file of readdirSync(join(root, 'docs')).filter((f) => f.endsWith('.md'))) {
+  const text = readFileSync(join(root, 'docs', file), 'utf8');
+  text.split('\n').forEach((line, i) => {
+    if (/renamed|was called|used to be|no longer/i.test(line)) return;
+    for (const m of line.matchAll(SUBNAV)) {
+      const [, section, target] = m;
+      if (subLabels.has(target) || labels.has(target)) continue;
+      problems.push(
+        `docs/${file}:${i + 1} says "${section} → ${target}", and no such view exists.\n` +
+          `    Under ${section} the screen offers: ${[...subLabels].join(', ')}.\n` +
+          '    The ROUTE and the LABEL are not the same word -- /reporting is called\n' +
+          '    Reports. Write both: the label the reader clicks, and the URL.',
+      );
+    }
+  });
+}
+
 if (problems.length > 0) {
   console.error(`check:nav — ${problems.length} problem(s):\n`);
   for (const p of problems) console.error(`  - ${p}\n`);
@@ -92,5 +142,5 @@ if (problems.length > 0) {
 }
 console.log(
   `check:nav — ok, ${Object.keys(RETIRED).length} retired label(s) absent from docs/, ` +
-    `${labels.size} live nav label(s).`,
+    `${labels.size} nav label(s) and ${subLabels.size} sub-view(s) all resolve.`,
 );

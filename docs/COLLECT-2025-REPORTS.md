@@ -13,7 +13,7 @@ after.
 > This is the job.
 
 **Nav note.** Labels moved on 2026-10-07. *Programs* is behind the **More ▾**
-menu at `/configuration`. The compliance desk is **Grants → Reporting**, at
+menu at `/configuration`. The compliance desk is **Grants → Reports**, at
 `/reporting`. URLs are given throughout because a label can be renamed and a
 URL in a document survives it.
 
@@ -134,7 +134,7 @@ Do not press confirm until the number is 13.
 Press confirm. This creates thirteen report obligations. **It does not send
 anything.**
 
-Check the compliance desk at **Grants → Reporting** (`/reporting`). Thirteen
+Check the compliance desk at **Grants → Reports** (`/reporting`). Thirteen
 rows, status `open`, your due date.
 
 ---

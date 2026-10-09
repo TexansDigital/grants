@@ -274,7 +274,7 @@ they go into Inspire Change, which this leaves untouched.
    If you have not run the `TEST-0001` import, this creates the organization
    instead, and the preview will say so before anything is written.
 
-5. **Create the obligation.** **Grants → Reporting** (`/reporting`) → *Create missing report obligations*.
+5. **Create the obligation.** **Grants → Reports** (`/reporting`) → *Create missing report obligations*.
    Expect one final report, open, due late November 2026.
 
 6. **File it as the grantee.** Sign in at `apply.houstontexansfoundation.org`
