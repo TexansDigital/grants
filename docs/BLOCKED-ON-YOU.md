@@ -402,10 +402,22 @@ npm run metrics -- --program=inspire-change --file=your-metrics.csv --apply
 ```
 
 The dry run reads, plans and prints; it writes nothing. It runs against your
-LOCAL preview database by default — add `--preview` for the remote preview one.
-There is no production flag and there will not be one.
+LOCAL preview database by default — add `--preview` for the remote preview one,
+or `--db=steward-production` for production.
 
-Then, in Configuration: **Build a report form from this program's metrics**,
+> **This paragraph used to say "there is no production flag and there will not
+> be one." That is no longer true, and the script itself explains why.** The
+> rule in CLAUDE.md is that a human names production in the moment, and
+> `--db=steward-production` is exactly that: the database is typed out, in that
+> command, by that person, and nothing defaults to it. The alternative during
+> the cutover was hand-writing the INSERTs — a second implementation of the
+> importer — or sending thirteen nonprofits a report form that asks for no
+> numbers. Corrected 2026-10-09, after a new-hire review followed this
+> paragraph and concluded the documented repair could not reach the database
+> that had the problem.
+
+Then, in **More ▾ → Programs** (`/configuration`): **Build a report form from
+this program's metrics**,
 read the generated wording, change anything you want, and **Publish**.
 
 **You do not need the metrics before the awards.** Publishing attaches the form
@@ -524,7 +536,7 @@ zero rubrics**.
 |---|---|
 | **Executive Director** | Decide what the Foundation actually scores on, and the weight of each. Four to seven criteria is normal; more than ten and reviewers stop discriminating between them. |
 | **Senior Director** | Write each criterion as a sentence a reviewer can score without asking what it means, and set a max score per criterion. |
-| **Either** | Hand over a CSV or XLSX: criterion label, description, weight, max score. An admin confirms the parse in-app; it versions per cycle. |
+| **Either** | Hand over a CSV or XLSX: criterion label, description, weight, max score. **`docs/rubric-template.csv` is a starting point with five criteria and equal weights** — change every word of it; it is a shape, not a recommendation. An admin uploads it and confirms the parse in-app; it versions per cycle. |
 
 Until this exists, "why was X funded and not Y" has no answer but one person's
 prose, and no consultant can be given anything to score.
@@ -584,8 +596,8 @@ analysed about 2025 regardless of the above.
 
 | Who | What |
 |---|---|
-| **Executive Director** | Agree the fixed list of focus areas — the categories the board thinks in. Six to ten. Once applications are submitted against them, changing the list splits the data. |
-| **Senior Director** | For each of the thirteen 2025 grants: one focus area from that list, the counties reached, and one sentence on what it funded. Thirteen rows in a spreadsheet. This single sheet unblocks search, the public page and portfolio analysis at once. |
+| **Executive Director** | **Confirm or amend the five focus areas that already exist** in the application form (`src/seed/inspireChange.ts:427`): Education, Criminal justice reform, Workforce and economic development, Community resources, Basic needs. This is a smaller job than it looks — the list is written and in use; it needs endorsing, not inventing. Once applications are submitted against it, changing it splits the data. |
+| **Senior Director** | For each of the thirteen 2025 grants: one focus area from that list, the counties reached, and one sentence on what it funded. **`docs/2025-grant-subjects-worksheet.csv` is already filled in with the reference, organization and amount** — three columns to complete, thirteen rows. This single sheet unblocks search, the public page and portfolio analysis at once. It is typed back in one award at a time on the award page; there is no bulk import, and at thirteen rows there does not need to be. |
 
 ### 3b.5 DMARC enforcement
 

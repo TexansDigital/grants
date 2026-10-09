@@ -1,0 +1,6 @@
+metric_key,label,help_text,metric_type,unit,is_required,sort_order,promotes_to
+individuals_served,How many unique individuals did this grant directly serve?,"Count each person once, however many times they took part. Do not count visits, meals, sessions or households. If your programme genuinely cannot count unique people, leave this blank and explain in the next question.",integer,people,no,10,
+individuals_served_basis,"If you could not count unique individuals, what did you count instead?","Only if the question above is blank. For example: meals served, household visits, or attendances.",text,,no,20,
+funds_spent,How much of the grant has been spent so far?,Dollars spent to date against this award. An estimate is fine; say so in the narrative if it is one.,currency,,yes,30,funds_spent_cents
+volunteer_hours,Volunteer hours contributed,Leave blank if you do not track this.,decimal,hours,no,40,
+counties_reached,Which counties in Greater Houston did this work reach?,,text,,no,50,
