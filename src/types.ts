@@ -98,6 +98,31 @@ export interface Env {
   RETENTION_DAYS?: string;
   /** Days after a report is ACCEPTED before its documents are purged. Unset means never. */
   REPORT_RETENTION_DAYS?: string;
+  /**
+   * Whether the NIGHTLY CRON may mail grantees on its own. `"on"` and nothing
+   * else. Unset means it may not.
+   *
+   * OFF BY DEFAULT, AND DELIBERATELY FAIL-SAFE. Until 2026-10-09 there was no
+   * switch at all: `wrangler.toml` sets `crons = ["0 7 * * *"]`, the scheduled
+   * handler called `runReportReminders` unconditionally, and the awards
+   * importer had already created an active grantee login from every row of the
+   * 2025 spreadsheet. So setting a due date was enough to mail thirteen
+   * nonprofits at 2am Central, fourteen days out, with nobody having read the
+   * letter. `docs/ONBOARDING.md` stated the opposite until that morning, and
+   * `docs/BLOCKED-ON-YOU.md` §3.10 then told the Foundation to turn the chase
+   * off -- an instruction with no mechanism behind it.
+   *
+   * The default is off rather than on because the failure modes are not
+   * symmetrical. Off when it should be on means a reminder is late and a human
+   * notices. On when it should be off means mail that cannot be recalled
+   * reaches organizations the Foundation funds.
+   *
+   * THIS DOES NOT TOUCH THE MANUAL PATH. `runRemindersNow` -- the Reports
+   * screen's "Send N now", which lists every address and refuses if the count
+   * moved -- ignores this entirely. That is the point: the switch removes the
+   * unattended send, not the ability to send.
+   */
+  REMINDERS_AUTOMATIC?: string;
   EMAIL_FROM?: string;
   EMAIL_REPLY_TO?: string;
   /**

@@ -316,7 +316,7 @@ describe('the application funnel', () => {
 describe('report compliance', () => {
   async function awardWithPeriod(
     p: { programId: string; cycleId: string; formId: string },
-    opts: { dueDaysAgo: number; status: string },
+    opts: { dueDaysAgo?: number; dueDate?: string; status: string },
   ) {
     const a = await submitted(p);
     await decideApplication(db, ctx(), admin, a.applicationId, { status: 'awarded' });
@@ -334,7 +334,14 @@ describe('report compliance', () => {
       )
       .bind(
         newId(), award.awardId,
-        new Date(Date.now() - opts.dueDaysAgo * 86_400_000).toISOString(),
+        /*
+         * dueDate lets a test write the format the REAL ask writes. The
+         * 2025 past-grantee ask stores a plain YYYY-MM-DD
+         * (reportPeriods.ts), not an instant, and the difference between
+         * those two is exactly what hid the day-of bug below.
+         */
+        opts.dueDate ??
+          new Date(Date.now() - (opts.dueDaysAgo ?? 0) * 86_400_000).toISOString(),
         opts.status,
         opts.status === 'waived' ? 'Grant returned unspent.' : null,
         now, now,
@@ -355,6 +362,50 @@ describe('report compliance', () => {
     const row = (await reportCompliance(db, admin, nowIso())).find((r) => r.programId === p.programId)!;
     expect(row.overdue).toBe(1);
     expect(row.open).toBe(2);
+  });
+
+  it('does not call a report overdue on the day it is due', async () => {
+    /*
+     * THE BUG THIS PINS, found 2026-10-09 by a review and not by this file.
+     * reportCompliance compared due_date against a full ISO instant, so a
+     * report due TODAY -- stored as a plain YYYY-MM-DD, which is what the
+     * past-grantee ask writes -- sorted before the timestamp and counted as
+     * overdue from a millisecond after midnight. The compliance desk, the
+     * award page and the organization page all said it was current.
+     *
+     * The existing cases above use plus or minus 30 days. They pin the SIGN
+     * and never the BOUNDARY, which is why 1887 tests were green over this.
+     * Today, yesterday and tomorrow, all three, deliberately.
+     */
+    const p = await program();
+    const day = (offset: number) =>
+      new Date(Date.now() + offset * 86_400_000).toISOString().slice(0, 10);
+
+    await awardWithPeriod(p, { dueDate: day(0), status: 'open' });
+    await awardWithPeriod(p, { dueDate: day(1), status: 'open' });
+
+    let row = (await reportCompliance(db, admin, nowIso())).find((r) => r.programId === p.programId)!;
+    expect(row.overdue).toBe(0);
+
+    await awardWithPeriod(p, { dueDate: day(-1), status: 'open' });
+    row = (await reportCompliance(db, admin, nowIso())).find((r) => r.programId === p.programId)!;
+    expect(row.overdue).toBe(1);
+  });
+
+  it('does not count a report the Foundation is sitting on as overdue', async () => {
+    /*
+     * `submitted` means the grantee filed it and we have not reviewed it. The
+     * old predicate excluded only accepted and waived, so a report we were
+     * late reviewing was counted against the nonprofit.
+     */
+    const p = await program();
+    const day = (offset: number) =>
+      new Date(Date.now() + offset * 86_400_000).toISOString().slice(0, 10);
+
+    await awardWithPeriod(p, { dueDate: day(-10), status: 'submitted' });
+    const row = (await reportCompliance(db, admin, nowIso())).find((r) => r.programId === p.programId)!;
+    expect(row.overdue).toBe(0);
+    expect(row.submitted).toBe(1);
   });
 
   it('does not hold a refused award against the program forever', async () => {

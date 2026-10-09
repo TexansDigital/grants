@@ -26,6 +26,7 @@ import type { Session } from '../types';
 import { notFound } from './errors';
 import { formatCents, MAX_CENTS } from './money';
 import { disbursementByProgram, type DisbursementLine } from './payments';
+import { today } from './reportDue';
 
 function assertAdmin(session: Session): void {
   // Executives have no in-app access by design and reviewers have no business
@@ -187,8 +188,28 @@ export async function reportCompliance(
               SUM(CASE WHEN rp.status = 'revisions_requested' THEN 1 ELSE 0 END) AS revisionsRequested,
               SUM(CASE WHEN rp.status = 'accepted' THEN 1 ELSE 0 END) AS accepted,
               SUM(CASE WHEN rp.status = 'waived' THEN 1 ELSE 0 END) AS waived,
-              SUM(CASE WHEN rp.due_date < ?
-                         AND rp.status NOT IN ('accepted','waived')
+              /*
+               * THE SAME PREDICATE AS EVERY OTHER SCREEN, and it was not,
+               * until 2026-10-09. This compared rp.due_date -- a plain
+               * YYYY-MM-DD, which is what requestUpdates writes -- against a
+               * full ISO instant, and the string '2026-11-15' sorts before
+               * '2026-11-15T13:00:00Z'. So on the due date itself Results
+               * called a report overdue while the compliance desk,
+               * awardPage.ts:409 and organizationPage.ts:184,417 all called
+               * it current. That is the number that goes in a board paper.
+               *
+               * It also counted 'submitted' as overdue -- a report the
+               * Foundation is sitting on, not one the grantee owes. Excluding
+               * only 'accepted' and 'waived' reads as careful and is wrong in
+               * the direction that blames the nonprofit.
+               *
+               * An earlier sweep fixed the other three sites and missed this
+               * one. 1887 tests stayed green because the dashboard tests use
+               * plus or minus 30 days, which pins the sign and never the
+               * boundary. reportDue.ts states the rule this now follows.
+               */
+              SUM(CASE WHEN substr(rp.due_date, 1, 10) < ?
+                         AND rp.status IN ('scheduled','open','revisions_requested')
                         THEN 1 ELSE 0 END) AS overdue,
               COUNT(rp.id) AS total
          FROM programs p
@@ -199,7 +220,7 @@ export async function reportCompliance(
         GROUP BY p.id
         ORDER BY p.name`,
     )
-    .bind(nowIsoStr)
+    .bind(today(nowIsoStr))
     .all<Omit<ComplianceRow, 'complianceRateBp'>>();
   return (results ?? []).map((r) => ({
     ...r,

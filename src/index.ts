@@ -2508,7 +2508,36 @@ export default {
        * upstream is visible in the dashboard before the send goes out, and the
        * loop below still gives it its own turn.
        */
-      { name: 'reminders', run: () => runReportReminders(env, ctx) },
+      {
+        name: 'reminders',
+        /*
+         * THE SWITCH, and it is off unless REMINDERS_AUTOMATIC is exactly
+         * "on". See src/types.ts for why the default is off rather than on.
+         *
+         * Skipping is RECORDED, not silent. "The cron did not mail anybody
+         * last night" has two causes -- nobody was due, and the switch is off
+         * -- and a Foundation staring at an empty outbox cannot tell them
+         * apart without this line.
+         *
+         * `warn` rather than a quieter level, and there is no quieter level on
+         * purpose. A switched-off chase is a deliberate state, but during a
+         * live reporting window it is also one somebody should be able to see
+         * from Data health without reading a config file.
+         */
+        run: async () => {
+          if ((env.REMINDERS_AUTOMATIC ?? '').trim().toLowerCase() !== 'on') {
+            await logError(env, ctx, {
+              severity: 'warn',
+              code: 'REMINDERS_AUTOMATIC_OFF',
+              message:
+                'the nightly reminder send is switched off; nothing was mailed. ' +
+                'Send from the Reports screen, or set REMINDERS_AUTOMATIC="on".',
+            });
+            return;
+          }
+          await runReportReminders(env, ctx);
+        },
+      },
     ]) {
       try {
         await job.run();

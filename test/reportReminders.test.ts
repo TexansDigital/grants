@@ -36,6 +36,7 @@ import {
 } from '../src/lib/reportReminders';
 import { REPORT_REMINDER } from '../src/lib/emailTemplates';
 import type { Env, Session } from '../src/types';
+import worker from '../src/index';
 
 const DAY = 86_400_000;
 const iso = (offsetMs: number) => new Date(Date.now() + offsetMs).toISOString();
@@ -857,5 +858,66 @@ describe('what the letter actually says', () => {
     const text = sent[0]!.text;
     expect(text).toContain('October 22, 2026');
     expect(text).toContain('14 days');
+  });
+});
+
+describe('the nightly cron, which mails without a human', () => {
+  /*
+   * THERE WAS NO SWITCH UNTIL 2026-10-09, AND NO TEST OF THE CRON AT ALL.
+   * `wrangler.toml` sets `crons = ["0 7 * * *"]`, the scheduled handler called
+   * runReportReminders unconditionally, and the awards importer had already
+   * created an active grantee login from every row of the 2025 spreadsheet.
+   * Setting a due date was therefore enough to mail thirteen nonprofits at 2am
+   * with nobody having read the letter, and docs/ONBOARDING.md said the
+   * opposite.
+   *
+   * These call the REAL scheduled handler rather than a stand-in, because the
+   * bug was the absence of a gate in that handler. A test of a helper would
+   * have passed against the broken code.
+   */
+  const fire = (e: Env) =>
+    worker.scheduled({} as ScheduledController, e, {} as ExecutionContext);
+
+  /*
+   * mailEnv has no RESEND_API_KEY, so a send that gets past the gate records a
+   * `suppressed` row and touches no network. That makes these deterministic
+   * and makes the assertion exact: the question is whether a row was written
+   * at all, which is whether the job ran.
+   */
+  it('mails nobody when the switch is unset, however due the report is', async () => {
+    const g = await granteeOwing({ dueInDays: 3 });
+    await fire(mailEnv());
+    expect(await mailCount(g.granteeEmail!)).toBe(0);
+
+    const row = await db
+      .prepare(`SELECT reminder_count AS n FROM report_periods WHERE id = ?`)
+      .bind(g.periodId)
+      .first<{ n: number }>();
+    expect(row?.n).toBe(0);
+  });
+
+  it('says why it mailed nobody, so an empty outbox is explainable', async () => {
+    await granteeOwing({ dueInDays: 3 });
+    await fire(mailEnv());
+    const row = await db
+      .prepare(`SELECT code, severity FROM error_log WHERE code = 'REMINDERS_AUTOMATIC_OFF'`)
+      .first<{ code: string; severity: string }>();
+    expect(row?.code).toBe('REMINDERS_AUTOMATIC_OFF');
+    expect(row?.severity).toBe('warn');
+  });
+
+  it('mails when the switch is explicitly on', async () => {
+    const g = await granteeOwing({ dueInDays: 3 });
+    await fire(mailEnv({ REMINDERS_AUTOMATIC: 'on' }));
+    expect(await mailCount(g.granteeEmail!)).toBe(1);
+  });
+
+  it('refuses anything but "on", because a half-set flag must not mail', async () => {
+    // 'true', '1' and 'yes' are what somebody types when guessing. None mail.
+    for (const value of ['true', '1', 'yes', 'ON ', '']) {
+      const g = await granteeOwing({ dueInDays: 3 });
+      await fire(mailEnv({ REMINDERS_AUTOMATIC: value }));
+      expect(await mailCount(g.granteeEmail!)).toBe(value.trim().toLowerCase() === 'on' ? 1 : 0);
+    }
   });
 });

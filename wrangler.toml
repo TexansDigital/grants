@@ -330,6 +330,20 @@ routes = [
   { pattern = "apply.houstontexansfoundation.org", custom_domain = true }
 ]
 
+# REMINDERS_AUTOMATIC is deliberately ABSENT, here and in every environment.
+#
+# Unset means the nightly cron does NOT mail grantees; it records
+# REMINDERS_AUTOMATIC_OFF and moves on. Set it to "on" -- that exact string --
+# only when somebody has decided the unattended send should happen, which is
+# decision 3.10 in docs/BLOCKED-ON-YOU.md.
+#
+# This does not disable reminders. The Reports screen's "Send N now" ignores
+# this var entirely: it lists every address, and refuses the run if the count
+# moved since the plan was read. The switch removes the UNATTENDED send.
+#
+# Before 2026-10-09 there was no switch, the cron mailed unconditionally, and
+# the awards importer had already given every row of the 2025 spreadsheet an
+# active grantee login. See src/types.ts for the whole account.
 [env.production.vars]
 ENVIRONMENT = "production"
 DISPLAY_TIMEZONE = "America/Chicago"
