@@ -17,35 +17,45 @@ the top of this list yesterday and it is now the one thing to hold. See §3.10.
 |---|---|---|---|
 | 1 | Decide **§3.10 — does the nightly cron mail grantees by itself?** | You | **Yes.** Everything waits on it. |
 | 2 | Confirm or replace **§3.12 — the five report questions** | You, in writing | **Yes.** Free to change today, permanent after the first real answer. |
-| 3 | Clear the test rows (command in §0.1) | You, one command | Yes — and dated, see §0.1 |
+| ~~3~~ | ~~Clear the test rows~~ | **DONE 9 October.** Verified independently: 13 awards, $469,000.00, 13 organizations, **0 live report periods**, 13 mailable grantee logins and **0 test logins**. The 19 October auto-send is gone with the period. |
 | 4 | Deploy: `npm run deploy:production` | You, one command | Yes |
 | 5 | Decide **§3.5 — who holds the second admin account** | You | Before the first cycle |
 | 6 | Add `np=reject` to DMARC | You, one DNS edit | No, but cheap |
 | 7 | Re-paste `CLAUDE.md` into the Claude Project prompt | You | No |
 | 8 | `houstontexans.com` message trace | Your mail admins | No — does not affect the thirteen |
 
-Production right now, read from it rather than remembered: **14 awards,
-$469,001.00, 14 organizations, 1 live report period, 29 migrations, 13 real
-grantee logins on 13 distinct domains plus 3 test logins.**
+Production right now, read from it rather than remembered: **13 awards,
+$469,000.00, 13 organizations, 0 live report periods, 29 migrations, and 13
+mailable grantee logins on 13 distinct domains.** No test data remains.
 
-### 0.1 The test rows have a dated consequence
+### 0.1 The test rows — cleared 9 October 2026
 
-`TEST-2026-001` still carries an **open** report period due **2026-10-22**, and
-the reminder ladder is 14, 3 and 0 days before, then weekly for ever
-(`src/lib/reportReminders.ts:56-59`). The 14-day rung fired on 8 October. So
-unless the rows are cleared, the nightly cron will mail the three test logins
-again on **19 October**, **22 October**, and every week after that, with nobody
-pressing anything.
+Done. Recorded because the dated hazard it carried is the evidence for §3.10.
 
-That is harmless — they are all mailboxes you control — and it is also the
-proof that §3.10 is real rather than theoretical.
+`TEST-2026-001` had an **open** period due 2026-10-22, and the ladder is 14, 3
+and 0 days before, then weekly for ever (`src/lib/reportReminders.ts:56-59`).
+The 14-day rung fired on 8 October. Left alone, the nightly cron would have
+mailed the three test logins again on **19 October**, **22 October** and weekly
+after, with nobody pressing anything. They were mailboxes the Foundation
+controls, so it cost nothing — and it is the proof that §3.10 describes a live
+behaviour rather than a theoretical one.
+
+**One thing the removal proved on its way out.** Today's test award reused the
+reference `TEST-2026-001` on a new award id. The cleanup script keys its audit
+row on the **award id**, not the reference, precisely so a reused reference
+still gets its own row. Under the obvious keying it would have collided with
+8 October's row, been skipped by the `NOT EXISTS` guard, and the award would
+have been soft-deleted **with no audit row at all** — a financial record
+removed with no trace, against non-negotiable 6. Three rows exist, one per
+award. The comment that explains the choice is in
+`scripts/sql/remove-test-data.sql`.
+
+To re-run it after any future test:
 
 ```
 npx wrangler d1 execute steward-production --remote --env production --yes \
   --json --command="$(cat scripts/sql/remove-test-data.sql)"
 ```
-
-It prints what is left. Expect `13 / 46900000 / 13 / 0`.
 
 ---
 

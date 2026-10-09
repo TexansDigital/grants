@@ -30,23 +30,17 @@ Condition 10, and the only thing gating the pilot. The due date **is** the send
 schedule: the nightly job mails at 14 days, 3 days and on the day, so a date
 inside two weeks emails everybody tomorrow.
 
-### 2. The test rows are in production again
+### 2. The test rows are gone — 9 October
 
-Today's check put them there deliberately. As of 2026-10-08 production holds
-**14 awards, $469,001.00, 14 organizations and 2 report periods** — the real
-thirteen plus `TEST-2026-001`, its two periods (one `accepted`, one `open`) and
-its three grantee logins.
+Cleared with `scripts/sql/remove-test-data.sql`, and verified independently of
+the script's own closing count: **13 awards, $469,000.00, 13 organizations, 0
+live report periods, 13 mailable grantee logins, 0 test logins.**
 
-Clear them before the real ask, or the dry run says fourteen and confirming it
-emails whoever is on the test contact record:
-
-```
-npx wrangler d1 execute steward-production --remote --env production --yes \
-  --json --command="$(cat scripts/sql/remove-test-data.sql)"
-```
-
-It ends by printing what is left. Expect `13 / 46900000 / 13 / 0`. **The dry
-run must say 13** before anyone confirms the real send.
+That also removed a dated hazard. The test period was open and due 2026-10-22,
+and the reminder ladder is 14, 3, 0 then weekly, so the nightly cron would have
+mailed the three test logins on 19 and 22 October and every week after. See
+`docs/BLOCKED-ON-YOU.md` §0.1 and §3.10 — the cron is the live blocker now, not
+the data.
 
 ### Not blocking: mail into `houstontexans.com`
 
